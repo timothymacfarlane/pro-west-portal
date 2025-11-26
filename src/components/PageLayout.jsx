@@ -1,0 +1,50 @@
+import { supabase } from "../lib/supabaseClient";
+import { useAuth } from "../context/AuthContext.jsx";
+
+function HeaderActions({ extraActions }) {
+  // useAuth() might return null if AuthProvider is not set up yet,
+  // so we don't destructure directly.
+  const auth = useAuth();
+  const user = auth?.user || null;
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    // AuthContext will clear the user and ProtectedRoute will send them to /login
+  };
+
+  return (
+    <div className="page-actions">
+      {/* Page-specific actions (e.g. "Start Over") */}
+      {extraActions}
+
+      {/* Global Logout button – only when logged in */}
+      {user && (
+        <button className="btn-pill" type="button" onClick={handleLogout}>
+          Logout
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PageLayout({ icon, title, subtitle, actions, children }) {
+  return (
+    <div className="page">
+      <header className="page-header">
+        <div className="page-title-group">
+          {icon && <span className="page-icon">{icon}</span>}
+          <div>
+            <h2 className="page-title">{title}</h2>
+            {subtitle && <p className="page-subtitle">{subtitle}</p>}
+          </div>
+        </div>
+
+        <HeaderActions extraActions={actions} />
+      </header>
+
+      <div className="page-body">{children}</div>
+    </div>
+  );
+}
+
+export default PageLayout;
