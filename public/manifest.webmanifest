@@ -1,0 +1,20 @@
+{
+  "name": "Pro West Portal",
+  "short_name": "Pro West",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0b3954",
+  "icons": [
+    {
+      "src": "/icons/pro-west-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/pro-west-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

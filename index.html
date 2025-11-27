@@ -2,17 +2,39 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>prowest-portal</title>
+
+    <!-- Favicon (fallback) -->
+    <link rel="icon" type="image/png" href="/icons/pro-west-192.png" />
+
+    <!-- Manifest for PWA -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- iOS Home Screen Icon -->
+    <link rel="apple-touch-icon" href="/icons/pro-west-192.png" />
+
+    <!-- iOS standalone mode -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Pro West Portal" />
+
+    <!-- Theme for Android address bar -->
+    <meta name="theme-color" content="#0b3954" />
+
+    <!-- Viewport -->
     <meta name="viewport"
-  content="width=device-width, initial-scale=1, maximum-scale=1"/>
+      content="width=device-width, initial-scale=1, maximum-scale=1"
+    />
+
+    <title>Pro West Portal</title>
+
+    <!-- Google Maps API -->
     <script
-  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCq3JFu1Wy8UMJK99MV9uP1KynNma7XoSA&libraries=places"
-  async
-  defer
-></script>
+      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCq3JFu1Wy8UMJK99MV9uP1KynNma7XoSA&libraries=places"
+      async
+      defer
+    ></script>
   </head>
+
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
