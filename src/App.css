@@ -1462,4 +1462,18 @@ table {
   .table-wrapper {
     overflow-x: auto;
   }
+  /* Ensure maps have a real height on mobile */
+  .maps-fullscreen {
+    inset: 0;
+    height: 100vh;           /* force full viewport height */
+  }
+
+  .maps-mapwrap {
+    height: calc(100vh - 70px);  /* viewport minus top bar */
+  }
+
+  .maps-map {
+    height: 100%;
+    width: 100%;
+  }
 }
