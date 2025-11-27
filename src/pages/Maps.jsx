@@ -534,6 +534,7 @@ function Maps() {
     // ✅ Add top horizontal tools control next to mapType buttons
     if (!toolsControlDivRef.current) {
       const div = document.createElement("div");
+      div.className = "maps-tools-bar";
       div.style.display = "flex";
       div.style.gap = "6px";
       div.style.marginLeft = "8px";

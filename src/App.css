@@ -1393,6 +1393,22 @@ table {
     max-height: 180px;
     overflow-y: auto;
   }
+/* MOBILE-ONLY – Shrink tools bar */
+.maps-tools-bar {
+  transform: scale(0.75);            /* shrink overall tools container */
+  transform-origin: top left;
+  margin-left: 4px !important;
+}
+
+/* Also shrink the buttons themselves */
+.maps-tools-bar button {
+  width: 28px !important;            /* was 34px */
+  height: 22px !important;           /* was 28px */
+  font-size: 12px !important;        /* was ~15px */
+  border-width: 1px !important;      /* thinner border for small screens */
+  border-radius: 4px !important;
+  padding: 0 !important;
+}
 
   /* Selected card: full width near bottom */
   .maps-selected-card {
