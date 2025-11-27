@@ -370,6 +370,7 @@
   font-size: 0.8rem;
   font-weight: 600;
 }
+
 /* Grid list of all contacts under the search/results */
 
 .contacts-list-grid {
@@ -413,90 +414,6 @@
 
 .btn-pill:hover {
   filter: brightness(0.96);
-}
-
-/* ---------- MOBILE RESPONSIVE ---------- */
-
-@media (max-width: 768px) {
-  .app-layout {
-    flex-direction: row; /* keep sidebar left, content right */
-    padding: 0.5rem;
-    gap: 0.5rem;
-  }
-
-  .app-header {
-    padding: 0.6rem 0.75rem;
-  }
-
-  .header-inner {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.3rem;
-  }
-
-  .header-text h1 {
-    font-size: 1.1rem;
-  }
-
-  .header-text p {
-    font-size: 0.8rem;
-  }
-
-  .sidebar {
-    width: 190px;
-    border-radius: 6px;
-    padding: 0.6rem 0.6rem 0.8rem;
-    padding-top: 2.1rem;
-    box-shadow: none;
-  }
-
-  .sidebar.collapsed {
-    width: 52px;
-    padding-left: 0.4rem;
-    padding-right: 0.4rem;
-  }
-
-  .nav-list {
-    flex-direction: column;
-    overflow: visible;
-    gap: 0.3rem;
-  }
-
-  .nav-link {
-    font-size: 0.85rem;
-    padding: 0.3rem 0.45rem;
-    border-radius: 6px;
-    border: none;
-    background: transparent;
-  }
-
-  .nav-link.active {
-    background: var(--pw-primary);
-    color: white;
-  }
-
-  .sidebar.collapsed .nav-label {
-    display: none;
-  }
-
-  .sidebar.collapsed .nav-link {
-    justify-content: center;
-    padding-inline: 0;
-  }
-
-  .main-content {
-    padding: 0.75rem;
-    border-radius: 6px;
-  }
-
-  .page-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .page-actions {
-    width: 100%;
-  }
 }
 
 /* --------- FULLSCREEN MAPS PAGE (UPDATED) --------- */
@@ -584,14 +501,15 @@
   z-index: 3;
   pointer-events: auto;
   opacity: 0.92;
-  
+}
+
+/* ensure scroll area behaves */
 .layers-list {
   overflow-x: hidden !important;
 }
 
 .panel-content {
   overflow-x: hidden;
-}
 }
 
 /* Retract the entire panel to the LEFT */
@@ -827,183 +745,6 @@
 .maps-my-location-btn {
   position: absolute;
   right: 0.75rem;
-  top: 4.2rem;
-  z-index: 30;
-  background: #ffffff;
-  color: var(--pw-primary);
-  border: 1px solid var(--pw-primary);
-  font-size: 1.3rem;
-  padding: 0.45rem 0.65rem;
-  border-radius: 50%;
-  cursor: pointer;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-  pointer-events: auto;
-}
-
-.maps-my-location-btn:hover { background: #ffebee; }
-
-/* -------- Mobile tweaks for maps -------- */
-
-@media (max-width: 768px) {
-  .maps-topbar {
-    height: auto;
-    padding: 0.5rem 0.7rem;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.35rem;
-  }
-
-  .maps-rightpanel {
-    width: calc(100% - 24px);
-    left: 12px;
-    right: 12px;
-  }
-
-  .maps-rightpanel.closed {
-    transform: translateY(calc(-100% + 32px));
-  }
-
-  .panel-toggle {
-    border-radius: 12px 12px 0 0;
-    width: 32px;
-    height: 26px;
-  }
-
-  .maps-selected-card {
-    left: 0.4rem;
-    right: 0.4rem;
-    bottom: 0.5rem;
-    max-width: none;
-  }
-
-  .maps-my-location-btn {
-    top: 6.2rem;
-  }
-}
-
-/* Job list */
-
-.maps-job-list {
-  max-height: 160px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.maps-job-item {
-  width: 100%;
-  text-align: left;
-  border-radius: 8px;
-  border: 1px solid #dde3ec;
-  background: #f8fafc;
-  padding: 0.35rem 0.45rem;
-  cursor: pointer;
-}
-
-.maps-job-item:hover {
-  background: #ffebee;
-}
-
-.maps-job-item.selected {
-  border-color: var(--pw-primary);
-  background: #ffebee;
-}
-
-.maps-job-id {
-  font-size: 0.8rem;
-  color: #555;
-}
-
-.maps-job-name {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--pw-primary);
-}
-
-.maps-job-suburb {
-  font-size: 0.8rem;
-  color: #444;
-}
-
-.maps-job-address {
-  font-size: 0.75rem;
-  color: #666;
-}
-
-.maps-empty {
-  font-size: 0.8rem;
-  color: #777;
-  padding: 0.4rem;
-}
-
-/* Selected job / address cards bottom-right */
-
-.maps-selected-card {
-  position: absolute;
-  right: 0.75rem;
-  bottom: 0.75rem;
-  max-width: 320px;
-  background: rgba(255, 255, 255, 0.97);
-  border-radius: 10px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(6px);
-  padding: 0.6rem 0.7rem;
-  pointer-events: auto;
-  font-size: 0.85rem;
-}
-
-.maps-selected-title {
-  font-weight: 600;
-  color: var(--pw-primary);
-}
-
-.maps-selected-suburb {
-  color: #444;
-  margin-top: 0.15rem;
-}
-
-.maps-selected-address {
-  color: #666;
-  font-size: 0.8rem;
-  margin-top: 0.1rem;
-}
-
-.maps-selected-buttons {
-  margin-top: 0.5rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.maps-btn-outline,
-.maps-btn-solid {
-  font-size: 0.8rem;
-  padding: 0.3rem 0.6rem;
-  border-radius: 999px;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.maps-btn-outline {
-  border: 1px solid var(--pw-primary);
-  color: var(--pw-primary);
-  background: #ffffff;
-}
-
-.maps-btn-solid {
-  border: 1px solid var(--pw-primary);
-  color: #ffffff;
-  background: var(--pw-primary);
-}
-
-/* Current location button */
-
-.maps-my-location-btn {
-  position: absolute;
-  right: 0.75rem;
   top: 4.5rem;
   z-index: 30;
   background: #ffffff;
@@ -1017,32 +758,7 @@
   pointer-events: auto;
 }
 
-.maps-my-location-btn:hover {
-  background: #ffebee;
-}
-
-/* Mobile tweaks for maps */
-
-@media (max-width: 768px) {
-  .maps-topbar {
-    margin: 0.4rem;
-    padding: 0.45rem 0.7rem;
-    border-radius: 12px;
-  }
-
-  .maps-panel {
-    max-width: none;
-    margin: 0.4rem;
-    border-radius: 12px;
-  }
-
-  .maps-selected-card {
-    left: 0.4rem;
-    right: 0.4rem;
-    bottom: 0.5rem;
-    max-width: none;
-  }
-}
+.maps-my-location-btn:hover { background: #ffebee; }
 
 /* ===============================
    TIMESHEET TABLE STYLES
@@ -1082,6 +798,7 @@
   font-size: 0.8rem;
   background: #fff8f8;
 }
+
 /* ===============================
    SCHEDULE ADMIN STYLES
    =============================== */
@@ -1273,6 +990,7 @@
   font-size: 0.75rem;
   color: #666;
 }
+
 .schedule-flipped-header-person {
   display: flex;
   flex-direction: column;
@@ -1312,10 +1030,6 @@
   font-size: 0.78rem;
   color: #555;
 }
-.schedule-day-weather {
-  font-size: 0.65rem;
-  color: #555;
-}
 
 /* small date input in header */
 .schedule-week-date-input {
@@ -1324,6 +1038,7 @@
   border-radius: 4px;
   border: 1px solid #c4c4c4;
 }
+
 /* Legend under schedule */
 
 .schedule-legend {
@@ -1346,6 +1061,7 @@
   border-radius: 3px;
   border: 1px solid #b0b0b0;
 }
+
 /* ===============================
    PRINT LAYOUT FOR SCHEDULE
    =============================== */
@@ -1419,6 +1135,7 @@
     display: none !important;
   }
 }
+
 /* ---------- Base layout container (desktop-first) ---------- */
 
 .app-shell {
@@ -1488,8 +1205,7 @@ table {
 }
 
 /* ==========================================================
-   MOBILE-ONLY PATCH: SIDEBAR + HAMBURGER
-   (Safe: desktop unchanged)
+   MOBILE-ONLY PATCH: SIDEBAR + HAMBURGER (BASE)
    ========================================================== */
 
 /* Hamburger is hidden by default (desktop) */
@@ -1497,42 +1213,49 @@ table {
   display: none;
 }
 
-/* Mobile-only behaviour */
+/* ===========================================
+   UNIVERSAL MOBILE OVERRIDES (iPhone + Android)
+   =========================================== */
 @media (max-width: 768px) {
-  /* Show hamburger only on small screens */
-  .mobile-hamburger {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    border: none;
-    background: #ffffff;
-    font-size: 1.3rem;
-    cursor: pointer;
+
+  /* HEADER */
+  .app-header {
+    padding: 0.6rem 0.9rem;
   }
 
-  /* Make sure the layout is a positioned context for the sidebar */
+  .header-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+  }
+
+  .header-text h1 { font-size: 1.1rem; }
+  .header-text p { font-size: 0.8rem; }
+
+  /* LAYOUT */
   .app-layout {
     position: relative;
+    padding: 0.6rem;
+    gap: 0.6rem;
+    flex-direction: column; /* stack vertically on mobile */
   }
 
-  /* Sidebar becomes a slide-in panel on mobile */
+  /* SIDEBAR → SLIDE-IN DRAWER */
   .sidebar {
     position: fixed;
     top: 0;
-    left: 0;
     bottom: 0;
+    left: 0;
     width: 80%;
     max-width: 260px;
     z-index: 1000;
+    border-radius: 0;
     transform: translateX(-100%);
-    transition: transform 0.2s ease-out;
-    /* we do NOT touch background, padding, colours – your existing styles stay */
+    transition: transform 0.25s ease-out;
+    overflow-y: auto;
   }
 
-  /* When App.jsx adds `sidebar-open`, slide it in */
+  /* When App.jsx adds .sidebar-open */
   .sidebar.sidebar-open {
     transform: translateX(0);
   }
@@ -1541,7 +1264,202 @@ table {
   .sidebar-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.35);
+    background: rgba(0,0,0,0.35);
     z-index: 999;
+  }
+
+  /* HAMBURGER BUTTON */
+  .mobile-hamburger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: #ffffff;
+    font-size: 1.3rem;
+    border: none;
+    cursor: pointer;
+  }
+
+  /* NAV ITEMS */
+  .nav-list { gap: 0.4rem; }
+
+  .nav-link {
+    font-size: 0.9rem;
+    padding: 0.35rem 0.55rem;
+  }
+
+  /* MAIN CONTENT */
+  .main-content {
+    flex: 1;
+    width: 100%;
+    padding: 0.9rem;
+    border-radius: 8px;
+  }
+
+  /* PAGE HEADERS */
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .page-actions {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  /* TABLES → HORIZONTAL SCROLL */
+  table {
+    min-width: 600px;
+  }
+
+  .table-wrapper {
+    overflow-x: auto;
+  }
+
+  /* CONTACTS GRID → SINGLE COLUMN */
+  .contacts-list-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* MAPS PAGE MOBILE FIXES */
+  .maps-topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    height: auto;
+    padding: 0.5rem 0.7rem;
+    gap: 0.35rem;
+  }
+
+  .maps-rightpanel {
+    width: calc(100% - 24px);
+    left: 12px;
+    right: 12px;
+  }
+
+  .maps-rightpanel.closed {
+    transform: translateY(calc(-100% + 32px));
+  }
+
+  .panel-toggle {
+    width: 32px;
+    height: 26px;
+    border-radius: 12px 12px 0 0;
+  }
+
+  .maps-selected-card {
+    left: 0.4rem;
+    right: 0.4rem;
+    bottom: 0.5rem;
+    max-width: none;
+  }
+
+  .maps-my-location-btn {
+    top: 6.3rem;
+  }
+  /* ADMIN PAGE – STACK ROWS AS CARDS ON MOBILE */
+  .admin-users-table {
+    gap: 0.4rem;
+  }
+
+  /* Hide desktop-style header row */
+  .admin-users-header {
+    display: none;
+  }
+
+  /* Turn each row into a card */
+  .admin-users-row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+    padding: 0.45rem 0.6rem;
+    margin: 0;
+    border-radius: 8px;
+    border: 1px solid var(--pw-border-soft);
+    background: #fff7f7;
+  }
+
+  /* Each "cell" inside the row becomes a label/value row */
+  .admin-users-row > div {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+  }
+
+  .admin-users-row > div span {
+    word-break: break-word;
+    text-align: right;
+  }
+  /* SCHEDULE PAGE – MOBILE TWEAKS */
+  .schedule-card {
+    padding: 0.6rem 0.5rem;
+    gap: 0.5rem;
+  }
+
+  .schedule-header {
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .schedule-week-label {
+    font-size: 0.85rem;
+  }
+
+  .schedule-week-buttons {
+    gap: 0.3rem;
+  }
+
+  /* Make the schedule scroll sideways rather than crush columns */
+  .schedule-grid-wrapper {
+    overflow-x: auto;
+  }
+
+  .schedule-grid {
+    min-width: 720px;
+    font-size: 0.7rem;
+  }
+
+  .schedule-person-name {
+    max-width: 80px;
+  }
+
+  .schedule-day-weather {
+    font-size: 0.6rem;
+  }
+  /* TIMESHEETS PAGE – MOBILE TWEAKS */
+  .ts-head {
+    font-size: 0.8rem;
+    padding: 0.3rem 0.35rem;
+  }
+
+  .ts-cell {
+    padding: 0.25rem 0.3rem;
+    font-size: 0.8rem;
+  }
+
+  .ts-cell-day {
+    white-space: nowrap;
+  }
+
+  .ts-cell-time input {
+    max-width: 60px;
+    font-size: 0.85rem;
+  }
+
+  .ts-cell-hours {
+    font-size: 0.85rem;
+  }
+
+  /* If you wrap the timesheets table in a .table-wrapper div,
+     this will allow horizontal scroll when needed. */
+  .table-wrapper {
+    overflow-x: auto;
   }
 }

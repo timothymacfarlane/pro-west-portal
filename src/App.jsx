@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Routes, Route, NavLink, useLocation } from "react-router-dom";
 import "./App.css";
 
@@ -41,21 +41,32 @@ function App() {
   const toggleMobileSidebar = () => {
     // Mobile slide-in menu
     setMobileSidebarOpen((prev) => !prev);
+
+    // Ensure sidebar is expanded when using mobile drawer
+    if (sidebarCollapsed) {
+      setSidebarCollapsed(false);
+    }
   };
 
   const closeMobileSidebar = () => setMobileSidebarOpen(false);
 
+  // Always close mobile drawer on route change (back/forward, programmatic nav, etc.)
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [location.pathname]);
+
   return (
     <div className="app-root">
-      {/* ---------- TOP HEADER (unchanged) ---------- */}
+      {/* ---------- TOP HEADER ---------- */}
       <header className="app-header">
         <div className="header-inner">
           <div className="header-left">
-            {/* MOBILE HAMBURGER */}
+            {/* MOBILE HAMBURGER (hidden on login page) */}
             {!isAuthPage && (
               <button
                 className="mobile-hamburger"
                 onClick={toggleMobileSidebar}
+                type="button"
               >
                 ☰
               </button>
@@ -90,7 +101,6 @@ function App() {
 
       {/* ---------- LAYOUT WRAPPER ---------- */}
       <div className="app-layout">
-
         {/* ---------- SIDEBAR (DESKTOP + MOBILE) ---------- */}
         {!isAuthPage && (
           <>
@@ -121,7 +131,12 @@ function App() {
 
               <ul className="nav-list">
                 <li>
-                  <NavLink to="/" end className="nav-link" onClick={closeMobileSidebar}>
+                  <NavLink
+                    to="/"
+                    end
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
                     <span className="nav-icon">🏠</span>
                     <span className="nav-label">Home</span>
                   </NavLink>
@@ -129,7 +144,11 @@ function App() {
 
                 {isAdmin && (
                   <li>
-                    <NavLink to="/admin" className="nav-link" onClick={closeMobileSidebar}>
+                    <NavLink
+                      to="/admin"
+                      className="nav-link"
+                      onClick={closeMobileSidebar}
+                    >
                       <span className="nav-icon">🛠</span>
                       <span className="nav-label">Administration</span>
                     </NavLink>
@@ -137,77 +156,123 @@ function App() {
                 )}
 
                 <li>
-                  <NavLink to="/profile" className="nav-link" onClick={closeMobileSidebar}>
+                  <NavLink
+                    to="/profile"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
                     <span className="nav-icon">👤</span>
                     <span className="nav-label">My Profile</span>
                   </NavLink>
                 </li>
 
                 <li>
-                  <NavLink to="/contacts" className="nav-link" onClick={closeMobileSidebar}>
+                  <NavLink
+                    to="/contacts"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
                     <span className="nav-icon">📇</span>
                     <span className="nav-label">Contacts</span>
                   </NavLink>
                 </li>
 
                 <li>
-                  <NavLink to="/jobs" className="nav-link" onClick={closeMobileSidebar}>
+                  <NavLink
+                    to="/jobs"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
                     <span className="nav-icon">📁</span>
                     <span className="nav-label">Jobs</span>
                   </NavLink>
                 </li>
 
                 <li>
-                  <NavLink to="/maps" className="nav-link" onClick={closeMobileSidebar}>
+                  <NavLink
+                    to="/maps"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
                     <span className="nav-icon">🗺️</span>
                     <span className="nav-label">Maps</span>
                   </NavLink>
                 </li>
 
                 <li>
-                  <NavLink to="/schedule" className="nav-link" onClick={closeMobileSidebar}>
+                  <NavLink
+                    to="/schedule"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
                     <span className="nav-icon">📅</span>
                     <span className="nav-label">Schedule</span>
                   </NavLink>
                 </li>
 
                 <li>
-                  <NavLink to="/take5" className="nav-link" onClick={closeMobileSidebar}>
+                  <NavLink
+                    to="/take5"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
                     <span className="nav-icon">📝</span>
                     <span className="nav-label">Take 5</span>
                   </NavLink>
                 </li>
 
                 <li>
-                  <NavLink to="/take5-register" className="nav-link" onClick={closeMobileSidebar}>
+                  <NavLink
+                    to="/take5-register"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
                     <span className="nav-icon">📋</span>
                     <span className="nav-label">Take 5 Register</span>
                   </NavLink>
                 </li>
 
                 <li>
-                  <NavLink to="/timesheets" className="nav-link" onClick={closeMobileSidebar}>
+                  <NavLink
+                    to="/timesheets"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
                     <span className="nav-icon">⏱️</span>
                     <span className="nav-label">Timesheets</span>
                   </NavLink>
                 </li>
 
                 <li>
-                  <NavLink to="/vehicle-prestart" className="nav-link" onClick={closeMobileSidebar}>
+                  <NavLink
+                    to="/vehicle-prestart"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
                     <span className="nav-icon">🚗</span>
                     <span className="nav-label">Vehicle Prestart</span>
                   </NavLink>
                 </li>
 
                 <li>
-                  <NavLink to="/vehicle-prestart-register" className="nav-link" onClick={closeMobileSidebar}>
+                  <NavLink
+                    to="/vehicle-prestart-register"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
                     <span className="nav-icon">🚗📋</span>
-                    <span className="nav-label">Vehicle Prestart Register</span>
+                    <span className="nav-label">
+                      Vehicle Prestart Register
+                    </span>
                   </NavLink>
                 </li>
 
                 <li>
-                  <NavLink to="/weather" className="nav-link" onClick={closeMobileSidebar}>
+                  <NavLink
+                    to="/weather"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
                     <span className="nav-icon">🌦️</span>
                     <span className="nav-label">Weather</span>
                   </NavLink>
