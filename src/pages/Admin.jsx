@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
-import { supabase } from "../lib/supabaseClient";
+import { supabase } from "../lib/supabaseClient.js";
 
 function Admin() {
   const { role } = useAuth();
