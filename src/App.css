@@ -1330,7 +1330,6 @@ table {
   .maps-fullscreen {
     inset: 0;
     height: 100vh;
-    box-sizing: border-box;
   }
 
   .maps-topbar {
