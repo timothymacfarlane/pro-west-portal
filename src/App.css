@@ -1329,8 +1329,9 @@ table {
     /* MAPS – MOBILE LAYOUT */
   .maps-fullscreen {
     inset: 0;
-    height: 100vh;               /* fill viewport on phone */
-    flex-direction: column;
+    height: 100vh;
+    padding: 4px 4px 0 4px;        /* small inset so edges aren’t clipped */
+    box-sizing: border-box;
   }
 
   .maps-topbar {
@@ -1370,24 +1371,6 @@ table {
   /* When closed, slide almost completely off-screen, leaving the tab visible */
   .maps-rightpanel.closed {
     transform: translateY(calc(100% - 32px));
-  }
-  .maps-fullscreen {
-    inset: 0;
-    height: 100vh;
-    padding: 4px 4px 0 4px;        /* small inset so edges aren’t clipped */
-    box-sizing: border-box;
-  }
-
-  .maps-mapwrap {
-    position: relative;
-    width: 100%;
-    flex: 1;
-    height: auto;
-  }
-
-  .maps-map {
-    width: 100%;
-    height: 100%;
   }
 
   /* Toggle sits centred at the top of the bottom sheet */
