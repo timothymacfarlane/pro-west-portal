@@ -1326,7 +1326,6 @@ table {
     grid-template-columns: 1fr;
   }
 
-  /* MAPS PAGE MOBILE FIXES */
     /* MAPS – MOBILE LAYOUT */
   .maps-fullscreen {
     inset: 0;
@@ -1354,13 +1353,12 @@ table {
     height: 100%;
   }
 
-  /* Bottom sheet panel instead of desktop left panel */
+  /* Bottom sheet panel: float slightly above bottom controls */
   .maps-rightpanel {
     position: absolute;
     left: 8px;
     right: 8px;
-    bottom: 0;
-    top: auto;
+    bottom: 56px;                 /* leave space for pegman + home bar */
     width: auto;
     max-height: 45vh;
     border-radius: 12px 12px 0 0;
@@ -1368,12 +1366,11 @@ table {
     transform: translateY(0);
   }
 
-  /* When closed, slide almost completely off-screen, leaving the tab visible */
   .maps-rightpanel.closed {
+    /* slide down but still above the very bottom */
     transform: translateY(calc(100% - 32px));
   }
 
-  /* Toggle sits centred at the top of the bottom sheet */
   .panel-toggle {
     position: absolute;
     top: -22px;
@@ -1384,12 +1381,18 @@ table {
     border-radius: 10px 10px 0 0;
   }
 
-  /* Panel content scrolls within the bottom sheet */
   .panel-content {
     max-height: calc(45vh - 24px);
     overflow-y: auto;
     padding-bottom: 0.4rem;
   }
+
+  .maps-my-location-btn {
+    top: auto;
+    bottom: 4.5rem;               /* float above sheet & controls */
+    right: 0.75rem;
+  }
+
 
   .maps-job-list {
     max-height: 180px;
