@@ -1,103 +1,205 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { supabase } from "../lib/supabaseClient";
 
 const AuthContext = createContext(null);
 
+// Normalise roles to match DB + app logic: "admin" | "basic"
+function normalizeRole(role) {
+  const r = String(role || "").trim().toLowerCase();
+  return r === "admin" ? "admin" : "basic";
+}
+
+function buildFallbackProfile(user) {
+  // If a profiles row doesn't exist (or fetch fails), we still want the app usable.
+  // Default to basic unless your app expects something else.
+  return {
+    id: user?.id ?? null,
+    full_name: user?.user_metadata?.full_name ?? user?.email ?? "User",
+    role: "basic",
+    is_active: true,
+  };
+}
+
+// Helper: promise timeout wrapper
+async function withTimeout(promise, ms, label = "operation") {
+  let t;
+  const timeout = new Promise((_, reject) => {
+    t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
+}
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);       // Supabase auth user
+  const [user, setUser] = useState(null); // Supabase auth user
   const [profile, setProfile] = useState(null); // Row from profiles table
+
+  // authLoading: only for explicit sign-in/out transitions (optional UI use)
   const [authLoading, setAuthLoading] = useState(true);
+
+  // authReady: once true, we never block route transitions with "checking login"
+  const [authReady, setAuthReady] = useState(false);
+
+  // Refs to avoid stale closures in onAuthStateChange
+  const userIdRef = useRef(null);
+  const hasProfileRef = useRef(false);
+
+  useEffect(() => {
+    userIdRef.current = user?.id ?? null;
+  }, [user]);
+
+  useEffect(() => {
+    hasProfileRef.current = !!profile;
+  }, [profile]);
+
+  async function fetchProfile(currentUser) {
+    try {
+      // Use maybeSingle so "no row" doesn't throw like single() can
+      const { data, error } = await withTimeout(
+        supabase.from("profiles").select("*").eq("id", currentUser.id).maybeSingle(),
+        8000,
+        "profiles fetch"
+      );
+
+      if (error) {
+        console.warn("Profile load error:", error.message);
+        return buildFallbackProfile(currentUser);
+      }
+
+      if (!data) {
+        console.warn("No profile row found — using fallback profile");
+        return buildFallbackProfile(currentUser);
+      }
+
+      // Normalise role value
+      return { ...data, role: normalizeRole(data.role) };
+    } catch (e) {
+      console.warn("Profile fetch exception:", e?.message || e);
+      return buildFallbackProfile(currentUser);
+    }
+  }
 
   useEffect(() => {
     let isMounted = true;
 
-    const loadUserAndProfile = async () => {
+    const bootstrapAuth = async () => {
       setAuthLoading(true);
 
-      // 1. Load current auth user
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (!isMounted) return;
+      try {
+        // 1) Fast/local: get current session (no network required)
+        const { data: sessionData, error: sessionError } = await withTimeout(
+          supabase.auth.getSession(),
+          8000,
+          "auth getSession"
+        );
 
-      if (userError) {
-        console.warn("Auth error:", userError.message);
+        if (!isMounted) return;
+
+        if (sessionError) {
+          console.warn("Session error:", sessionError.message);
+          setUser(null);
+          setProfile(null);
+          return;
+        }
+
+        const sessionUser = sessionData?.session?.user ?? null;
+        setUser(sessionUser);
+
+        if (!sessionUser) {
+          setProfile(null);
+          return;
+        }
+
+        // 2) Fetch profile (network)
+        const p = await fetchProfile(sessionUser);
+        if (!isMounted) return;
+        setProfile(p);
+      } catch (e) {
+        console.warn("Auth bootstrap exception:", e?.message || e);
+        if (!isMounted) return;
         setUser(null);
         setProfile(null);
-        setAuthLoading(false);
-        return;
+      } finally {
+        if (isMounted) {
+          setAuthLoading(false);
+          setAuthReady(true);
+        }
       }
-
-      const currentUser = userData?.user ?? null;
-      setUser(currentUser);
-
-      if (!currentUser) {
-        setProfile(null);
-        setAuthLoading(false);
-        return;
-      }
-
-      // 2. Load matching profile row
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", currentUser.id)
-        .single();
-
-      if (profileError) {
-        console.warn("Profile load error:", profileError.message);
-
-        // Fallback if no profile exists
-        setProfile({
-          id: currentUser.id,
-          email: currentUser.email,
-          display_name: currentUser.email,
-          role: "BASIC",
-          is_active: true,
-          show_in_contacts: true,
-          show_in_schedule: true,
-          show_in_timesheets: true
-        });
-      } else {
-        setProfile(profileData);
-      }
-
-      setAuthLoading(false);
     };
 
-    loadUserAndProfile();
+    bootstrapAuth();
 
-    // 3. Watch for login/logout events
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    // 3) Watch for login/logout events
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return;
+
       const newUser = session?.user ?? null;
-      setUser(newUser);
+      const newUserId = newUser?.id ?? null;
+      const currentUserId = userIdRef.current;
 
-      if (newUser) {
-        supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", newUser.id)
-          .single()
-          .then(({ data }) => {
-            setProfile(data);
-          });
-      } else {
-        setProfile(null);
+      // ✅ Token refresh happens in the background — never show "Checking login"
+      if (event === "TOKEN_REFRESHED") {
+        setUser(newUser);
+        if (isMounted) setAuthReady(true);
+        return;
+      }
+
+      const userChanged = newUserId !== currentUserId;
+
+      // Only show loading overlay for real auth transitions
+      const shouldShowLoading = event === "SIGNED_IN" || event === "SIGNED_OUT";
+      if (shouldShowLoading) setAuthLoading(true);
+
+      try {
+        setUser(newUser);
+
+        if (!newUser) {
+          setProfile(null);
+          return;
+        }
+
+        // Only refetch profile if user changed OR we don't have one yet
+        if (userChanged || !hasProfileRef.current) {
+          const p = await fetchProfile(newUser);
+          if (!isMounted) return;
+          setProfile(p);
+        }
+      } catch (e) {
+        console.warn("Auth change handler exception:", e?.message || e);
+        if (!isMounted) return;
+        // Keep user, but fall back profile so app isn't blocked
+        if (newUser) setProfile(buildFallbackProfile(newUser));
+      } finally {
+        if (isMounted) {
+          setAuthLoading(false);
+          setAuthReady(true);
+        }
       }
     });
 
     return () => {
       isMounted = false;
-      subscription.unsubscribe();
+      sub?.subscription?.unsubscribe();
     };
   }, []);
 
-  const value = {
-    user,
-    profile,
-    role: profile?.role || "BASIC",
-    authLoading
-  };
+  const value = useMemo(() => {
+    const role = normalizeRole(profile?.role);
+    return {
+      user,
+      profile,
+      role,
+      authLoading,
+      authReady,
+      isAdmin: role === "admin",
+    };
+  }, [user, profile, authLoading, authReady]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

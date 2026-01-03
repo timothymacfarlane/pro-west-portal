@@ -62,3 +62,32 @@ button:focus,
 button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
+
+/* ==========================================================
+   Mobile & PWA polish (safe, global, low-risk)
+   ========================================================== */
+
+/* Prevent iOS tap highlight flash */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Improve text rendering on mobile */
+body {
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Make buttons more touch-friendly on small screens */
+@media (max-width: 768px) {
+  button {
+    min-height: 44px; /* Apple HIG touch target */
+  }
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

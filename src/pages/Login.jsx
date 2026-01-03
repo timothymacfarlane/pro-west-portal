@@ -53,6 +53,10 @@ function Login() {
             <span className="card-row-label">Email</span>
             <input
               type="email"
+              inputMode="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              aria-label="Email address"
               className="maps-search-input"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -65,6 +69,7 @@ function Login() {
             <span className="card-row-label">Password</span>
             <input
               type="password"
+              aria-label="Password"
               className="maps-search-input"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

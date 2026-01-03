@@ -2,14 +2,19 @@ import { Navigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 
 function ProtectedRoute({ children }) {
-  const { user, authLoading } = useAuth();
+  const { user, authReady } = useAuth();
 
-  if (authLoading) {
-    return <div style={{ padding: "1rem" }}>Checking login…</div>;
+  // Only block during first app boot (not on every navigation)
+  if (!authReady) {
+    return (
+      <div style={{ padding: 24, textAlign: "center", fontWeight: 600 }}>
+        Loading…
+      </div>
+    );
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={{ from: window.location.pathname }} />;
   }
 
   return children;

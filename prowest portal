@@ -1,6 +1,0 @@
-git init
-git add .
-git commit -m "Initial portal commit"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/pro-west-portal.git
-git push -u origin main

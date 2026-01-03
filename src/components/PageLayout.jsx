@@ -13,13 +13,13 @@ function HeaderActions({ extraActions }) {
   };
 
   return (
-    <div className="page-actions">
+    <div className="page-actions" role="group" aria-label="Page actions">
       {/* Page-specific actions (e.g. "Start Over") */}
       {extraActions}
 
       {/* Global Logout button – only when logged in */}
       {user && (
-        <button className="btn-pill" type="button" onClick={handleLogout}>
+        <button className="btn-pill" type="button" onClick={handleLogout} aria-label="Log out" title="Log out">
           Logout
         </button>
       )}
@@ -29,8 +29,8 @@ function HeaderActions({ extraActions }) {
 
 function PageLayout({ icon, title, subtitle, actions, children }) {
   return (
-    <div className="page">
-      <header className="page-header">
+    <div className="page" data-layout="page">
+      <header className="page-header" role="banner">
         <div className="page-title-group">
           {icon && <span className="page-icon">{icon}</span>}
           <div>

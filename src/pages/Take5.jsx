@@ -891,6 +891,7 @@ function Take5() {
               setIncompleteWarning("");
             }}
             placeholder="e.g. 101441"
+            inputMode="numeric"
             className="maps-search-input"
             style={{ maxWidth: "200px" }}
           />
@@ -1086,6 +1087,7 @@ function Take5() {
             value={h.description}
             onChange={(e) => handleHazardChange(index, "description", e.target.value)}
             className="maps-search-input"
+            aria-label="Hazard description"
             placeholder="e.g. Wet weather, traffic, uneven ground…"
             style={{ width: "100%", marginTop: "0.2rem" }}
           />
@@ -1147,6 +1149,7 @@ function Take5() {
               type="text"
               value={h.controlMeasure}
               onChange={(e) => handleHazardChange(index, "controlMeasure", e.target.value)}
+              aria-label="Control measure"
               className="maps-search-input"
               style={{ width: "100%", marginTop: "0.2rem" }}
             />
@@ -1384,7 +1387,7 @@ function Take5() {
           </div>
 
           {/* Scrollable Content */}
-          <div style={{ overflowY: "auto", paddingRight: "0.25rem" }}>
+          <div style={{ overflowY: "auto", paddingRight: "0.25rem", WebkitOverflowScrolling: "touch" }}>
             {/* TAB 1 — MATRIX */}
             {riskTab === "matrix" && (
               <>
@@ -1671,7 +1674,7 @@ function Take5() {
   };
 
   return (
-    <PageLayout
+    <PageLayout data-take5
       icon="📝"
       title="Take 5"
       subtitle={`Step ${step} of ${totalSteps}`}

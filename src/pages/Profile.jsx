@@ -26,7 +26,7 @@ function Profile() {
     // ProtectedRoute should prevent this, but just in case
     return (
       <PageLayout icon="👤" title="My Profile">
-        <div className="card">
+        <div className="card" data-profile-card>
           <p>You must be logged in to view this page.</p>
         </div>
       </PageLayout>
@@ -134,6 +134,8 @@ function Profile() {
             <span className="card-row-label">Display name</span>
             <input
               type="text"
+              aria-label="Display name"
+              autoCapitalize="words"
               className="maps-search-input"
               style={{ maxWidth: "260px" }}
               value={displayName}
@@ -179,6 +181,7 @@ function Profile() {
             <span className="card-row-label">New password</span>
             <input
               type="password"
+              aria-label="New password"
               className="maps-search-input"
               style={{ maxWidth: "260px" }}
               value={newPassword}
@@ -191,6 +194,7 @@ function Profile() {
             <span className="card-row-label">Confirm password</span>
             <input
               type="password"
+              aria-label="Confirm password"
               className="maps-search-input"
               style={{ maxWidth: "260px" }}
               value={confirmPassword}

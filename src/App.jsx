@@ -11,6 +11,7 @@ import Home from "./pages/Home.jsx";
 import Admin from "./pages/Admin.jsx";
 import Contacts from "./pages/Contacts.jsx";
 import Jobs from "./pages/Jobs.jsx";
+import MyJobs from "./pages/MyJobs.jsx"; // ✅ ADDED
 import Maps from "./pages/Maps.jsx";
 import Profile from "./pages/Profile.jsx";
 import Schedule from "./pages/Schedule.jsx";
@@ -21,6 +22,8 @@ import VehiclePrestart from "./pages/VehiclePrestart.jsx";
 import VehiclePrestartRegister from "./pages/VehiclePrestartRegister.jsx";
 import Weather from "./pages/Weather.jsx";
 
+import NotificationBell from "./components/NotificationBell.jsx"; // 🔔 ADDED
+
 import { useAuth } from "./context/AuthContext.jsx";
 
 function App() {
@@ -28,8 +31,9 @@ function App() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const location = useLocation();
-  const { role } = useAuth();
-  const isAdmin = role === "ADMIN";
+
+  // Updated: rely on AuthContext canonical flags rather than "ADMIN" string checks
+  const { isAdmin, authLoading } = useAuth();
 
   const isAuthPage = location.pathname === "/login";
 
@@ -51,6 +55,16 @@ function App() {
   const closeMobileSidebar = () => setMobileSidebarOpen(false);
 
   // Always close mobile drawer on route change (back/forward, programmatic nav, etc.)
+  // Prevent background scroll when the mobile sidebar is open (better on iOS/Android)
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const prev = document.body.style.overflow;
+    if (mobileSidebarOpen) document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileSidebarOpen]);
+
   useEffect(() => {
     setMobileSidebarOpen(false);
   }, [location.pathname]);
@@ -67,6 +81,8 @@ function App() {
                 className="mobile-hamburger"
                 onClick={toggleMobileSidebar}
                 type="button"
+                aria-label="Open menu"
+                title="Open menu"
               >
                 ☰
               </button>
@@ -86,6 +102,9 @@ function App() {
           </div>
 
           <div className="header-right">
+            {/* 🔔 In-app notifications */}
+            {!isAuthPage && <NotificationBell />}
+
             <a
               href="https://prowestsurveying.com.au/"
               target="_blank"
@@ -109,6 +128,7 @@ function App() {
               <div
                 className="sidebar-backdrop"
                 onClick={closeMobileSidebar}
+                aria-hidden="true"
               />
             )}
 
@@ -123,6 +143,8 @@ function App() {
                 className="sidebar-toggle"
                 type="button"
                 onClick={toggleSidebar}
+                aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               >
                 {sidebarCollapsed ? "»" : "«"}
               </button>
@@ -142,7 +164,8 @@ function App() {
                   </NavLink>
                 </li>
 
-                {isAdmin && (
+                {/* Admin tab: only show once auth has resolved, and user is admin */}
+                {!authLoading && isAdmin && (
                   <li>
                     <NavLink
                       to="/admin"
@@ -174,6 +197,18 @@ function App() {
                   >
                     <span className="nav-icon">📇</span>
                     <span className="nav-label">Contacts</span>
+                  </NavLink>
+                </li>
+
+                {/* ✅ ADDED: My Jobs */}
+                <li>
+                  <NavLink
+                    to="/my-jobs"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
+                    <span className="nav-icon">🧰</span>
+                    <span className="nav-label">My Jobs</span>
                   </NavLink>
                 </li>
 
@@ -286,7 +321,6 @@ function App() {
         <main className="main-content">
           <Routes>
             <Route path="/login" element={<Login />} />
-
             <Route
               path="/"
               element={
@@ -310,6 +344,16 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Contacts />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ✅ ADDED: My Jobs route */}
+            <Route
+              path="/my-jobs"
+              element={
+                <ProtectedRoute>
+                  <MyJobs />
                 </ProtectedRoute>
               }
             />

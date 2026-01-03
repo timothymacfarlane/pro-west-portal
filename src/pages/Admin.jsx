@@ -3,9 +3,13 @@ import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabaseClient.js";
 
+function normalizeRole(role) {
+  const r = String(role || "").trim().toLowerCase();
+  return r === "admin" ? "admin" : "basic";
+}
+
 function Admin() {
-  const { role } = useAuth();
-  const isAdmin = role === "ADMIN";
+  const { isAdmin } = useAuth();
 
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -31,7 +35,9 @@ function Admin() {
         setError("Could not load user list.");
         setProfiles([]);
       } else {
-        setProfiles(data || []);
+        setProfiles(
+          (data || []).map((p) => ({ ...p, role: normalizeRole(p.role) }))
+        );
       }
 
       setLoading(false);
@@ -44,15 +50,16 @@ function Admin() {
     setSavingId(id);
     setError("");
 
-    const { error } = await supabase.from("profiles").update(patch).eq("id", id);
+    const safePatch = { ...patch };
+    if ("role" in safePatch) safePatch.role = normalizeRole(safePatch.role);
+
+    const { error } = await supabase.from("profiles").update(safePatch).eq("id", id);
 
     if (error) {
       console.error("Error updating profile:", error);
       setError("Could not update user – please try again.");
     } else {
-      setProfiles((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, ...patch } : p))
-      );
+      setProfiles((prev) => prev.map((p) => (p.id === id ? { ...p, ...safePatch } : p)));
     }
 
     setSavingId(null);
@@ -79,11 +86,9 @@ function Admin() {
           <p>Loading users…</p>
         ) : (
           <>
-            {error && (
-              <p style={{ color: "#b71c1c", fontSize: "0.8rem" }}>{error}</p>
-            )}
+            {error && <p style={{ color: "#b71c1c", fontSize: "0.8rem" }}>{error}</p>}
 
-            <div className="admin-users-table">
+            <div className="admin-users-table" role="table">
               <div className="admin-users-header">
                 <span>Name</span>
                 <span>Email</span>
@@ -94,23 +99,17 @@ function Admin() {
 
               {profiles.map((p) => (
                 <div key={p.id} className="admin-users-row">
-                  {/* Name */}
                   <span>{p.display_name || p.email}</span>
-
-                  {/* Email */}
                   <span>{p.email}</span>
 
-                  {/* Access level (Basic / Admin) */}
                   <span>
                     <label style={{ marginRight: "0.5rem" }}>
                       <input
                         type="radio"
                         name={`role-${p.id}`}
-                        value="BASIC"
-                        checked={p.role !== "ADMIN"}
-                        onChange={() =>
-                          handleUpdate(p.id, { role: "BASIC" })
-                        }
+                        value="basic"
+                        checked={normalizeRole(p.role) !== "admin"}
+                        onChange={() => handleUpdate(p.id, { role: "basic" })}
                         disabled={savingId === p.id}
                       />{" "}
                       Basic
@@ -119,27 +118,22 @@ function Admin() {
                       <input
                         type="radio"
                         name={`role-${p.id}`}
-                        value="ADMIN"
-                        checked={p.role === "ADMIN"}
-                        onChange={() =>
-                          handleUpdate(p.id, { role: "ADMIN" })
-                        }
+                        value="admin"
+                        checked={normalizeRole(p.role) === "admin"}
+                        onChange={() => handleUpdate(p.id, { role: "admin" })}
                         disabled={savingId === p.id}
                       />{" "}
                       Admin
                     </label>
                   </span>
 
-                  {/* Visibility flags */}
                   <span>
                     <label style={{ marginRight: "0.5rem", fontSize: "0.8rem" }}>
                       <input
                         type="checkbox"
                         checked={!!p.show_in_contacts}
                         onChange={(e) =>
-                          handleUpdate(p.id, {
-                            show_in_contacts: e.target.checked,
-                          })
+                          handleUpdate(p.id, { show_in_contacts: e.target.checked })
                         }
                         disabled={savingId === p.id}
                       />{" "}
@@ -150,9 +144,7 @@ function Admin() {
                         type="checkbox"
                         checked={!!p.show_in_schedule}
                         onChange={(e) =>
-                          handleUpdate(p.id, {
-                            show_in_schedule: e.target.checked,
-                          })
+                          handleUpdate(p.id, { show_in_schedule: e.target.checked })
                         }
                         disabled={savingId === p.id}
                       />{" "}
@@ -163,9 +155,7 @@ function Admin() {
                         type="checkbox"
                         checked={!!p.show_in_timesheets}
                         onChange={(e) =>
-                          handleUpdate(p.id, {
-                            show_in_timesheets: e.target.checked,
-                          })
+                          handleUpdate(p.id, { show_in_timesheets: e.target.checked })
                         }
                         disabled={savingId === p.id}
                       />{" "}
@@ -173,14 +163,11 @@ function Admin() {
                     </label>
                   </span>
 
-                  {/* Active toggle */}
                   <span>
                     <input
                       type="checkbox"
                       checked={!!p.is_active}
-                      onChange={(e) =>
-                        handleUpdate(p.id, { is_active: e.target.checked })
-                      }
+                      onChange={(e) => handleUpdate(p.id, { is_active: e.target.checked })}
                       disabled={savingId === p.id}
                     />
                   </span>

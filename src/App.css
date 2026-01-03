@@ -493,14 +493,14 @@
 .maps-rightpanel {
   position: absolute;
   top: 38px;                 /* below top bar & Google buttons */
-  left: 10px;                /* anchored to LEFT side */
-  width: 260px;
-  max-height: 65vh;
+  left: 10px;
+  width: 310px;              /* closer to the compact example panel */
+  max-height: 72vh;
   display: flex;
-  transition: transform 0.25s ease, opacity 0.25s ease;
+  transition: transform 0.22s ease, opacity 0.22s ease;
   z-index: 3;
   pointer-events: auto;
-  opacity: 0.92;
+  opacity: 0.96;
 }
 
 /* ensure scroll area behaves */
@@ -509,40 +509,48 @@
 }
 
 .panel-content {
+  width: 100%;
+  overflow: auto;
+  padding: 0 10px 10px 42px;  /* space for the inside toggle */
+  border-radius: 10px;
   overflow-x: hidden;
 }
 
 /* Retract the entire panel to the LEFT */
 .maps-rightpanel.closed {
-  transform: translateX(calc(-100% + 22px));  /* hide panel, leave toggle visible */
-  opacity: 0.85;
+  transform: translateX(calc(-100% + 36px));  /* hide panel, leave toggle visible */
+  opacity: 0.9;
 }
 
 /* Toggle button on the *Left* side of the panel */
 .panel-toggle {
-  background: rgba(255, 255, 255, 0.75);
-  border: 1px solid rgba(0,0,0,0.08);
-  color: var(--pw-primary-dark);
-  width: 18px;
-  height: 25px;
+  background: var(--pw-primary);
+  border: 1px solid rgba(0,0,0,0.18);
+  color: #fff;
+  width: 34px;
+  height: 40px;
   cursor: pointer;
 
-  /* Round the right-side edges (because button sits on the right) */
+  /* Keep toggle INSIDE the panel so it stays visible when collapsed */
   border-radius: 0 10px 10px 0;
 
-  /* Position toggle at the right edge of panel */
   position: absolute;
-  top: 0;
-  right: -42px;     /* pushes toggle outside the panel so it’s visible when collapsed */
+  top: 8px;
+  left: 0;
 
   display: flex;
   align-items: center;
   justify-content: center;
 
-  font-size: 16px;
-  box-shadow: 0 3px 8px rgba(0,0,0,0.18);
+  font-size: 18px;
+  font-weight: 900;
+  box-shadow: 0 6px 14px rgba(0,0,0,0.22);
   backdrop-filter: blur(4px);
-  z-index: 5;
+  z-index: 6;
+}
+.panel-toggle:hover { filter: brightness(0.96); }
+.panel-toggle:hover {
+  filter: brightness(0.96);
 }
 
 .panel-content {
@@ -552,14 +560,15 @@
 }
 
 /* Panel cards keep your portal style */
+/* Panel cards keep your portal style, but more compact like the example */
 .panel-card {
-  background: rgba(255, 255, 255, 0.9);  /* less “white block” */
+  background: rgba(255, 255, 255, 0.96);
   border-radius: 10px;
-  border: 1px solid rgba(0,0,0,0.06);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18); /* lighter shadow */
+  border: 1px solid rgba(0,0,0,0.08);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   backdrop-filter: blur(6px);
-  padding: 0.55rem 0.6rem;
-  margin-bottom: 0.5rem;
+  padding: 10px 10px;
+  margin-bottom: 10px;
 }
 
 .panel-card-title {
@@ -621,6 +630,225 @@
 .maps-job-item.selected {
   border-color: var(--pw-primary);
   background: #ffebee;
+}
+
+/* =========================
+   MAPS TABS + COMPACT PANEL
+   ========================= */
+
+.maps-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  gap: 14px;
+  padding: 10px 10px 8px 10px;
+  margin: 0 0 10px 0;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+}
+
+.maps-tab {
+  border: none;
+  background: transparent;
+  color: rgba(0,0,0,0.55);
+  font-weight: 800;
+  font-size: 13px;
+  padding: 6px 0;
+  cursor: pointer;
+  white-space: nowrap;
+  border-bottom: 3px solid transparent;
+}
+.maps-tab:hover {
+  background: #ffebee;
+}
+
+.maps-tab.active {
+  background: var(--pw-primary);
+  border-color: var(--pw-primary);
+  color: #fff;
+}
+
+.maps-search-compact {
+  font-size: 0.85rem;
+  padding: 0.3rem 0.45rem;
+}
+
+.maps-inline-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  margin-top: 8px;
+}
+
+.maps-mini-check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 900;
+  color: #333;
+}
+
+.maps-job-list-compact {
+  margin-top: 8px;
+  max-height: 240px;
+}
+
+.maps-job-item-compact {
+  padding: 0.3rem 0.4rem;
+}
+
+.maps-job-meta {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 900;
+  opacity: 0.85;
+}
+
+.maps-notice {
+  font-size: 12px;
+  color: #666;
+  margin: 6px 0 10px 0;
+  padding: 6px 8px;
+  background: #fafafa;
+  border: 1px dashed #ddd;
+  border-radius: 8px;
+}
+
+.maps-layer-section {
+  margin-top: 10px;
+}
+
+.maps-layer-section-title {
+  font-weight: 900;
+  font-size: 13px;
+  margin-bottom: 6px;
+  color: #333;
+}
+
+.layer-row-compact {
+  padding: 4px 2px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+}
+.layer-row-compact input[type="checkbox"]{
+  width: 18px;
+  height: 18px;
+}
+
+.maps-layer-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #666;
+  line-height: 1.3;
+}
+
+.maps-notes {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid #c4cddd;
+  padding: 10px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  resize: vertical;
+  background: #fff;
+}
+
+.maps-notes:focus {
+  outline: none;
+  border-color: var(--pw-primary);
+}
+
+/* Legend UI */
+.maps-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.maps-legend-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.maps-legend-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 2px solid rgba(0,0,0,0.15);
+}
+
+.swatch-ssm { background: #A6B96A; }
+.swatch-bm { background: #1976d2; }
+.swatch-rm {
+  background: #fff;
+  position: relative;
+}
+.swatch-rm::before,
+.swatch-rm::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 2px;
+  background: #111;
+  transform-origin: center;
+}
+.swatch-rm::before { transform: translate(-50%, -50%) rotate(45deg); }
+.swatch-rm::after { transform: translate(-50%, -50%) rotate(-45deg); }
+
+.maps-legend-line {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 2px solid rgba(0,0,0,0.15);
+  background:
+    linear-gradient(90deg, transparent 0, transparent 6px, #fff 6px, #fff 8px, transparent 8px);
+}
+
+.maps-legend-title {
+  font-weight: 900;
+  color: #111;
+  font-size: 13px;
+}
+
+.maps-legend-sub {
+  color: #666;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.maps-legend-divider {
+  height: 1px;
+  background: rgba(0,0,0,0.08);
+  margin: 2px 0;
+}
+
+.maps-legend-tools {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  color: #333;
+}
+
+/* Mobile: tighten tabs a bit more */
+@media (max-width: 768px) {
+  .maps-tab {
+    font-size: 11px;
+    padding: 6px 9px;
+  }
+  .maps-job-list-compact {
+    max-height: 220px;
+  }
 }
 
 .maps-job-id { font-size: 0.8rem; color: #555; }
@@ -1371,23 +1599,29 @@ table {
     transform: translateY(calc(100% - 32px));
   }
 
-  /* Toggle sits centred at the top of the bottom sheet */
-  .panel-toggle {
-    position: absolute;
-    top: -22px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 46px;
-    height: 20px;
-    border-radius: 10px 10px 0 0;
-  }
+  
+/* Toggle sits centred at the top of the bottom sheet */
+.panel-toggle {
+  position: absolute;
+  top: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 54px;
+  height: 22px;
+  border-radius: 12px 12px 0 0;
+  background: var(--pw-primary);
+  border: 1px solid rgba(0,0,0,0.18);
+  color: #fff;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.22);
+}
 
-  /* Panel content scrolls within the bottom sheet */
-  .panel-content {
-    max-height: calc(45vh - 24px);
-    overflow-y: auto;
-    padding-bottom: 0.4rem;
-  }
+  
+/* Panel content scrolls within the bottom sheet */
+.panel-content {
+  max-height: calc(45vh - 24px);
+  overflow-y: auto;
+  padding: 0.6rem 0.6rem 0.4rem 0.6rem; /* reset desktop left padding */
+}
 
   .maps-job-list {
     max-height: 180px;
@@ -1538,5 +1772,407 @@ table {
   .maps-map {
     height: 100%;
     width: 100%;
+  }
+}
+/* ============================= */
+/* In-app Notifications (Bell)   */
+/* ============================= */
+
+.notification-wrapper {
+  position: relative;
+  margin-right: 10px;
+}
+
+.notification-bell {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  position: relative;
+  color: inherit;
+}
+
+.notification-badge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  background: #e53935;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2px 6px;
+  line-height: 1;
+}
+
+.notification-dropdown {
+  position: absolute;
+  right: 0;
+  top: 120%;
+  width: 320px;
+  max-height: 420px;
+  overflow-y: auto;
+  background: #1e1e24;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+  z-index: 1000;
+}
+
+.notification-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  font-size: 13px;
+}
+
+.notification-header button {
+  background: none;
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.9;
+  color: #ffffff; /* ✅ force white */
+}
+
+.notification-item {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.notification-title {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.notification-body {
+  font-size: 12px;
+  opacity: 0.85;
+  margin-top: 4px;
+}
+
+.notification-actions {
+  margin-top: 6px;
+  text-align: right;
+}
+
+.notification-actions button {
+  background: none;
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.notification-empty {
+  padding: 12px;
+  font-size: 12px;
+  opacity: 0.7;
+  text-align: center;
+}
+
+/* Mobile: full-width dropdown */
+@media (max-width: 640px) {
+  .notification-dropdown {
+    right: -12px;
+    width: calc(100vw - 24px);
+  }
+}
+/* ==========================================================
+   MAPS: MOBILE "FIELD-READY" PATCH (safe-area + 100dvh)
+   Paste at the very bottom of App.css
+   ========================================================== */
+
+/* iOS/Android dynamic viewport height support */
+@media (max-width: 768px) {
+  .maps-fullscreen {
+    height: 100dvh;                /* modern mobile browsers */
+    min-height: 100vh;
+  }
+
+  /* fallback for older iOS */
+  @supports (-webkit-touch-callout: none) {
+    .maps-fullscreen {
+      height: -webkit-fill-available;
+    }
+  }
+
+  /* keep map visible above iOS bottom bar + safe areas */
+  .maps-mapwrap {
+    height: calc(100dvh - 70px);
+  }
+
+  /* safe-area padding so bottom sheet + cards don't clip */
+  .maps-rightpanel {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .maps-selected-card {
+    margin-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Make bottom sheet feel better on touch */
+  .maps-rightpanel {
+    overscroll-behavior: contain;
+  }
+
+  .panel-content {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+}
+
+/* ----------------------------------------------------------
+   If Maps.jsx uses a separate mobile toggle button:
+   <button className="maps-panel-toggle" ... />
+   This styling is isolated + won't affect desktop.
+   ---------------------------------------------------------- */
+.maps-panel-toggle {
+  display: none; /* desktop hidden */
+}
+
+@media (max-width: 768px) {
+  .maps-panel-toggle {
+    display: inline-flex;
+    position: absolute;
+    z-index: 50;
+    right: 10px;
+    top: 82px; /* below topbar */
+    width: 38px;
+    height: 38px;
+    border-radius: 999px;
+    border: 2px solid rgba(0,0,0,0.25);
+    background: rgba(255,255,255,0.92);
+    font-weight: 900;
+    font-size: 18px;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 10px 22px rgba(0,0,0,0.25);
+    backdrop-filter: blur(6px);
+  }
+
+  .maps-panel-toggle:active {
+    transform: scale(0.98);
+  }
+}
+/* ==========================================================
+   SCHEDULE – MOBILE FIELD OPTIMISATION (SAFE)
+   ========================================================== */
+@media (max-width: 768px) {
+
+  /* Allow sideways scroll instead of crushing columns */
+  .schedule-grid-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Keep grid readable */
+  .schedule-grid {
+    min-width: 720px;
+    font-size: 0.7rem;
+  }
+
+  /* Header controls wrap nicely */
+  .schedule-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .schedule-week-buttons {
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .schedule-week-buttons button {
+    min-height: 42px;
+  }
+
+  /* Reduce name truncation pain */
+  .schedule-person-name {
+    max-width: 80px;
+  }
+
+  /* Sticky editor panel for field use */
+  .schedule-editor-card {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    background: #fff;
+    box-shadow: 0 -6px 16px rgba(0,0,0,0.12);
+  }
+}
+/* ==========================================================
+   ADMIN – MOBILE FRIENDLY LAYOUT
+   ========================================================== */
+@media (max-width: 768px) {
+  .admin-users-header {
+    display: none;
+  }
+
+  .admin-users-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+    padding: 0.6rem;
+    border-bottom: 1px solid rgba(0,0,0,0.12);
+  }
+
+  .admin-users-row span {
+    font-size: 0.8rem;
+  }
+
+  .admin-users-row label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+}
+/* ==========================================================
+   CONTACTS – MOBILE POLISH
+   ========================================================== */
+@media (max-width: 768px) {
+  .contacts-suggestion,
+  .contacts-list-item {
+    padding: 0.6rem;
+  }
+
+  .contacts-avatar {
+    width: 34px;
+    height: 34px;
+    font-size: 0.9rem;
+  }
+
+  .contacts-avatar-large {
+    width: 52px;
+    height: 52px;
+    font-size: 1.2rem;
+  }
+
+  .contacts-suggestion-meta {
+    font-size: 0.75rem;
+  }
+}
+/* ==========================================================
+   HOME – MOBILE POLISH
+   ========================================================== */
+@media (max-width: 768px) {
+  .home-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .home-actions .btn-pill {
+    flex: 1 1 auto;
+    min-width: 120px;
+  }
+
+  [data-home-card] ul {
+    padding-left: 1rem;
+  }
+
+  [data-home-card] li {
+    margin-bottom: 0.25rem;
+  }
+}
+/* ==========================================================
+   MY JOBS – MOBILE POLISH
+   ========================================================== */
+@media (max-width: 768px) {
+  [data-myjobs-list] > div {
+    padding: 0.6rem;
+  }
+
+  [data-myjobs-list] .btn-pill {
+    min-height: 40px;
+  }
+
+  [data-myjobs-list] {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+/* ==========================================================
+   PROFILE – MOBILE POLISH
+   ========================================================== */
+@media (max-width: 768px) {
+  [data-profile-card] .card-row {
+    align-items: flex-start;
+  }
+
+  [data-profile-card] .card-row-label {
+    min-width: 90px;
+  }
+}
+/* ==========================================================
+   TAKE 5 – MOBILE FIELD OPTIMISATION
+   ========================================================== */
+@media (max-width: 768px) {
+  [data-take5] .card {
+    padding: 0.75rem;
+  }
+
+  [data-take5] .card-row-label {
+    font-size: 0.8rem;
+  }
+
+  [data-take5] .btn-pill {
+    min-height: 40px;
+  }
+
+  [data-take5] table {
+    font-size: 0.75rem;
+  }
+}
+/* ==========================================================
+   TAKE 5 REGISTER – MOBILE POLISH
+   ========================================================== */
+@media (max-width: 768px) {
+  [data-take5-register] table {
+    font-size: 0.75rem;
+  }
+
+  [data-take5-register] .btn-pill {
+    min-height: 38px;
+  }
+}
+/* ==========================================================
+   VEHICLE PRESTART – MOBILE FIELD OPTIMISATION
+   ========================================================== */
+@media (max-width: 768px) {
+  [data-vehicle-prestart] .card {
+    padding: 0.75rem;
+  }
+
+  [data-vehicle-prestart] .card-row-label {
+    font-size: 0.8rem;
+  }
+
+  [data-vehicle-prestart] .btn-pill {
+    min-height: 40px;
+  }
+}
+/* ==========================================================
+   VEHICLE PRESTART REGISTER – MOBILE POLISH
+   ========================================================== */
+@media (max-width: 768px) {
+  [data-vehicle-prestart-register] table {
+    font-size: 0.75rem;
+  }
+
+  [data-vehicle-prestart-register] .btn-pill {
+    min-height: 38px;
+  }
+}
+/* ==========================================================
+   WEATHER – MOBILE FIELD OPTIMISATION
+   ========================================================== */
+@media (max-width: 768px) {
+  [data-weather] iframe {
+    min-height: 420px !important;
+  }
+
+  [data-weather] .card {
+    padding: 0.6rem;
   }
 }

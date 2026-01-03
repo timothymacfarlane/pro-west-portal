@@ -2,7 +2,7 @@ import PageLayout from "../components/PageLayout.jsx";
 
 function Weather() {
   return (
-    <PageLayout
+    <PageLayout data-weather
       icon="🌦️"
       title="Weather"
       subtitle="Radar and marine conditions around Perth for Pro West jobs"
@@ -50,7 +50,7 @@ function Weather() {
             border: "1px solid rgba(0,0,0,0.06)",
           }}
         >
-          <iframe
+          <iframe referrerPolicy="no-referrer-when-downgrade"
             title="BOM Perth rain radar"
             src="https://www.bom.gov.au/products/IDR70B.loop.shtml"
             style={{
@@ -79,7 +79,7 @@ function Weather() {
             border: "1px solid rgba(0,0,0,0.06)",
           }}
         >
-          <iframe
+          <iframe referrerPolicy="no-referrer-when-downgrade"
             title="Seabreeze Perth wind forecast"
             src="https://www.seabreeze.com.au/weather/wind-forecast/perth#"
             style={{

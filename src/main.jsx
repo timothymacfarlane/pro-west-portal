@@ -6,11 +6,13 @@ import "./index.css";
 import { AuthProvider } from "./context/AuthContext.jsx";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
+  <>
+    {/* React.StrictMode disabled to avoid double effects during field testing */}
     <BrowserRouter>
+      {/* If deploying under a sub-path later, add basename here */}
       <AuthProvider>
         <App />
       </AuthProvider>
     </BrowserRouter>
-  </React.StrictMode>
+  </>
 );

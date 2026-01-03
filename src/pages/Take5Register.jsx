@@ -82,7 +82,7 @@ function Take5Register() {
   };
 
   return (
-    <PageLayout
+    <PageLayout data-take5-register
       icon="📋"
       title="Take 5 Register"
       subtitle="List of submitted Take 5s with links to PDFs"
@@ -96,6 +96,8 @@ function Take5Register() {
           <span className="card-row-label">Job number</span>
           <input
             type="text"
+            inputMode="numeric"
+            aria-label="Filter by job number"
             value={jobFilter}
             onChange={(e) => setJobFilter(e.target.value)}
             className="maps-search-input"
@@ -152,6 +154,7 @@ function Take5Register() {
                   {/* Job header */}
                   <button
                     type="button"
+                    aria-label={`Toggle job ${jobNumber}`}
                     onClick={() => toggleJob(jobNumber)}
                     style={{
                       width: "100%",
@@ -177,7 +180,7 @@ function Take5Register() {
                   {/* Job body */}
                   {expanded && (
                     <div style={{ padding: "0.6rem 0.8rem", background: "#fafafa" }}>
-                      <div style={{ overflowX: "auto" }}>
+                      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
                         <table
                           style={{
                             width: "100%",

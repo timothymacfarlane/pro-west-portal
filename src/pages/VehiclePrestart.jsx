@@ -703,7 +703,7 @@ function VehiclePrestart() {
   }, []);
 
   return (
-    <PageLayout
+    <PageLayout data-vehicle-prestart
       icon="🚗"
       title="Vehicle Pre Start"
       subtitle="Vehicle Checklist"
@@ -737,6 +737,7 @@ function VehiclePrestart() {
               type="text"
               value={vehicle}
               onChange={(e) => setVehicle(e.target.value)}
+              aria-label="Vehicle registration"
               placeholder="Registration #"
               className="maps-search-input"
               style={{ maxWidth: "260px" }}
@@ -749,6 +750,8 @@ function VehiclePrestart() {
               type="number"
               value={odometer}
               onChange={(e) => setOdometer(e.target.value)}
+              aria-label="Odometer reading"
+              inputMode="numeric"
               placeholder="km"
               className="maps-search-input"
               style={{ maxWidth: "160px" }}
@@ -762,6 +765,7 @@ function VehiclePrestart() {
               type="text"
               value={lastService}
               onChange={(e) => setLastService(e.target.value)}
+              aria-label="Last service date"
               placeholder="e.g. 10 February 2025"
               className="maps-search-input"
               style={{ maxWidth: "220px" }}
@@ -774,6 +778,7 @@ function VehiclePrestart() {
               type="text"
               value={nextService}
               onChange={(e) => setNextService(e.target.value)}
+              aria-label="Next service date"
               placeholder="e.g. 10 August 2025"
               className="maps-search-input"
               style={{ maxWidth: "220px" }}
@@ -861,6 +866,7 @@ function VehiclePrestart() {
           rows={4}
           className="maps-search-input"
           style={{ width: "100%", marginTop: "0.4rem", resize: "vertical" }}
+          aria-label="Vehicle damage or comments"
           placeholder="Describe any issues found during the pre-start…"
         />
 

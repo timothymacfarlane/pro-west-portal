@@ -86,7 +86,7 @@ function VehiclePrestartRegister() {
   };
 
   return (
-    <PageLayout
+    <PageLayout data-vehicle-prestart-register
       icon="📋"
       title="Vehicle Pre Start Register"
       subtitle="List of submitted vehicle pre-starts"
@@ -101,6 +101,8 @@ function VehiclePrestartRegister() {
           <span className="card-row-label">Vehicle</span>
           <input
             type="text"
+            inputMode="text"
+            aria-label="Filter by vehicle registration"
             value={vehicleFilter}
             onChange={(e) => setVehicleFilter(e.target.value)}
             className="maps-search-input"
@@ -166,6 +168,7 @@ function VehiclePrestartRegister() {
                   {/* Vehicle header */}
                   <button
                     type="button"
+                    aria-label={`Toggle vehicle ${vehicleLabel}`}
                     onClick={() => toggleVehicle(vehicleLabel)}
                     style={{
                       width: "100%",
@@ -196,7 +199,7 @@ function VehiclePrestartRegister() {
                         background: "#fafafa",
                       }}
                     >
-                      <div style={{ overflowX: "auto" }}>
+                      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
                         <table
                           style={{
                             width: "100%",

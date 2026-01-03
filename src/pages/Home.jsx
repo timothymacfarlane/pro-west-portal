@@ -7,13 +7,13 @@ function Home() {
       title="Home"
       subtitle="Quick overview of Pro West operations"
       actions={
-        <>
+        <div className="home-actions">
           <button className="btn-pill primary">Today</button>
           <button className="btn-pill">This week</button>
-        </>
+        </div>
       }
     >
-      <div className="card">
+      <div className="card" data-home-card>
         <h3 className="card-title">Welcome to ProWest Portal</h3>
         <p className="card-subtitle">
           Use the navigation on the left to access jobs, maps, schedule, forms and more.

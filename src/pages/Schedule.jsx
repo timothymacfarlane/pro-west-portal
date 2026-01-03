@@ -4,16 +4,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabaseClient";
 
 // --- Statuses & colours ---
-
-const STATUSES = [
-  "FIELD",
-  "OFFICE",
-  "AWAY",
-  "LEAVE",
-  "COURSE",
-  "HOLD",
-  "NON-WORK",
-];
+const STATUSES = ["FIELD", "OFFICE", "AWAY", "LEAVE", "COURSE", "HOLD", "NON-WORK"];
 
 const PALETTE = {
   OFFICE: "#c6f5b2ff",
@@ -33,12 +24,6 @@ const PALETTE = {
   FIELD_TOUCHED_BG: "#E3F2FD",
   FIELD_TOUCHED_BORDER: "#90CAF9",
 };
-
-// UPDATE THESE to your real admin emails
-const ADMIN_EMAILS = [
-  "tim@prowestsurveying.com.au",
-  // "director@prowestsurveying.com.au",
-];
 
 function getMonday(date) {
   const d = new Date(date);
@@ -63,7 +48,6 @@ function formatISO(date) {
 }
 
 // --- Weather helpers (Open-Meteo for Perth) ---
-
 function weatherIcon(code) {
   if (code === 0) return "☀";
   if (code === 1 || code === 2) return "⛅";
@@ -76,7 +60,6 @@ function weatherIcon(code) {
   if (code >= 95) return "⛈";
   return "·";
 }
-
 function weatherPhrase(code) {
   if (code === 0) return "Sunny";
   if (code === 1 || code === 2) return "Partly cloudy";
@@ -91,12 +74,9 @@ function weatherPhrase(code) {
 }
 
 function Schedule() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
 
-  const [currentMonday, setCurrentMonday] = useState(() =>
-    getMonday(new Date())
-  );
-
+  const [currentMonday, setCurrentMonday] = useState(() => getMonday(new Date()));
   const [people, setPeople] = useState([]);
   const [assignments, setAssignments] = useState({});
   const [loading, setLoading] = useState(false);
@@ -109,9 +89,6 @@ function Schedule() {
   const [weatherByDate, setWeatherByDate] = useState({});
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherError, setWeatherError] = useState("");
-
-  const isAdmin =
-    !!user && !!user.email && ADMIN_EMAILS.includes(user.email.toLowerCase());
 
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(currentMonday, i)),
@@ -129,7 +106,7 @@ function Schedule() {
 
   const weekStartISO = formatISO(currentMonday);
 
-  // ✅ Load people from PROFILES using display_name
+  // Load staff list for schedule
   useEffect(() => {
     let cancelled = false;
 
@@ -138,7 +115,7 @@ function Schedule() {
       try {
         const { data, error } = await supabase
           .from("profiles")
-          .select("id, display_name, is_active, show_in_schedule")
+          .select("id, display_name, email, is_active, show_in_schedule")
           .eq("is_active", true)
           .eq("show_in_schedule", true)
           .order("display_name", { ascending: true });
@@ -149,7 +126,7 @@ function Schedule() {
         const normalized = (data || [])
           .map((p) => ({
             id: p.id,
-            name: p.display_name || "Unnamed",
+            name: p.display_name || p.email || "Unnamed",
           }))
           .filter((p) => p.id);
 
@@ -157,8 +134,7 @@ function Schedule() {
       } catch (err) {
         console.error("Error loading profiles for schedule:", err);
         if (!cancelled) {
-          const msg =
-            err?.message || err?.details || err?.hint || "Unknown Supabase error";
+          const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
           setError(`Could not load staff list for schedule. (${msg})`);
           setPeople([]);
         }
@@ -166,13 +142,11 @@ function Schedule() {
     };
 
     loadPeople();
-
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // ✅ Fix sortedPeople return
   const sortedPeople = useMemo(() => {
     if (!people || people.length === 0) return [];
     const specialName = "Pro West Survey";
@@ -260,9 +234,7 @@ function Schedule() {
           const icon = weatherIcon(code);
           const phrase = weatherPhrase(code);
 
-          const line1 = `${Math.round(tmin[i])}°C–${Math.round(
-            tmax[i]
-          )}°C ${icon}`;
+          const line1 = `${Math.round(tmin[i])}°C–${Math.round(tmax[i])}°C ${icon}`;
 
           const parts2 = [];
           if (phrase) parts2.push(phrase);
@@ -299,17 +271,14 @@ function Schedule() {
     setCurrentMonday((prev) => addDays(prev, -7));
     setSelectedCell(null);
   };
-
   const handleNextWeek = () => {
     setCurrentMonday((prev) => addDays(prev, 7));
     setSelectedCell(null);
   };
-
   const handleThisWeek = () => {
     setCurrentMonday(getMonday(new Date()));
     setSelectedCell(null);
   };
-
   const handleWeekDateChange = (e) => {
     const v = e.target.value;
     if (!v) return;
@@ -403,7 +372,6 @@ function Schedule() {
     }
   }, [selectedCell, assignments]);
 
-  // ✅ SAVE (dot-corruptions fixed)
   const handleSave = async () => {
     if (!selectedCell || !isAdmin) return;
     setSaving(true);
@@ -412,24 +380,6 @@ function Schedule() {
     try {
       const key = `${selectedCell.dateISO}|${selectedCell.personId}`;
       const existing = assignments[key];
-
-      const allBlank =
-        !editStatus && !editRegion && !editJobRef && !editNotes && existing;
-
-      if (allBlank) {
-        const { error } = await supabase
-          .from("schedule_assignments")
-          .delete()
-          .eq("id", existing.id);
-
-        if (error) throw error;
-
-        const newMap = { ...assignments };
-        delete newMap[key];
-        setAssignments(newMap);
-        setSelectedCell(null);
-        return;
-      }
 
       if (existing) {
         const updatePayload = {
@@ -449,11 +399,7 @@ function Schedule() {
           .single();
 
         if (error) throw error;
-
-        setAssignments((prev) => ({
-          ...prev,
-          [key]: data,
-        }));
+        setAssignments((prev) => ({ ...prev, [key]: data }));
       } else {
         const insertPayload = {
           date: selectedCell.dateISO,
@@ -472,17 +418,11 @@ function Schedule() {
           .single();
 
         if (error) throw error;
-
-        setAssignments((prev) => ({
-          ...prev,
-          [key]: data,
-        }));
+        setAssignments((prev) => ({ ...prev, [key]: data }));
       }
     } catch (err) {
       console.error("Error saving assignment:", err);
-      // show underlying message to diagnose RLS if any
-      const msg =
-        err?.message || err?.details || err?.hint || "Unknown Supabase error";
+      const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
       setError(`Could not save this assignment. (${msg})`);
     } finally {
       setSaving(false);
@@ -518,8 +458,7 @@ function Schedule() {
       setSelectedCell(null);
     } catch (err) {
       console.error("Error clearing assignment:", err);
-      const msg =
-        err?.message || err?.details || err?.hint || "Unknown Supabase error";
+      const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
       setError(`Could not clear this assignment. (${msg})`);
     } finally {
       setSaving(false);
@@ -556,30 +495,18 @@ function Schedule() {
     <PageLayout
       icon="📅"
       title="Schedule"
-      subtitle={
-        isAdmin
-          ? "Weekly schedule – click a cell to edit (admins only)"
-          : "Weekly schedule – view only"
-      }
+      subtitle={isAdmin ? "Weekly schedule – click a cell to edit" : "Weekly schedule – view only"}
     >
       <div className="card schedule-card">
         <div className="schedule-header">
           <div className="schedule-week-label">
             Week of&nbsp;<strong>{weekLabel}</strong>
-            {loading && (
-              <span style={{ marginLeft: "0.5rem", fontSize: "0.75rem" }}>
-                Loading…
-              </span>
-            )}
+            {loading && <span style={{ marginLeft: "0.5rem", fontSize: "0.75rem" }}>Loading…</span>}
             {weatherLoading && (
-              <span style={{ marginLeft: "0.5rem", fontSize: "0.7rem" }}>
-                (weather updating…)
-              </span>
+              <span style={{ marginLeft: "0.5rem", fontSize: "0.7rem" }}>(weather updating…)</span>
             )}
             {weatherError && !weatherLoading && (
-              <span style={{ marginLeft: "0.5rem", fontSize: "0.7rem" }}>
-                (weather unavailable)
-              </span>
+              <span style={{ marginLeft: "0.5rem", fontSize: "0.7rem" }}>(weather unavailable)</span>
             )}
           </div>
 
@@ -594,14 +521,7 @@ function Schedule() {
               Next week ▶
             </button>
 
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.25rem",
-                fontSize: "0.75rem",
-              }}
-            >
+            <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", fontSize: "0.75rem" }}>
               <span>Select week:</span>
               <input
                 type="date"
@@ -611,293 +531,95 @@ function Schedule() {
               />
             </div>
 
-            <button
-              type="button"
-              className="btn-pill"
-              onClick={() => setIsFlipped((v) => !v)}
-            >
+            <button type="button" className="btn-pill" onClick={() => setIsFlipped((v) => !v)}>
               {isFlipped ? "Normal view" : "Flip orientation"}
             </button>
 
-            <button
-              type="button"
-              className="btn-pill"
-              onClick={() => window.print()}
-            >
+            <button type="button" className="btn-pill" onClick={() => window.print()}>
               Print PDF
             </button>
           </div>
         </div>
 
         {error && (
-          <div
-            style={{
-              marginBottom: "0.5rem",
-              fontSize: "0.8rem",
-              color: "#b71c1c",
-              whiteSpace: "pre-wrap",
-            }}
-          >
+          <div style={{ marginBottom: "0.5rem", fontSize: "0.8rem", color: "#b71c1c", whiteSpace: "pre-wrap" }}>
             {error}
           </div>
         )}
 
-        <div className="schedule-grid-wrapper">
-          {!isFlipped ? (
-            <table className="schedule-grid">
-              <thead>
-                <tr>
-                  <th className="schedule-col-person">Staff</th>
-                  {weekDays.map((d) => {
-                    const iso = formatISO(d);
-                    const wx = weatherByDate[iso];
-                    return (
-                      <th key={iso} className="schedule-col-day">
-                        <div className="schedule-day-label">
-                          <span className="schedule-day-name">
-                            {d.toLocaleDateString("en-AU", {
-                              weekday: "short",
-                            })}
-                          </span>
-                          <span className="schedule-day-date">
-                            {d.toLocaleDateString("en-AU", {
-                              day: "numeric",
-                              month: "short",
-                            })}
-                          </span>
-                          {wx && (
-                            <span className="schedule-day-weather">
-                              {wx.line1}
-                            </span>
-                          )}
-                        </div>
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {sortedPeople.map((p) => (
-                  <tr key={p.id}>
-                    <td className="schedule-person-cell">
-                      <div className="schedule-person-avatar">
-                        {getInitialsFromName(p.name)}
-                      </div>
-                      <div className="schedule-person-name">{p.name}</div>
-                    </td>
-                    {weekDays.map((d) => {
-                      const cell = getCellVisual(d, p.id);
-                      const isSelected =
-                        selectedCell &&
-                        selectedCell.dateISO === cell.dateISO &&
-                        selectedCell.personId === p.id;
-
-                      const tooltipText = buildTooltip(p.name, cell);
-
-                      return (
-                        <td
-                          key={cell.dateISO + "|" + p.id}
-                          className={
-                            "schedule-cell" +
-                            (cell.isWeekend ? " schedule-weekend" : "") +
-                            (isSelected ? " schedule-selected" : "")
-                          }
-                          style={{
-                            backgroundColor: cell.bg,
-                            border: `1px solid ${
-                              cell.border || PALETTE.GRID_LINE
-                            }`,
-                            cursor: isAdmin ? "pointer" : "default",
-                          }}
-                          onClick={() => onCellClick(cell.dateISO, p.id)}
-                          title={tooltipText}
-                        >
-                          <div
-                            className="schedule-cell-status"
-                            style={{ color: cell.statusColor }}
-                          >
-                            {cell.status}
-                          </div>
-                          {cell.region && (
-                            <div className="schedule-cell-region">
-                              {cell.region}
-                            </div>
-                          )}
-                          {cell.job_ref && (
-                            <div className="schedule-cell-job">
-                              Job: {cell.job_ref}
-                            </div>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <table className="schedule-grid">
-              <thead>
-                <tr>
-                  <th className="schedule-col-person">Day</th>
-                  {sortedPeople.map((p) => (
-                    <th key={p.id} className="schedule-col-day">
-                      <div className="schedule-flipped-header-person">
-                        <div className="schedule-person-avatar">
-                          {getInitialsFromName(p.name)}
-                        </div>
-                        <div className="schedule-flipped-person-name">
-                          {p.name}
-                        </div>
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
+        <div className="schedule-grid-wrapper" style={{ WebkitOverflowScrolling: "touch" }}>
+          <table className="schedule-grid">
+            <thead>
+              <tr>
+                <th className="schedule-col-person">Staff</th>
                 {weekDays.map((d) => {
                   const iso = formatISO(d);
                   const wx = weatherByDate[iso];
                   return (
-                    <tr key={iso}>
-                      <td className="schedule-person-cell">
-                        <div className="schedule-person-name">
-                          {d.toLocaleDateString("en-AU", {
-                            weekday: "short",
-                            day: "numeric",
-                            month: "short",
-                          })}
-                        </div>
-                        {wx && (
-                          <div className="schedule-day-weather">
-                            {wx.line1}
-                          </div>
-                        )}
-                      </td>
-                      {sortedPeople.map((p) => {
-                        const cell = getCellVisual(d, p.id);
-                        const isSelected =
-                          selectedCell &&
-                          selectedCell.dateISO === cell.dateISO &&
-                          selectedCell.personId === p.id;
-
-                        const tooltipText = buildTooltip(p.name, cell);
-
-                        return (
-                          <td
-                            key={cell.dateISO + "|" + p.id}
-                            className={
-                              "schedule-cell" +
-                              (cell.isWeekend ? " schedule-weekend" : "") +
-                              (isSelected ? " schedule-selected" : "")
-                            }
-                            style={{
-                              backgroundColor: cell.bg,
-                              border: `1px solid ${
-                                cell.border || PALETTE.GRID_LINE
-                              }`,
-                              cursor: isAdmin ? "pointer" : "default",
-                            }}
-                            onClick={() => onCellClick(cell.dateISO, p.id)}
-                            title={tooltipText}
-                          >
-                            <div
-                              className="schedule-cell-status"
-                              style={{ color: cell.statusColor }}
-                            >
-                              {cell.status}
-                            </div>
-                            {cell.region && (
-                              <div className="schedule-cell-region">
-                                {cell.region}
-                              </div>
-                            )}
-                            {cell.job_ref && (
-                              <div className="schedule-cell-job">
-                                Job: {cell.job_ref}
-                              </div>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
+                    <th key={iso} className="schedule-col-day">
+                      <div className="schedule-day-label">
+                        <span className="schedule-day-name">
+                          {d.toLocaleDateString("en-AU", { weekday: "short" })}
+                        </span>
+                        <span className="schedule-day-date">
+                          {d.toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
+                        </span>
+                        {wx && <span className="schedule-day-weather">{wx.line1}</span>}
+                      </div>
+                    </th>
                   );
                 })}
-              </tbody>
-            </table>
-          )}
-        </div>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedPeople.map((p) => (
+                <tr key={p.id}>
+                  <td className="schedule-person-cell">
+                    <div className="schedule-person-avatar">{getInitialsFromName(p.name)}</div>
+                    <div className="schedule-person-name">{p.name}</div>
+                  </td>
+                  {weekDays.map((d) => {
+                    const cell = getCellVisual(d, p.id);
+                    const isSelected =
+                      selectedCell &&
+                      selectedCell.dateISO === cell.dateISO &&
+                      selectedCell.personId === p.id;
 
-        <div className="schedule-legend">
-          <div className="schedule-legend-item">
-            <span
-              className="schedule-legend-swatch"
-              style={{
-                backgroundColor: PALETTE.FIELD_BG,
-                borderColor: PALETTE.FIELD_BORDER,
-              }}
-            />
-            <span style={{ color: "#E57373" }}>FIELD – not yet set</span>
-          </div>
-          <div className="schedule-legend-item">
-            <span
-              className="schedule-legend-swatch"
-              style={{
-                backgroundColor: PALETTE.FIELD_TOUCHED_BG,
-                borderColor: PALETTE.FIELD_TOUCHED_BORDER,
-              }}
-            />
-            <span>FIELD – set</span>
-          </div>
-          <div className="schedule-legend-item">
-            <span
-              className="schedule-legend-swatch"
-              style={{ backgroundColor: PALETTE.OFFICE }}
-            />
-            <span>OFFICE</span>
-          </div>
-          <div className="schedule-legend-item">
-            <span
-              className="schedule-legend-swatch"
-              style={{ backgroundColor: PALETTE.AWAY }}
-            />
-            <span>AWAY</span>
-          </div>
-          <div className="schedule-legend-item">
-            <span
-              className="schedule-legend-swatch"
-              style={{ backgroundColor: PALETTE.LEAVE }}
-            />
-            <span>LEAVE</span>
-          </div>
-          <div className="schedule-legend-item">
-            <span
-              className="schedule-legend-swatch"
-              style={{ backgroundColor: PALETTE.COURSE }}
-            />
-            <span>COURSE</span>
-          </div>
-          <div className="schedule-legend-item">
-            <span
-              className="schedule-legend-swatch"
-              style={{ backgroundColor: PALETTE.HOLD }}
-            />
-            <span>HOLD</span>
-          </div>
-          <div className="schedule-legend-item">
-            <span
-              className="schedule-legend-swatch"
-              style={{ backgroundColor: PALETTE["NON-WORK"] }}
-            />
-            <span>NON-WORK</span>
-          </div>
+                    const tooltipText = buildTooltip(p.name, cell);
+
+                    return (
+                      <td
+                        key={cell.dateISO + "|" + p.id}
+                        className={
+                          "schedule-cell" +
+                          (cell.isWeekend ? " schedule-weekend" : "") +
+                          (isSelected ? " schedule-selected" : "")
+                        }
+                        style={{
+                          backgroundColor: cell.bg,
+                          border: `1px solid ${cell.border || PALETTE.GRID_LINE}`,
+                          cursor: isAdmin ? "pointer" : "default",
+                        }}
+                        onClick={() => onCellClick(cell.dateISO, p.id)}
+                        title={tooltipText}
+                      >
+                        <div className="schedule-cell-status" style={{ color: cell.statusColor }}>
+                          {cell.status}
+                        </div>
+                        {cell.region && <div className="schedule-cell-region">{cell.region}</div>}
+                        {cell.job_ref && <div className="schedule-cell-job">Job: {cell.job_ref}</div>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
         <p className="schedule-footer-note">
           Logged in as <strong>{user?.email}</strong>.{" "}
-          {isAdmin
-            ? "You have admin editing rights."
-            : "You have view-only access."}
+          {isAdmin ? "You have admin editing rights." : "You have view-only access."}
         </p>
       </div>
 
@@ -905,9 +627,7 @@ function Schedule() {
         <div className="card schedule-editor-card">
           <h3 className="card-title">Edit assignment</h3>
           <p className="card-subtitle">
-            {sortedPeople.find((p) => p.id === selectedCell.personId)?.name ||
-              "Staff"}{" "}
-            –{" "}
+            {sortedPeople.find((p) => p.id === selectedCell.personId)?.name || "Staff"} –{" "}
             {new Date(selectedCell.dateISO).toLocaleDateString("en-AU", {
               weekday: "long",
               day: "numeric",
@@ -919,11 +639,7 @@ function Schedule() {
           <div className="schedule-editor-grid">
             <div className="schedule-editor-row">
               <label className="schedule-editor-label">Status</label>
-              <select
-                className="maps-search-input"
-                value={editStatus}
-                onChange={(e) => setEditStatus(e.target.value)}
-              >
+              <select className="maps-search-input" value={editStatus} onChange={(e) => setEditStatus(e.target.value)}>
                 {STATUSES.map((st) => (
                   <option key={st} value={st}>
                     {st}
@@ -939,7 +655,7 @@ function Schedule() {
                 type="text"
                 value={editRegion}
                 onChange={(e) => setEditRegion(e.target.value)}
-                placeholder="e.g. METRO NORTH / WATER BORRANUP"
+                placeholder="e.g. METRO NORTH"
               />
             </div>
 
@@ -966,36 +682,14 @@ function Schedule() {
             </div>
           </div>
 
-          <div
-            style={{
-              marginTop: "0.6rem",
-              display: "flex",
-              gap: "0.5rem",
-              flexWrap: "wrap",
-            }}
-          >
-            <button
-              type="button"
-              className="btn-pill primary"
-              onClick={handleSave}
-              disabled={saving}
-            >
+          <div style={{ marginTop: "0.6rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <button type="button" className="btn-pill primary" onClick={handleSave} disabled={saving}>
               {saving ? "Saving…" : "Save"}
             </button>
-            <button
-              type="button"
-              className="btn-pill"
-              onClick={handleClear}
-              disabled={saving}
-            >
+            <button type="button" className="btn-pill" onClick={handleClear} disabled={saving}>
               Clear / remove
             </button>
-            <button
-              type="button"
-              className="btn-pill"
-              onClick={() => setSelectedCell(null)}
-              disabled={saving}
-            >
+            <button type="button" className="btn-pill" onClick={() => setSelectedCell(null)} disabled={saving}>
               Close
             </button>
           </div>
