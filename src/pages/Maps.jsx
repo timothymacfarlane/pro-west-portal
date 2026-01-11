@@ -316,7 +316,7 @@ function buildPopupHtmlExample({ layerTag, name, props }) {
 
   return `
     <div style="font-family: Inter, sans-serif; font-size: 13px; min-width: 240px;">
-      <div style="font-weight:800; font-size:14px; margin-bottom:8px; color:#111;">
+      <div data-pw-drag-handle="1" style="font-weight:800; font-size:14px; margin-bottom:8px; color:#111;">
         ${layerTag} – ${name || ""}
       </div>
 
@@ -443,6 +443,83 @@ function isSmallScreen() {
   );
 }
 
+
+/* ================================
+   ✅ Draggable InfoWindows (field-friendly)
+   - Applies to the most recently opened InfoWindow.
+   - Drag handle: the top row of the popup content.
+   ================================ */
+function makeLatestInfoWindowDraggable() {
+  try {
+    const nodes = Array.from(document.querySelectorAll('.gm-style-iw-c, .gm-style-iw'));
+    if (!nodes.length) return;
+
+    const iwc = nodes[nodes.length - 1];
+    if (!iwc || iwc.dataset.pwDraggable === "1") return;
+    iwc.dataset.pwDraggable = "1";
+
+    const handle =
+      iwc.querySelector('[data-pw-drag-handle="1"]') ||
+      iwc.querySelector("div") ||
+      iwc;
+
+    handle.style.cursor = "grab";
+    handle.style.userSelect = "none";
+    handle.style.touchAction = "none";
+
+    let startX = 0;
+    let startY = 0;
+    let baseX = 0;
+    let baseY = 0;
+    let dragging = false;
+
+    const readBase = () => {
+      const tx = Number(iwc.dataset.pwTx || "0");
+      const ty = Number(iwc.dataset.pwTy || "0");
+      baseX = Number.isFinite(tx) ? tx : 0;
+      baseY = Number.isFinite(ty) ? ty : 0;
+    };
+
+    const onDown = (ev) => {
+      const e = ev;
+      dragging = true;
+      handle.style.cursor = "grabbing";
+      startX = e.clientX;
+      startY = e.clientY;
+      readBase();
+      ev.preventDefault?.();
+      ev.stopPropagation?.();
+    };
+
+    const onMove = (ev) => {
+      if (!dragging) return;
+      const e = ev;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      const nx = baseX + dx;
+      const ny = baseY + dy;
+      iwc.style.transform = `translate(${nx}px, ${ny}px)`;
+      iwc.dataset.pwTx = String(nx);
+      iwc.dataset.pwTy = String(ny);
+      ev.preventDefault?.();
+      ev.stopPropagation?.();
+    };
+
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      handle.style.cursor = "grab";
+    };
+
+    handle.addEventListener("pointerdown", onDown, { passive: false });
+window.addEventListener("pointermove", onMove, { passive: false });
+window.addEventListener("pointerup", onUp, { passive: true });
+window.addEventListener("pointercancel", onUp, { passive: true });
+  } catch {
+    // ignore
+  }
+}
+
 /* ================================
    ✅ Persisted state helpers
    ================================ */
@@ -539,6 +616,10 @@ function Maps() {
   const measurePolyRef = useRef(null);
   const measureLiveIWRef = useRef(null);
   const measureFinalIWRef = useRef(null);
+  const lastMeasureSummaryRef = useRef(null);
+  const lastMeasureLatLngRef = useRef(null);
+  const lastMeasureSavedRef = useRef(false);
+  const measureOverlaysByNoteIdRef = useRef(new Map());
 
 
   // ✅ Map Notes (synced via Supabase, cached locally for fast startup/offline)
@@ -632,6 +713,41 @@ function Maps() {
     typeof restoredState.panelOpen === "boolean" ? restoredState.panelOpen : true
   );
 
+  // Mobile-only: retractable Notes/Jobs panel as a bottom drawer (does not affect desktop)
+  const [isMobile, setIsMobile] = useState(() => {
+    try {
+      return typeof window !== "undefined" && window.innerWidth <= 900;
+    } catch {
+      return false;
+    }
+  });
+  const [mobilePanelCollapsed, setMobilePanelCollapsed] = useState(false);
+
+  useEffect(() => {
+    const onResize = () => {
+      try {
+        const mobile = typeof window !== "undefined" && window.innerWidth <= 900;
+        setIsMobile(mobile);
+        if (!mobile) setMobilePanelCollapsed(false); // never hide panel on desktop
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    // Default to collapsed on mobile so the map is usable immediately in the field
+    try {
+      if (isMobile) setMobilePanelCollapsed(true);
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile]);
+
+
   // Jobs search (portal jobs)
   const [jobNumberQuery, setJobNumberQuery] = useState(() => restoredState.jobNumberQuery || "");
   const [jobPicked, setJobPicked] = useState(() => !!restoredState.jobPicked);
@@ -642,6 +758,8 @@ function Maps() {
   const [portalSelectedJobId, setPortalSelectedJobId] = useState(
     () => restoredState.portalSelectedJobId || null
   );
+  const portalSelectedJobIdRef = useRef(null);
+  const selectedPortalJobNumberRef = useRef("");
 
   // Portal jobs fetch state
   const [portalJobs, setPortalJobs] = useState([]);
@@ -665,7 +783,7 @@ function Maps() {
       setNotesSyncError("");
       const { data, error } = await supabase
         .from("map_notes")
-        .select("id, text, lat, lng, created_at, created_by, created_by_name, job_id, job_number")
+        .select("id, text, lat, lng, created_at, created_by, created_by_name, job_id, job_number, measure_mode, measure_path")
         .order("created_at", { ascending: false })
         .limit(500);
 
@@ -861,6 +979,63 @@ function Maps() {
     const note = (visibleNotes || []).find((n) => n.id === id);
     if (!note) return;
 
+
+    // Show measurement overlay (if this note has one) and hide others
+    try {
+      for (const [, ov] of measureOverlaysByNoteIdRef.current.entries()) {
+        try {
+          ov.setMap(null);
+        } catch {}
+      }
+
+      // Build overlay on demand from persisted geometry
+      let ov = measureOverlaysByNoteIdRef.current.get(id);
+      if (!ov && note.measure_path && Array.isArray(note.measure_path) && note.measure_path.length >= 2) {
+        const pts = note.measure_path
+          .map((p) => {
+            const lat = Number(p?.lat);
+            const lng = Number(p?.lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+            return new window.google.maps.LatLng(lat, lng);
+          })
+          .filter(Boolean);
+
+        if (pts.length >= 2) {
+          const mode = note.measure_mode || "distance";
+          if (mode === "area") {
+            ov = new window.google.maps.Polygon({
+              map: null,
+              paths: pts,
+              strokeColor: "#d32f2f",
+              strokeOpacity: 1,
+              strokeWeight: 2,
+              fillColor: "#d32f2f",
+              fillOpacity: 0.12,
+              clickable: false,
+            });
+          } else {
+            ov = new window.google.maps.Polyline({
+              map: null,
+              path: pts,
+              strokeColor: "#d32f2f",
+              strokeOpacity: 1,
+              strokeWeight: 2,
+              clickable: false,
+            });
+          }
+          measureOverlaysByNoteIdRef.current.set(id, ov);
+        }
+      }
+
+      if (ov) {
+        try {
+          ov.setMap(map);
+        } catch {}
+      }
+    } catch {
+      // ignore
+    }
+
     const canManageNote =
       !!currentUserIsAdmin ||
       (currentUserId && String(note.created_by || "") === String(currentUserId)) ||
@@ -882,7 +1057,7 @@ function Maps() {
 
     const html = `
       <div style="font-family: Inter, system-ui, sans-serif; font-size: 12px; min-width: 220px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <div data-pw-drag-handle="1" style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
           <div style="font-weight:950; font-size:13px; color:#111;">📝 Note</div>
           ${canManageNote ? `<button id="note-edit-${id}"
             style="border:2px solid #111; background:#111; color:#fff; font-weight:900; border-radius:8px;
@@ -934,6 +1109,7 @@ function Maps() {
     }
 
     window.google.maps.event.addListenerOnce(noteInfoWindowRef.current, "domready", () => {
+      setTimeout(makeLatestInfoWindowDraggable, 0);
       const delBtn = document.getElementById(`note-del-${id}`);
       if (delBtn) delBtn.onclick = () => deleteNoteById(id);
 
@@ -1031,19 +1207,19 @@ function Maps() {
 
     const html = `
       <div style="font-family: Inter, system-ui, sans-serif; font-size: 12px; min-width: 240px;">
-        <div style="font-weight:950; font-size:13px; color:#111;">New note</div>
+        <div data-pw-drag-handle="1" style="font-weight:950; font-size:13px; color:#111;">New note</div>
         <textarea id="note-textarea"
           rows="4"
           placeholder="Type your note…"
           style="width:100%; margin-top:8px; padding:8px; border-radius:10px; border:2px solid #111; font-size:12px; box-sizing:border-box; resize:vertical;"></textarea>
         ${
-          portalSelectedJobId
-            ? `<label style="display:flex; gap:8px; align-items:center; margin-top:8px; font-weight:900; color:#111;">
-                 <input id="note-attach-job" type="checkbox" checked />
-                 Attach to Job #${selectedPortalJobNumber || ""}
-               </label>`
-            : `<input id="note-attach-job" type="checkbox" style="display:none" />`
-        }
+            selectedPortalJobNumber
+              ? `<label style="display:flex; gap:8px; align-items:center; margin-top:8px; font-weight:900; color:#111;">
+                   <input id="note-attach-job" type="checkbox" checked />
+                   Attach to Job #${selectedPortalJobNumberRef.current}
+                 </label>`
+              : ``
+          }
 
         <div style="display:flex; gap:8px; margin-top:8px;">
           <button id="note-cancel"
@@ -1063,6 +1239,7 @@ function Maps() {
     noteComposerIWRef.current.open({ map });
 
     window.google.maps.event.addListenerOnce(noteComposerIWRef.current, "domready", () => {
+      setTimeout(makeLatestInfoWindowDraggable, 0);
       const ta = document.getElementById("note-textarea");
       const saveBtn = document.getElementById("note-save");
       const cancelBtn = document.getElementById("note-cancel");
@@ -1100,15 +1277,18 @@ function Maps() {
             };
 
             // Optional: attach to the currently selected job (recommended)
-            if (attachToJob && portalSelectedJobId) {
-              notePayload.job_id = portalSelectedJobId;
-              if (selectedPortalJobNumber) notePayload.job_number = selectedPortalJobNumber;
+            const jobIdToAttach = portalSelectedJobIdRef.current;
+            const jobNumToAttach = selectedPortalJobNumberRef.current;
+            if (attachToJob && jobIdToAttach) {
+              notePayload.job_id = jobIdToAttach;
+              if (jobNumToAttach) notePayload.job_number = jobNumToAttach;
+              else notePayload.job_number = null;
             }
 
             const { data, error } = await supabase
               .from("map_notes")
               .insert(notePayload)
-              .select("id, text, lat, lng, created_at, created_by, created_by_name, job_id, job_number")
+              .select("id, text, lat, lng, created_at, created_by, created_by_name, job_id, job_number, measure_mode, measure_path")
               .single();
 
             if (error) throw error;
@@ -1223,7 +1403,12 @@ function Maps() {
     return (portalJobs || []).find((j) => String(j.id) === String(portalSelectedJobId)) || null;
   }, [portalSelectedJobId, portalJobs]);
 
-  const selectedPortalJobNumber = selectedPortalJob?.job_number ?? "";
+  const selectedPortalJobNumber = String(selectedPortalJob?.job_number ?? "");
+
+  useEffect(() => {
+    portalSelectedJobIdRef.current = portalSelectedJobId || null;
+    selectedPortalJobNumberRef.current = String(selectedPortalJobNumber || "");
+  }, [portalSelectedJobId, selectedPortalJobNumber]);
 
   // Notes filter: show notes for current selected job unless "Show All Notes" is ticked
   const visibleNotes = useMemo(() => {
@@ -1361,6 +1546,10 @@ function Maps() {
       const clearBtn = makeBtn("✖", "Clear measurement", "clear");
       clearBtn.style.display = "none";
 
+      const finishBtn = makeBtn("✔", "Finish measurement", "finish");
+      finishBtn.style.display = "none";
+      finishBtn.onclick = () => finishMeasure();
+
       distBtn.onclick = () => startDistanceMeasure();
       areaBtn.onclick = () => startAreaMeasure();
       locBtn.onclick = () => handleMyLocation();
@@ -1387,6 +1576,7 @@ function Maps() {
       div.appendChild(locBtn);
       div.appendChild(histBtn);
       div.appendChild(svBtn);
+      div.appendChild(finishBtn);
       div.appendChild(clearBtn);
 
       map.controls[window.google.maps.ControlPosition.TOP_LEFT].push(div);
@@ -1496,6 +1686,9 @@ function Maps() {
 
     const clearBtn = div.querySelector('button[data-action="clear"]');
     if (clearBtn) clearBtn.style.display = hasMeasure ? "grid" : "none";
+
+    const finishBtn = div.querySelector('button[data-action="finish"]');
+    if (finishBtn) finishBtn.style.display = measureMode ? "grid" : "none";
   }, [measureMode, hasMeasure]);
 
 
@@ -1593,7 +1786,7 @@ const safeLA =
 
     const html = `
       <div style="font-family: Inter, system-ui, sans-serif; font-size: 13px; min-width: 250px;">
-        <div style="font-weight:900; font-size:14px; margin-bottom:6px; color:#111;">
+        <div data-pw-drag-handle="1" style="font-weight:900; font-size:14px; margin-bottom:6px; color:#111;">
           Job #${job.job_number}
         </div>
         <div style="font-weight:800; color:#333;">
@@ -1635,6 +1828,7 @@ const safeLA =
     infoWindowRef.current.open({ anchor: marker, map });
 
     window.google.maps.event.addListenerOnce(infoWindowRef.current, "domready", () => {
+      setTimeout(makeLatestInfoWindowDraggable, 0);
       const btn = document.getElementById("open-job-register");
       if (btn) btn.onclick = () => navigate(`/jobs?job=${encodeURIComponent(job.job_number)}&from=maps&edit=1`);
 });
@@ -1997,6 +2191,157 @@ marker = new window.google.maps.Marker({
     setHasMeasure(false);
   };
 
+
+
+  const getMeasureSaveLatLng = (pathLatLngs, mode) => {
+    try {
+      if (!pathLatLngs || pathLatLngs.length === 0) return null;
+
+      // For distance, try to find the halfway point along the polyline length
+      if (
+        mode === "distance" &&
+        window.google?.maps?.geometry?.spherical &&
+        pathLatLngs.length >= 2
+      ) {
+        const spherical = window.google.maps.geometry.spherical;
+        const total = spherical.computeLength(pathLatLngs);
+        const half = total / 2;
+
+        let run = 0;
+        for (let i = 1; i < pathLatLngs.length; i++) {
+          const a = pathLatLngs[i - 1];
+          const b = pathLatLngs[i];
+          const seg = spherical.computeDistanceBetween(a, b);
+          if (run + seg >= half) {
+            const t = seg > 0 ? (half - run) / seg : 0;
+            return spherical.interpolate(a, b, t);
+          }
+          run += seg;
+        }
+        return pathLatLngs[Math.floor(pathLatLngs.length / 2)];
+      }
+
+      // For area (and as a robust fallback), use the bounds center
+      if (window.google?.maps?.LatLngBounds) {
+        const b = new window.google.maps.LatLngBounds();
+        pathLatLngs.forEach((p) => b.extend(p));
+        const c = b.getCenter();
+        return c || pathLatLngs[Math.floor(pathLatLngs.length / 2)];
+      }
+
+      return pathLatLngs[Math.floor(pathLatLngs.length / 2)];
+    } catch {
+      return pathLatLngs?.[Math.floor((pathLatLngs?.length || 1) / 2)] || null;
+    }
+  };
+
+  const saveCurrentMeasurementAsNote = async (attachToJob = true) => {
+    try {
+      const summary = lastMeasureSummaryRef.current;
+      const pos = lastMeasureLatLngRef.current;
+      if (!summary || !pos) return;
+
+
+      // Ensure we have an auth user id (RLS often requires created_by = auth.uid())
+      let authUserId = currentUserId || null;
+      let authUserName = currentUserName || null;
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (data?.user?.id) authUserId = data.user.id;
+        if (!authUserName) authUserName = data?.user?.email || data?.user?.id || "";
+      } catch {
+        // ignore
+      }
+
+      if (lastMeasureSavedRef.current) return;
+      lastMeasureSavedRef.current = true;
+
+      const lat = typeof pos.lat === "function" ? pos.lat() : pos.lat;
+      const lng = typeof pos.lng === "function" ? pos.lng() : pos.lng;
+
+      const notePayload = {
+        text: summary.plainText || "Measurement",
+        lat,
+        lng,
+        created_by: authUserId,
+        created_by_name: authUserName || null,
+        measure_mode: summary.mode || null,
+        measure_path: (measurePathRef.current || []).map((p) => ({ lat: p.lat(), lng: p.lng() })),
+      };
+
+      const jobIdToAttach = portalSelectedJobIdRef.current;
+      const jobNumToAttach = selectedPortalJobNumberRef.current;
+
+      if (attachToJob && jobIdToAttach) {
+        notePayload.job_id = jobIdToAttach;
+        if (jobNumToAttach) notePayload.job_number = jobNumToAttach;
+      }
+
+      const { data, error } = await supabase
+        .from("map_notes")
+        .insert(notePayload)
+        .select("id, text, lat, lng, created_at, created_by, created_by_name, job_id, job_number, measure_mode, measure_path")
+        .single();
+
+      if (error) throw error;
+
+
+      // Create a persistent overlay for this measurement and tie it to the note id
+      try {
+        const map = mapRef.current;
+        const summaryMode = summary?.mode;
+        const pathLatLngs = (measurePathRef.current || []).slice();
+        if (map && pathLatLngs.length >= 2) {
+          // Remove any existing overlay for this note id
+          const existing = measureOverlaysByNoteIdRef.current.get(data.id);
+          if (existing) {
+            try { existing.setMap(null); } catch {}
+          }
+
+          if (summaryMode === "distance") {
+            const pl = new window.google.maps.Polyline({
+              map: null,
+              path: pathLatLngs,
+              strokeColor: "#d32f2f",
+              strokeOpacity: 1,
+              strokeWeight: 2,
+              clickable: false,
+            });
+            measureOverlaysByNoteIdRef.current.set(data.id, pl);
+          } else if (summaryMode === "area") {
+            const pg = new window.google.maps.Polygon({
+              map: null,
+              paths: pathLatLngs,
+              strokeColor: "#d32f2f",
+              strokeOpacity: 1,
+              strokeWeight: 2,
+              fillColor: "#d32f2f",
+              fillOpacity: 0.12,
+              clickable: false,
+            });
+            measureOverlaysByNoteIdRef.current.set(data.id, pg);
+          }
+        }
+      } catch {
+        // ignore overlay errors
+      }
+
+      setMapNotes((prev) => [data, ...(prev || [])]);
+
+      setTimeout(() => {
+        try {
+          openNoteInfo(data.id, { zoom: false });
+        } catch {
+          // ignore
+        }
+      }, 0);
+    } catch (e) {
+      console.error("Save measurement note failed:", e);
+      lastMeasureSavedRef.current = false;
+      alert(`Couldn’t save measurement note: ${e?.message || "unknown error"}`);
+    }
+  };
+
   const updateLiveMeasure = (lastLatLng) => {
     const map = mapRef.current;
     const path = measurePathRef.current;
@@ -2018,14 +2363,36 @@ marker = new window.google.maps.Marker({
           : approxPolygonAreaM2(arr);
     }
 
+
+    let segmentMeters = 0;
+    if (measureModeRef.current === "distance" && path.length >= 2) {
+      const a = path[path.length - 2];
+      const b = path[path.length - 1];
+      if (window.google.maps.geometry && window.google.maps.geometry.spherical) {
+        segmentMeters = window.google.maps.geometry.spherical.computeDistanceBetween(a, b);
+      } else {
+        segmentMeters = haversineMeters(
+          { lat: a.lat(), lng: a.lng() },
+          { lat: b.lat(), lng: b.lng() }
+        );
+      }
+    }
+
     let label = "";
     if (measureModeRef.current === "distance") {
-      const meters = value;
-      label =
-        meters >= 1000
-          ? `${meters.toFixed(2)} m (${(meters / 1000).toFixed(3)} km)`
-          : `${meters.toFixed(2)} m`;
-      label = `Distance: ${label}`;
+      const totalMeters = value;
+
+      const segText =
+        segmentMeters >= 1000
+          ? `${segmentMeters.toFixed(2)} m (${(segmentMeters / 1000).toFixed(3)} km)`
+          : `${segmentMeters.toFixed(2)} m`;
+
+      const totalText =
+        totalMeters >= 1000
+          ? `${totalMeters.toFixed(2)} m (${(totalMeters / 1000).toFixed(3)} km)`
+          : `${totalMeters.toFixed(2)} m`;
+
+      label = `Segment: ${segText}<br/>Total: ${totalText}`;
     } else {
       const areaM2 = value;
       const hectares = areaM2 / 10000;
@@ -2039,27 +2406,112 @@ marker = new window.google.maps.Marker({
     if (!measureLiveIWRef.current) {
       measureLiveIWRef.current = new window.google.maps.InfoWindow();
     }
+    const hint = isSmallScreen() ? "Tap ✔ Finish to complete" : "Right-click to finish";
+    // Store last measurement summary so we can save it as a map note
+    const plainText = (() => {
+      try {
+        const tmp = String(label || "")
+          .replace(/<br\s*\/?>/gi, "\n")
+          .replace(/<[^>]+>/g, "")
+          .trim();
+        const modePrefix = measureModeRef.current === "distance" ? "Distance measurement" : "Area measurement";
+        return `${modePrefix}\n${tmp}`;
+      } catch {
+        return "Measurement";
+      }
+    })();
+    lastMeasureSummaryRef.current = { mode: measureModeRef.current, htmlLabel: label, plainText };
+    lastMeasureLatLngRef.current = lastLatLng;
     measureLiveIWRef.current.setContent(
-      `<div style="font-weight:900; font-size:13px;">${label}<br/><span style="font-weight:700; color:#666;">Right-click or double-click to finish</span></div>`
+      `<div style="font-weight:900; font-size:13px;">${label}<br/><span style="font-weight:700; color:#666;">${hint}</span></div>`
     );
     measureLiveIWRef.current.setPosition(lastLatLng);
     measureLiveIWRef.current.open(map);
   };
 
-  const finishMeasure = () => {
+    const finishMeasure = () => {
     const map = mapRef.current;
     const path = measurePathRef.current;
     if (!map || path.length < 2) return;
 
-    updateLiveMeasure(path[path.length - 1]);
+    // Render the final readout at the last point
+    const last = path[path.length - 1];
+    updateLiveMeasure(last);
+
+    // Save position: midpoint (distance: halfway along line; area: bounds center)
+    const savePos = getMeasureSaveLatLng(path, lastMeasureSummaryRef.current?.mode || "area");
+    if (savePos) lastMeasureLatLngRef.current = savePos;
 
     clearMeasureListeners();
     setHasMeasure(true);
     setMeasureMode(null);
     measureModeRef.current = null;
 
+    // Promote the live InfoWindow to the final one
     measureFinalIWRef.current = measureLiveIWRef.current;
     measureLiveIWRef.current = null;
+
+    // Reset "saved" state for this measurement
+    lastMeasureSavedRef.current = false;
+
+    // Replace content to include a Save button (touch-friendly)
+    try {
+      const summary = lastMeasureSummaryRef.current;
+      const htmlLabel = summary?.htmlLabel || "";
+      const hintFinal = isSmallScreen()
+        ? "Tap ✖ Clear to remove"
+        : "Use ✖ Clear to remove (or start a new measure)";
+
+      const btnId = `save-measure-note-${Date.now()}`;
+
+      measureFinalIWRef.current.setContent(
+        `<div data-pw-drag-handle="1" style="font-weight:900; font-size:13px;">
+          ${htmlLabel}<br/>
+          ${
+            selectedPortalJobNumberRef.current
+              ? `<label style="display:flex; gap:8px; align-items:center; margin-top:8px; font-weight:900; color:#111;">
+                   <input id="save-measure-attach-job" type="checkbox" checked />
+                   Attach to Job #${selectedPortalJobNumberRef.current || "—"}
+                 </label>`
+              : `<input id="save-measure-attach-job" type="checkbox" style="display:none" />`
+          }
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button id="${btnId}"
+              style="flex:1; padding:7px 8px; border-radius:10px; border:2px solid #111; background:#111; color:#fff; font-weight:900; cursor:pointer; font-size:12px;">
+              Save as note
+            </button>
+          </div>
+          <div style="margin-top:6px; font-weight:700; color:#666; font-size:12px;">${hintFinal}</div>
+        </div>`
+      );
+
+      window.google.maps.event.addListenerOnce(measureFinalIWRef.current, "domready", () => {
+        setTimeout(makeLatestInfoWindowDraggable, 0);
+        const btn = document.getElementById(btnId);
+        if (!btn) return;
+
+        btn.onclick = async () => {
+          const attachEl = document.getElementById("save-measure-attach-job");
+          const attachToJob = attachEl ? !!attachEl.checked : false;
+          try {
+            btn.disabled = true;
+            btn.textContent = "Saving…";
+          } catch {
+            // ignore
+          }
+
+          await saveCurrentMeasurementAsNote(attachToJob);
+
+          try {
+            btn.textContent = "Saved ✓";
+          } catch {
+            // ignore
+          }
+        };
+      });
+    } catch {
+      // ignore
+    }
   };
 
   const startDistanceMeasure = () => {
@@ -2620,8 +3072,55 @@ marker = new window.google.maps.Marker({
         <div ref={mapDivRef} className="maps-map" />
 
         {/* Left retractable panel */}
-        <div className={`maps-rightpanel ${panelOpen ? "open" : "closed"}`}>
+        <div
+          className={`maps-rightpanel ${panelOpen ? "open" : "closed"}`}
+          style={
+            isMobile
+              ? {
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  width: "100%",
+                  maxHeight: "60vh",
+                  overflow: "auto",
+                  transform: mobilePanelCollapsed ? "translateY(86%)" : "translateY(0)",
+                  transition: "transform 180ms ease",
+                  zIndex: 5,
+                }
+              : undefined
+          }
+        >
           {/* ✅ requested: toggle button on RIGHT edge of the tab */}
+          <button
+            type="button"
+            className="maps-mobile-retract-toggle"
+            onClick={() => setMobilePanelCollapsed((v) => !v)}
+            title={mobilePanelCollapsed ? "Show panel" : "Hide panel"}
+            style={{
+              position: "sticky",
+              top: 8,
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 20,
+              width: 44,
+              height: 30,
+              borderRadius: 999,
+              border: "1px solid rgba(0,0,0,0.18)",
+              background: "rgba(255,255,255,0.96)",
+              fontWeight: 900,
+              display: isMobile ? "flex" : "none",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
+              cursor: "pointer",
+              userSelect: "none",
+              margin: "6px auto 10px",
+            }}
+          >
+            {mobilePanelCollapsed ? "˄" : "˅"}
+          </button>
+
 
           <div className="panel-content" style={{ fontSize: leftPanelFontSize }}>
             <div className="maps-tabs">
@@ -3076,11 +3575,15 @@ marker = new window.google.maps.Marker({
                             <div style={{ fontWeight: 950, color: "#111", fontSize: 13 }}>
                               📝 {preview.length > 40 ? preview.slice(0, 40) + "…" : preview}
                             </div>
-                            <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2 }}>
-                              {time}
-                              {n.created_by_name ? ` · ${n.created_by_name}` : ""} ·{" "}
-                              {Number(n.lat).toFixed(5)}, {Number(n.lng).toFixed(5)}
-                            </div>
+                            <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2, whiteSpace: "nowrap" }}>{time}</div>
+                            {n.job_number ? (
+                              <div style={{ fontSize: 11, opacity: 0.9, marginTop: 2, fontWeight: 900 }}>
+                                Attached to Job #{n.job_number}
+                              </div>
+                            ) : null}
+                            {n.created_by_name ? (
+                              <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2 }}>{n.created_by_name}</div>
+                            ) : null}
                           </button>
 
                           <div
