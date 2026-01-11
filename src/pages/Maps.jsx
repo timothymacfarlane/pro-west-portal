@@ -713,7 +713,7 @@ function Maps() {
     typeof restoredState.panelOpen === "boolean" ? restoredState.panelOpen : true
   );
 
-  // Mobile-only: retractable Notes/Jobs panel as a bottom drawer (does not affect desktop)
+  // Mobile-only: retractable right panel as a bottom drawer (does not affect desktop)
   const [isMobile, setIsMobile] = useState(() => {
     try {
       return typeof window !== "undefined" && window.innerWidth <= 900;
@@ -744,7 +744,6 @@ function Maps() {
     } catch {
       // ignore
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile]);
 
 
@@ -3081,12 +3080,15 @@ marker = new window.google.maps.Marker({
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  width: "100%",
-                  maxHeight: "60vh",
-                  overflow: "auto",
-                  transform: mobilePanelCollapsed ? "translateY(86%)" : "translateY(0)",
+                  width: "100vw",
+                  maxHeight: "70vh",
+                  transform: mobilePanelCollapsed ? "translateY(72%)" : "translateY(0)",
                   transition: "transform 180ms ease",
                   zIndex: 5,
+                  overflowY: "auto",
+                  overflowX: "hidden",
+                  overflow: "visible",
+                  paddingTop: 18,
                 }
               : undefined
           }
@@ -3098,12 +3100,12 @@ marker = new window.google.maps.Marker({
             onClick={() => setMobilePanelCollapsed((v) => !v)}
             title={mobilePanelCollapsed ? "Show panel" : "Hide panel"}
             style={{
-              position: "sticky",
-              top: 8,
+              position: "absolute",
+              top: -36,
               left: "50%",
               transform: "translateX(-50%)",
               zIndex: 20,
-              width: 44,
+              width: 54,
               height: 30,
               borderRadius: 999,
               border: "1px solid rgba(0,0,0,0.18)",
@@ -3115,7 +3117,6 @@ marker = new window.google.maps.Marker({
               boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
               cursor: "pointer",
               userSelect: "none",
-              margin: "6px auto 10px",
             }}
           >
             {mobilePanelCollapsed ? "˄" : "˅"}

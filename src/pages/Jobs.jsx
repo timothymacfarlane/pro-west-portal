@@ -463,14 +463,20 @@ function buildStickerHtml(jobForPrint) {
   const telephoneText = (j.client_phone || "").toString();
   const mobileText = (j.client_mobile || "").toString();
 
-  // Prefer Google formatted address
-  const siteAddressText =
-    (j.full_address || deriveStickerSiteAddress(j) || "").toString();
+ // Sticker SITE ADDRESS: Lot + street only (no suburb/state/postcode)
+const siteAddressText = deriveStickerSiteAddress(j);
 
-  // Derive suburb from Google address if suburb field is empty
-  let suburbText = (j.suburb || "").toString();
+  // Suburb: use field first, otherwise derive from full_address "..., SUBURB STATE POSTCODE, Australia"
+  let suburbText = (j.suburb || "").toString().trim();
   if (!suburbText && j.full_address) {
-    suburbText = parseSuburbFromFullAddress(j.full_address);
+    const parts = j.full_address.split(",").map((p) => p.trim()).filter(Boolean);
+    // Commonly: [street, suburb state postcode, Australia]
+    if (parts.length >= 3) {
+      const mid = parts[parts.length - 2]; // "Hillarys WA 6025"
+      suburbText = (mid.split(" WA ")[0] || mid.split(" W.A. ")[0] || mid).trim();
+      // If still has postcode/state format, take first token group as suburb
+      suburbText = suburbText.replace(/\s+(WA|W\.A\.)\s+\d{4}$/i, "").trim();
+    }
   }
 
   const planText = (j.plan_number || "").toString();
@@ -485,60 +491,75 @@ function buildStickerHtml(jobForPrint) {
     <meta charset="utf-8" />
     <title>Job Sticker</title>
     <style>
-      @page {
-        size: A4 landscape;
-        margin: 0;
-      }
+      @page { size: A4 landscape; margin: 0; }
 
+      html, body { width: 297mm; height: 210mm; }
       body {
         margin: 0;
         font-family: "Times New Roman", Times, serif;
         color: #000;
       }
 
+      /* A4 landscape page */
       .page {
         width: 297mm;
         height: 210mm;
-        padding-top: 10mm;
-        padding-left: 9mm;
         box-sizing: border-box;
+        padding-top: 10mm;  /* your measured top margin */
+        padding-left: 9mm;  /* your measured left margin */
       }
 
+      /* Top-left label area only (Avery L7169 / PPS 4-up) */
       .label-box {
-        width: 139mm;
-        height: 99mm;
-      }
+  width: 139mm;
+  height: 84mm; /* ≈ 4/5ths of original height */
+  box-sizing: border-box;
+  overflow: hidden;
+}
 
-      .row {
-        display: flex;
-        align-items: flex-start;
-        margin-bottom: 3mm;
-      }
+     .row {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 1.2mm;
+}
 
+.row:last-child {
+  margin-bottom: 0; /* comments row doesn't waste space */
+}
+
+      /* Left headers: NOT bold */
       .label {
-        width: 48mm;
+        width: 50mm;
         font-size: 12pt;
         font-weight: normal;
         white-space: nowrap;
       }
 
+      /* Right values: bold */
       .value {
-  font-size: 14pt;
-  font-weight: bold; /* values ARE bold */
-  flex: 1;
+        flex: 1;
+        font-size: 14pt;
+        font-weight: bold;
+        line-height: 1.1;
       }
 
-      .value.address {
-        font-size: 13pt;
-      }
+   .value.address {
+  font-size: 13pt;
+  line-height: 1.1;
+}
 
-      .value.comments {
-        font-size: 10pt;
-        line-height: 1.25;
-        white-space: pre-wrap;
-      }
+.value.comments {
+  font-size: 10pt;
+  line-height: 1.05;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
     </style>
   </head>
+
   <body>
     <div class="page">
       <div class="label-box">
@@ -559,10 +580,7 @@ function buildStickerHtml(jobForPrint) {
     </div>
 
     <script>
-      setTimeout(() => {
-        window.focus();
-        window.print();
-      }, 250);
+      setTimeout(() => { window.focus(); window.print(); }, 250);
     </script>
   </body>
 </html>

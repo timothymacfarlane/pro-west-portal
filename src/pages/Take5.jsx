@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { jsPDF } from "jspdf";
@@ -54,6 +54,15 @@ function computeRiskResult(lCode, cCode) {
   return "Low";
 }
 
+function addressSummaryFromRow(r) {
+  const a =
+    (r?.full_address || "").trim() ||
+    [r?.street_number, r?.street_name, r?.suburb].filter(Boolean).join(" ").trim() ||
+    (r?.suburb || "").trim() ||
+    "—";
+  return a;
+}
+
 /**
  * colorMode:
  *  - "traffic": Yes=green, No=red (NA grey)
@@ -65,9 +74,18 @@ function YesNoToggle({
   onChange,
   colorMode = "traffic",
   options = yesNoOptions,
+  disabled = false,
 }) {
   return (
-    <div style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden" }}>
+    <div
+      style={{
+        display: "inline-flex",
+        borderRadius: 6,
+        overflow: "hidden",
+        opacity: disabled ? 0.55 : 1,
+        pointerEvents: disabled ? "none" : "auto",
+      }}
+    >
       {options.map((opt) => {
         const selected = value === opt;
 
@@ -109,11 +127,12 @@ function YesNoToggle({
             onClick={() => onChange(opt)}
             style={{
               border: `1px solid ${selected ? selectedBorder : "#ccc"}`,
-              padding: "0.35rem 0.85rem",
+              padding: "0.4rem 0.9rem",
               fontSize: "0.85rem",
               cursor: "pointer",
               background: selected ? selectedBg : "#fff",
               color: selected ? "#fff" : "#333",
+              minWidth: 56,
             }}
           >
             {opt}
@@ -230,8 +249,10 @@ function drawRiskPill(doc, result, x, y) {
 
 function Take5() {
   const { user } = useAuth();
-  const derivedDisplayName =
-    user?.user_metadata?.full_name || user?.email || "";
+  const derivedDisplayName = useMemo(
+    () => user?.user_metadata?.full_name || user?.email || "",
+    [user]
+  );
 
   const [step, setStep] = useState(1);
   const totalSteps = 5;
@@ -254,6 +275,12 @@ function Take5() {
   // Header info
   const [jobNumber, setJobNumber] = useState("");
   const [employeeName, setEmployeeName] = useState(derivedDisplayName);
+
+  // ✅ Job number autosuggest (copied pattern from Jobs.jsx)
+  const [jobNoQuery, setJobNoQuery] = useState("");
+  const [jobNoSuggestions, setJobNoSuggestions] = useState([]);
+  const [jobNoLoading, setJobNoLoading] = useState(false);
+  const debounceJobNoRef = useRef(null);
 
   // Signature
   const [signatureName, setSignatureName] = useState(derivedDisplayName);
@@ -310,12 +337,149 @@ function Take5() {
   const [showRiskMatrix, setShowRiskMatrix] = useState(false);
   const [riskMatrixContext, setRiskMatrixContext] = useState(null);
 
+  // ---------------- Draft autosave (field-friendly) ----------------
+  const draftKey = useMemo(() => {
+    const uid = user?.id || "anon";
+    const j = (jobNumber || "").trim() || "nojob";
+    return `pw_take5_draft:${uid}:${j}`;
+  }, [user?.id, jobNumber]);
+
+  // Restore draft (when key changes)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+
+      // Only restore if it looks like our shape
+      if (parsed && typeof parsed === "object") {
+        setStep(parsed.step || 1);
+        setJobNumber(parsed.jobNumber || "");
+        setJobNoQuery(parsed.jobNumber || "");
+        setEmployeeName(parsed.employeeName || derivedDisplayName);
+        setSignatureName(parsed.signatureName || derivedDisplayName);
+
+        setSwms(parsed.swms || "");
+        setJha(parsed.jha || "");
+
+        setConsider(
+          parsed.consider || {
+            understandScope: "",
+            inspectedArea: "",
+            readInstructions: "",
+            toolsInOrder: "",
+            fitAndCompetent: "",
+            correctPpe: "",
+          }
+        );
+
+        setAssess(
+          parsed.assess || {
+            requirePermits: "",
+            obtainedPermit: "",
+            sprainStrainRisk: "",
+            riskToOthers: "",
+            hazardousEnvironment: "",
+          }
+        );
+
+        setHazards(
+          Array.isArray(parsed.hazards) && parsed.hazards.length
+            ? parsed.hazards
+            : [
+                {
+                  id: 1,
+                  description: "",
+                  preLikelihood: "",
+                  preConsequence: "",
+                  preResult: "",
+                  controlMeasure: "",
+                  postLikelihood: "",
+                  postConsequence: "",
+                  postResult: "",
+                },
+              ]
+        );
+
+        // keep counter sane
+        const maxId = (Array.isArray(parsed.hazards) ? parsed.hazards : [])
+          .map((h) => h?.id || 0)
+          .reduce((a, b) => Math.max(a, b), 1);
+        nextHazardId.current = Math.max(2, maxId + 1);
+
+        setControls(parsed.controls || { hazardsControlled: "", confidentSafe: "" });
+        setSignatureConfirmed(!!parsed.signatureConfirmed);
+
+        // don’t restore submit states
+        setSubmitError("");
+        setSubmitSuccess("");
+        setIncompleteWarning("");
+        setPdfUrl("");
+        setShowRedWarning(false);
+        setShowRiskMatrix(false);
+        setRiskMatrixContext(null);
+        setRiskTab("matrix");
+      }
+    } catch {
+      // ignore bad draft
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+
+  // Save draft on changes (lightweight)
+  useEffect(() => {
+    try {
+      const payload = {
+        step,
+        jobNumber,
+        employeeName,
+        signatureName,
+        signatureConfirmed,
+        swms,
+        jha,
+        consider,
+        assess,
+        hazards,
+        controls,
+        savedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(draftKey, JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+  }, [
+    draftKey,
+    step,
+    jobNumber,
+    employeeName,
+    signatureName,
+    signatureConfirmed,
+    swms,
+    jha,
+    consider,
+    assess,
+    hazards,
+    controls,
+  ]);
+
+  // Keep employee/signature name synced with auth display name
   useEffect(() => {
     if (derivedDisplayName) {
       setEmployeeName(derivedDisplayName);
       setSignatureName((prev) => prev || derivedDisplayName);
     }
   }, [derivedDisplayName]);
+
+  // Keep jobNoQuery synced if jobNumber is changed elsewhere (e.g. restore)
+  useEffect(() => {
+    if ((jobNumber || "") !== (jobNoQuery || "")) {
+      // only sync when jobNoQuery is empty OR jobNumber was set programmatically
+      if (!jobNoQuery || !jobNumber) {
+        setJobNoQuery(jobNumber || "");
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobNumber]);
 
   // Load logo from /public
   useEffect(() => {
@@ -333,44 +497,99 @@ function Take5() {
     loadLogo();
   }, []);
 
-  const openRiskMatrix = (hazardIndex, phase) => {
+  // -------- Permit NA automation (reduces admin errors) --------
+  useEffect(() => {
+    // If permits are not required, obtained permit should be NA and locked.
+    if (assess.requirePermits === "No") {
+      if (assess.obtainedPermit !== "NA") {
+        setAssess((prev) => ({ ...prev, obtainedPermit: "NA" }));
+      }
+    }
+
+    // If permits required, obtained permit should not remain NA (force user to answer)
+    if (assess.requirePermits === "Yes" && assess.obtainedPermit === "NA") {
+      setAssess((prev) => ({ ...prev, obtainedPermit: "" }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assess.requirePermits]);
+
+  // ✅ Job-number suggestions (copied from Jobs.jsx)
+  const runJobNoSuggest = useCallback(async (query) => {
+    const q = (query || "").trim();
+    if (!q || !/^\d+$/.test(q)) {
+      setJobNoSuggestions([]);
+      return;
+    }
+
+    setJobNoLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("jobs")
+        .select("id, job_number, full_address, street_number, street_name, suburb")
+        .like("job_number_text", `${q}%`)
+        .order("job_number", { ascending: false })
+        .limit(20);
+
+      if (error) throw error;
+
+      setJobNoSuggestions(
+        (data || []).map((r) => ({
+          id: r.id,
+          job_number: r.job_number,
+          address: addressSummaryFromRow(r),
+        }))
+      );
+    } catch {
+      setJobNoSuggestions([]);
+    } finally {
+      setJobNoLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (debounceJobNoRef.current) clearTimeout(debounceJobNoRef.current);
+    debounceJobNoRef.current = setTimeout(() => runJobNoSuggest(jobNoQuery), 160);
+    return () => debounceJobNoRef.current && clearTimeout(debounceJobNoRef.current);
+  }, [jobNoQuery, runJobNoSuggest]);
+
+  const openRiskMatrix = useCallback((hazardIndex, phase) => {
     setRiskMatrixContext({ hazardIndex, phase });
     setShowRiskMatrix(true);
-  };
+  }, []);
 
-  const closeRiskMatrix = () => {
+  const closeRiskMatrix = useCallback(() => {
     setShowRiskMatrix(false);
     setRiskMatrixContext(null);
     setRiskTab("matrix");
-  };
+  }, []);
 
-  const applyRiskFromMatrix = (likelihoodCode, consequenceCode) => {
-    if (!riskMatrixContext) return;
-    const { hazardIndex, phase } = riskMatrixContext;
+  const applyRiskFromMatrix = useCallback(
+    (likelihoodCode, consequenceCode) => {
+      setHazards((prev) =>
+        prev.map((h, i) => {
+          if (!riskMatrixContext || i !== riskMatrixContext.hazardIndex) return h;
+          const updated = { ...h };
 
-    setHazards((prev) =>
-      prev.map((h, i) => {
-        if (i !== hazardIndex) return h;
-        const updated = { ...h };
+          if (riskMatrixContext.phase === "pre") {
+            updated.preLikelihood = likelihoodCode;
+            updated.preConsequence = consequenceCode;
+            updated.preResult = computeRiskResult(likelihoodCode, consequenceCode);
+          } else {
+            updated.postLikelihood = likelihoodCode;
+            updated.postConsequence = consequenceCode;
+            updated.postResult = computeRiskResult(likelihoodCode, consequenceCode);
+          }
 
-        if (phase === "pre") {
-          updated.preLikelihood = likelihoodCode;
-          updated.preConsequence = consequenceCode;
-          updated.preResult = computeRiskResult(likelihoodCode, consequenceCode);
-        } else {
-          updated.postLikelihood = likelihoodCode;
-          updated.postConsequence = consequenceCode;
-          updated.postResult = computeRiskResult(likelihoodCode, consequenceCode);
-        }
+          return updated;
+        })
+      );
 
-        return updated;
-      })
-    );
+      closeRiskMatrix();
+    },
+    [riskMatrixContext, closeRiskMatrix]
+  );
 
-    closeRiskMatrix();
-  };
-
-  const handleHazardChange = (index, field, value) => {
+  const handleHazardChange = useCallback((index, field, value) => {
     setHazards((prev) =>
       prev.map((h, i) => {
         if (i !== index) return h;
@@ -383,9 +602,9 @@ function Take5() {
       })
     );
     setIncompleteWarning("");
-  };
+  }, []);
 
-  const addHazard = () => {
+  const addHazard = useCallback(() => {
     const newId = nextHazardId.current++;
     setHazards((prev) => [
       ...prev,
@@ -401,20 +620,22 @@ function Take5() {
         postResult: "",
       },
     ]);
-  };
+  }, []);
 
   // remove hazard (only if more than one remains)
-  const removeHazard = (indexToRemove) => {
+  const removeHazard = useCallback((indexToRemove) => {
     setHazards((prev) => {
       if (prev.length === 1) return prev;
       const updated = prev.filter((_, i) => i !== indexToRemove);
       return updated.length ? updated : prev;
     });
-  };
+  }, []);
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setStep(1);
     setJobNumber("");
+    setJobNoQuery("");
+    setJobNoSuggestions([]);
     setEmployeeName(derivedDisplayName);
     setSignatureName(derivedDisplayName);
     setSwms("");
@@ -462,59 +683,73 @@ function Take5() {
     setShowRiskMatrix(false);
     setRiskMatrixContext(null);
     setRiskTab("matrix");
-  };
 
-  const canContinueFromStep = (currentStep) => {
-    if (currentStep === 1) {
-      return jobNumber.trim() && employeeName && swms && jha;
+    // Clear draft too (admin efficiency)
+    try {
+      localStorage.removeItem(draftKey);
+    } catch {
+      // ignore
     }
-    if (currentStep === 2) {
-      return Object.values(consider).every((v) => v);
-    }
-    if (currentStep === 3) {
-      return Object.values(assess).every((v) => v);
-    }
-    if (currentStep === 4) {
-      return hazards.some((h) => h.description.trim());
-    }
-    if (currentStep === 5) {
-      return (
-        controls.hazardsControlled &&
-        controls.confidentSafe &&
-        (signatureName || employeeName) &&
-        signatureConfirmed
-      );
-    }
-    return true;
-  };
+  }, [derivedDisplayName, draftKey]);
+
+  const canContinueFromStep = useCallback(
+    (currentStep) => {
+      if (currentStep === 1) {
+        return jobNumber.trim() && employeeName && swms && jha;
+      }
+      if (currentStep === 2) {
+        return Object.values(consider).every((v) => v);
+      }
+      if (currentStep === 3) {
+        return Object.values(assess).every((v) => v);
+      }
+      if (currentStep === 4) {
+        return hazards.some((h) => h.description.trim());
+      }
+      if (currentStep === 5) {
+        return (
+          controls.hazardsControlled &&
+          controls.confidentSafe &&
+          (signatureName || employeeName) &&
+          signatureConfirmed
+        );
+      }
+      return true;
+    },
+    [jobNumber, employeeName, swms, jha, consider, assess, hazards, controls, signatureName, signatureConfirmed]
+  );
 
   // detect red selections on the current step
-  const hasRedSelectionsOnStep = (s) => {
-    if (s === 1) return false; // all green always
-    if (s === 2) {
-      return Object.values(consider).some((v) => v === "No"); // traffic
-    }
-    if (s === 3) {
-      // inverseTraffic except obtainedPermit (traffic)
-      const redsInverse = ["requirePermits","sprainStrainRisk","riskToOthers","hazardousEnvironment"]
-        .some((k) => assess[k] === "Yes");
-      const redObtained = assess.obtainedPermit === "No";
-      return redsInverse || redObtained;
-    }
-    if (s === 4) return false;
-    if (s === 5) {
-      return Object.values(controls).some((v) => v === "No");
-    }
-    return false;
-  };
+  const hasRedSelectionsOnStep = useCallback(
+    (s) => {
+      if (s === 1) return false; // all green always
+      if (s === 2) {
+        return Object.values(consider).some((v) => v === "No"); // traffic
+      }
+      if (s === 3) {
+        // inverseTraffic except obtainedPermit (traffic)
+        const redsInverse = ["requirePermits", "sprainStrainRisk", "riskToOthers", "hazardousEnvironment"].some(
+          (k) => assess[k] === "Yes"
+        );
+        const redObtained = assess.obtainedPermit === "No";
+        return redsInverse || redObtained;
+      }
+      if (s === 4) return false;
+      if (s === 5) {
+        return Object.values(controls).some((v) => v === "No");
+      }
+      return false;
+    },
+    [consider, assess, controls]
+  );
 
-  const proceedToNextStep = () => {
+  const proceedToNextStep = useCallback(() => {
     setShowRedWarning(false);
     setIncompleteWarning("");
     setStep((s) => Math.min(s + 1, totalSteps));
-  };
+  }, []);
 
-  const nextStep = () => {
+  const nextStep = useCallback(() => {
     if (!canContinueFromStep(step)) {
       setIncompleteWarning("All fields must be completed");
       return;
@@ -526,13 +761,13 @@ function Take5() {
     }
 
     proceedToNextStep();
-  };
+  }, [step, canContinueFromStep, hasRedSelectionsOnStep, proceedToNextStep]);
 
-  const prevStep = () => {
+  const prevStep = useCallback(() => {
     setIncompleteWarning("");
     setShowRedWarning(false);
     setStep((s) => Math.max(s - 1, 1));
-  };
+  }, []);
 
   const buildFormData = (take5Number) => {
     const signatureDisplayName = signatureName || employeeName;
@@ -580,10 +815,10 @@ function Take5() {
     // logo
     if (logoDataUrl) {
       try {
-        doc.addImage(logoDataUrl, "PNG", left, 2.2, 40, 13);
+        doc.addImage(logoDataUrl, "JPEG", left, 2.2, 40, 13);
       } catch {
         try {
-          doc.addImage(logoDataUrl, "JPEG", left, 2.2, 40, 13);
+          doc.addImage(logoDataUrl, "PNG", left, 2.2, 40, 13);
         } catch {}
       }
     }
@@ -606,14 +841,13 @@ function Take5() {
     doc.setFontSize(10);
     doc.text(
       `Take 5 #: ${data.take5Number || "-"}  |  Submitted: ${new Date(data.submittedAt).toLocaleString("en-AU", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false
-})}
-`,
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })}`,
       left,
       y
     );
@@ -690,9 +924,7 @@ function Take5() {
     // Step 4 Hazards
     sectionHeader("STEP 4 – Hazards Identified");
 
-    const hazardsList = data.steps.hazards.filter(
-      (h) => h.description && h.description.trim()
-    );
+    const hazardsList = data.steps.hazards.filter((h) => h.description && h.description.trim());
 
     if (hazardsList.length === 0) {
       doc.setFont("helvetica", "normal");
@@ -716,22 +948,14 @@ function Take5() {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9.2);
 
-      doc.text(
-        `Pre-risk: Lik ${h.preLikelihood || "-"} | Cons ${h.preConsequence || "-"} | Result`,
-        cardX + 4,
-        y
-      );
+      doc.text(`Pre-risk: Lik ${h.preLikelihood || "-"} | Cons ${h.preConsequence || "-"} | Result`, cardX + 4, y);
       drawRiskPill(doc, h.preResult, cardX + cardW - 30, y);
       y += lineH;
 
       doc.text(`Control: ${h.controlMeasure || "-"}`, cardX + 4, y);
       y += lineH;
 
-      doc.text(
-        `Post-risk: Lik ${h.postLikelihood || "-"} | Cons ${h.postConsequence || "-"} | Result`,
-        cardX + 4,
-        y
-      );
+      doc.text(`Post-risk: Lik ${h.postLikelihood || "-"} | Cons ${h.postConsequence || "-"} | Result`, cardX + 4, y);
       drawRiskPill(doc, h.postResult, cardX + cardW - 30, y);
       y += lineH;
 
@@ -744,16 +968,8 @@ function Take5() {
 
     // Step 5
     sectionHeader("STEP 5 – Controls & Sign-off");
-    qaRow(
-      "Have I removed hazards or implemented effective controls?",
-      data.steps.controls.hazardsControlled,
-      "traffic"
-    );
-    qaRow(
-      "Am I confident this task can be done safely?",
-      data.steps.controls.confidentSafe,
-      "traffic"
-    );
+    qaRow("Have I removed hazards or implemented effective controls?", data.steps.controls.hazardsControlled, "traffic");
+    qaRow("Am I confident this task can be done safely?", data.steps.controls.confidentSafe, "traffic");
     y += 3;
 
     ensureSpace(14);
@@ -766,14 +982,13 @@ function Take5() {
 
     doc.text(
       `Confirmed: ${data.signature.confirmed ? "Yes" : "No"}   |   Signed at: ${new Date(data.signature.signedAt).toLocaleString("en-AU", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false
-})}
-`,
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })}`,
       left + 2,
       y
     );
@@ -863,6 +1078,13 @@ function Take5() {
 
       setSubmitSuccess("Take 5 submitted and PDF saved successfully.");
       setStep(totalSteps);
+
+      // Clear draft after successful submit (keeps admin clean)
+      try {
+        localStorage.removeItem(draftKey);
+      } catch {
+        // ignore
+      }
     } catch (err) {
       console.error(err);
       setSubmitError("There was a problem submitting the Take 5. Please try again.");
@@ -881,20 +1103,80 @@ function Take5() {
       </p>
 
       <div style={{ marginTop: "0.6rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-        <div className="card-row">
-          <span className="card-row-label">Job Number</span>
-          <input
-            type="text"
-            value={jobNumber}
-            onChange={(e) => {
-              setJobNumber(e.target.value);
-              setIncompleteWarning("");
-            }}
-            placeholder="e.g. 101441"
-            inputMode="numeric"
-            className="maps-search-input"
-            style={{ maxWidth: "200px" }}
-          />
+        <div className="card-row" style={{ alignItems: "flex-start" }}>
+          <span className="card-row-label" style={{ paddingTop: 8 }}>Job Number</span>
+
+          <div style={{ width: "100%", maxWidth: 320 }}>
+            <input
+              type="text"
+              value={jobNoQuery}
+              onChange={(e) => {
+                const v = e.target.value;
+                setJobNoQuery(v);
+                setJobNumber(v);
+                setIncompleteWarning("");
+              }}
+              onFocus={() => runJobNoSuggest(jobNoQuery)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  setJobNoSuggestions([]);
+                  setJobNumber(jobNoQuery);
+                }
+                if (e.key === "Escape") setJobNoSuggestions([]);
+              }}
+              placeholder={`Type job number…${jobNoLoading ? "…" : ""}`}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              className="maps-search-input"
+              style={{ width: "100%" }}
+            />
+
+            {jobNoSuggestions.length > 0 && (
+              <div
+                style={{
+                  marginTop: 8,
+                  borderRadius: 14,
+                  overflow: "hidden",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(20,20,25,0.95)",
+                  boxShadow: "0 12px 30px rgba(0,0,0,0.35)",
+                  maxHeight: 280,
+                  overflowY: "auto",
+                  WebkitOverflowScrolling: "touch",
+                }}
+              >
+                {jobNoSuggestions.map((j) => (
+                  <button
+                    key={j.id}
+                    className="btn-pill"
+                    style={{
+                      width: "100%",
+                      justifyContent: "flex-start",
+                      borderRadius: 0,
+                      padding: "10px 12px",
+                      background: "transparent",
+                      textAlign: "left",
+                      whiteSpace: "normal",
+                    }}
+                    type="button"
+                    onClick={() => {
+                      setJobNoQuery(String(j.job_number));
+                      setJobNumber(String(j.job_number));
+                      setJobNoSuggestions([]);
+                      setIncompleteWarning("");
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 950, color: "#fff" }}>#{j.job_number}</div>
+                      <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2, color: "#fff" }}>
+                        {j.address}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="card-row">
@@ -962,87 +1244,96 @@ function Take5() {
     </div>
   );
 
-  const renderStep3 = () => (
-    <div className="card">
-      <h3 className="card-title">Assess the Task</h3>
-      <p className="card-subtitle">
-        Answer the following to assess risks prior to starting work.
-      </p>
+  const renderStep3 = () => {
+    const obtainedDisabled = assess.requirePermits === "No";
+    return (
+      <div className="card">
+        <h3 className="card-title">Assess the Task</h3>
+        <p className="card-subtitle">
+          Answer the following to assess risks prior to starting work.
+        </p>
 
-      <div style={{ marginTop: "0.6rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-        <div>
-          <div className="card-row-label">
-            Do I require site specific permits or inductions?
+        <div style={{ marginTop: "0.6rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          <div>
+            <div className="card-row-label">
+              Do I require site specific permits or inductions?
+            </div>
+            <YesNoToggle
+              colorMode="inverseTraffic"
+              value={assess.requirePermits}
+              onChange={(v) => {
+                setAssess((prev) => ({ ...prev, requirePermits: v }));
+                setIncompleteWarning("");
+              }}
+            />
           </div>
-          <YesNoToggle
-            colorMode="inverseTraffic"
-            value={assess.requirePermits}
-            onChange={(v) => {
-              setAssess((prev) => ({ ...prev, requirePermits: v }));
-              setIncompleteWarning("");
-            }}
-          />
-        </div>
 
-        <div>
-          <div className="card-row-label">
-            Have I obtained this specific permit or induction?
+          <div>
+            <div className="card-row-label">
+              Have I obtained this specific permit or induction?
+              {obtainedDisabled && (
+                <span style={{ marginLeft: 8, fontSize: "0.75rem", color: "#777" }}>
+                  (Auto set to NA)
+                </span>
+              )}
+            </div>
+            <YesNoToggle
+              options={yesNaNoOptions}
+              colorMode="traffic"
+              value={assess.obtainedPermit}
+              disabled={obtainedDisabled}
+              onChange={(v) => {
+                setAssess((prev) => ({ ...prev, obtainedPermit: v }));
+                setIncompleteWarning("");
+              }}
+            />
           </div>
-          <YesNoToggle
-            options={yesNaNoOptions}
-            colorMode="traffic"
-            value={assess.obtainedPermit}
-            onChange={(v) => {
-              setAssess((prev) => ({ ...prev, obtainedPermit: v }));
-              setIncompleteWarning("");
-            }}
-          />
-        </div>
 
-        <div>
-          <div className="card-row-label">
-            Could I suffer a sprain or strain from repetitive or excessive exertion?
+          <div>
+            <div className="card-row-label">
+              Could I suffer a sprain or strain from repetitive or excessive exertion?
+            </div>
+            <YesNoToggle
+              colorMode="inverseTraffic"
+              value={assess.sprainStrainRisk}
+              onChange={(v) => {
+                setAssess((prev) => ({ ...prev, sprainStrainRisk: v }));
+                setIncompleteWarning("");
+              }}
+            />
           </div>
-          <YesNoToggle
-            colorMode="inverseTraffic"
-            value={assess.sprainStrainRisk}
-            onChange={(v) => {
-              setAssess((prev) => ({ ...prev, sprainStrainRisk: v }));
-              setIncompleteWarning("");
-            }}
-          />
-        </div>
 
-        <div>
-          <div className="card-row-label">
-            Could the work I am carrying out, or any nearby activities, be a potential risk for me or to others?
+          <div>
+            <div className="card-row-label">
+              Could the work I am carrying out, or any nearby activities, be a potential risk for me or to others?
+            </div>
+            <YesNoToggle
+              colorMode="inverseTraffic"
+              value={assess.riskToOthers}
+              onChange={(v) => {
+                setAssess((prev) => ({ ...prev, riskToOthers: v }));
+                setIncompleteWarning("");
+              }}
+            />
           </div>
-          <YesNoToggle
-            colorMode="inverseTraffic"
-            value={assess.riskToOthers}
-            onChange={(v) => {
-              setAssess((prev) => ({ ...prev, riskToOthers: v }));
-              setIncompleteWarning("");
-            }}
-          />
-        </div>
 
-        <div>
-          <div className="card-row-label">
-            Will I be working in or near a hazardous environment? (Near a road, powerline or water, at heights or in a confined space)
+          <div>
+            <div className="card-row-label">
+              Will I be working in or near a hazardous environment? (Near a road, powerline or water, at heights or in a confined space)
+            </div>
+            <YesNoToggle
+              colorMode="inverseTraffic"
+              value={assess.hazardousEnvironment}
+              onChange={(v) => {
+                setAssess((prev) => ({ ...prev, hazardousEnvironment: v }));
+                setIncompleteWarning("");
+              }}
+            />
           </div>
-          <YesNoToggle
-            colorMode="inverseTraffic"
-            value={assess.hazardousEnvironment}
-            onChange={(v) => {
-              setAssess((prev) => ({ ...prev, hazardousEnvironment: v }));
-              setIncompleteWarning("");
-            }}
-          />
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderStep4 = () => (
     <div className="card">
@@ -1110,7 +1401,9 @@ function Take5() {
               >
                 <option value="">Select…</option>
                 {likelihoodOptions.map((opt) => (
-                  <option key={opt.code} value={opt.code}>{opt.label}</option>
+                  <option key={opt.code} value={opt.code}>
+                    {opt.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -1123,7 +1416,9 @@ function Take5() {
               >
                 <option value="">Select…</option>
                 {consequenceOptions.map((opt) => (
-                  <option key={opt.code} value={opt.code}>{opt.label}</option>
+                  <option key={opt.code} value={opt.code}>
+                    {opt.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -1173,7 +1468,9 @@ function Take5() {
               >
                 <option value="">Select…</option>
                 {likelihoodOptions.map((opt) => (
-                  <option key={opt.code} value={opt.code}>{opt.label}</option>
+                  <option key={opt.code} value={opt.code}>
+                    {opt.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -1186,7 +1483,9 @@ function Take5() {
               >
                 <option value="">Select…</option>
                 {consequenceOptions.map((opt) => (
-                  <option key={opt.code} value={opt.code}>{opt.label}</option>
+                  <option key={opt.code} value={opt.code}>
+                    {opt.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -1225,9 +1524,7 @@ function Take5() {
 
       <div style={{ marginTop: "0.6rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
         <div>
-          <div className="card-row-label">
-            Have I removed the hazards or implemented effective controls?
-          </div>
+          <div className="card-row-label">Have I removed the hazards or implemented effective controls?</div>
           <YesNoToggle
             value={controls.hazardsControlled}
             onChange={(v) => {
@@ -1238,9 +1535,7 @@ function Take5() {
         </div>
 
         <div>
-          <div className="card-row-label">
-            Am I confident this task can be done safely?
-          </div>
+          <div className="card-row-label">Am I confident this task can be done safely?</div>
           <YesNoToggle
             value={controls.confidentSafe}
             onChange={(v) => {
@@ -1261,9 +1556,7 @@ function Take5() {
           gap: "0.6rem",
         }}
       >
-        <h4 style={{ margin: 0, fontSize: "0.95rem", color: "var(--pw-primary-dark)" }}>
-          Sign-off
-        </h4>
+        <h4 style={{ margin: 0, fontSize: "0.95rem", color: "var(--pw-primary-dark)" }}>Sign-off</h4>
 
         <div className="card-row">
           <span className="card-row-label">Signature name</span>
@@ -1351,6 +1644,7 @@ function Take5() {
           alignItems: "center",
           justifyContent: "center",
           zIndex: 50,
+          padding: "0.75rem",
         }}
         onClick={closeRiskMatrix}
       >
@@ -1360,7 +1654,7 @@ function Take5() {
             borderRadius: 10,
             padding: "1rem",
             maxWidth: "700px",
-            width: "96%",
+            width: "100%",
             maxHeight: "90vh",
             overflow: "hidden",
             boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
@@ -1380,7 +1674,7 @@ function Take5() {
           </div>
 
           {/* Tabs */}
-          <div style={{ display: "flex", gap: "0.4rem", marginBottom: "0.7rem" }}>
+          <div style={{ display: "flex", gap: "0.4rem", marginBottom: "0.7rem", flexWrap: "wrap" }}>
             <TabButton id="matrix">Matrix</TabButton>
             <TabButton id="likelihood">Likelihood</TabButton>
             <TabButton id="consequence">Consequence</TabButton>
@@ -1637,13 +1931,14 @@ function Take5() {
           alignItems: "center",
           justifyContent: "center",
           zIndex: 60,
+          padding: "0.75rem",
         }}
         onClick={() => setShowRedWarning(false)}
       >
         <div
           className="card"
           style={{
-            width: "92%",
+            width: "100%",
             maxWidth: 420,
             padding: "1rem",
           }}
@@ -1655,16 +1950,10 @@ function Take5() {
           </p>
 
           <div style={{ display: "flex", gap: "0.6rem", justifyContent: "flex-end", marginTop: "1rem" }}>
-            <button
-              className="btn-pill"
-              onClick={() => setShowRedWarning(false)}
-            >
+            <button className="btn-pill" onClick={() => setShowRedWarning(false)} type="button">
               No
             </button>
-            <button
-              className="btn-pill primary"
-              onClick={proceedToNextStep}
-            >
+            <button className="btn-pill primary" onClick={proceedToNextStep} type="button">
               Yes
             </button>
           </div>
@@ -1673,8 +1962,23 @@ function Take5() {
     );
   };
 
+  const footerBarStyle = {
+    marginTop: "0.8rem",
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "0.5rem",
+    position: "sticky",
+    bottom: 0,
+    background: "rgba(255,255,255,0.96)",
+    borderTop: "1px solid #f0f0f0",
+    padding: "0.7rem 0",
+    paddingBottom: "calc(0.7rem + env(safe-area-inset-bottom))",
+    backdropFilter: "blur(6px)",
+  };
+
   return (
-    <PageLayout data-take5
+    <PageLayout
+      data-take5
       icon="📝"
       title="Take 5"
       subtitle={`Step ${step} of ${totalSteps}`}
@@ -1709,7 +2013,7 @@ function Take5() {
         </div>
       )}
 
-      <div style={{ marginTop: "0.8rem", display: "flex", justifyContent: "space-between", gap: "0.5rem" }}>
+      <div style={footerBarStyle}>
         <button type="button" className="btn-pill" onClick={prevStep} disabled={step === 1}>
           ◀ Back
         </button>
@@ -1736,10 +2040,7 @@ function Take5() {
             disabled={isSubmitting || !!submitSuccess}
             style={{
               opacity: canContinueFromStep(totalSteps) ? 1 : 0.55,
-              cursor:
-                canContinueFromStep(totalSteps) && !submitSuccess
-                  ? "pointer"
-                  : "not-allowed",
+              cursor: canContinueFromStep(totalSteps) && !submitSuccess ? "pointer" : "not-allowed",
             }}
           >
             {isSubmitting ? "Submitting..." : submitSuccess ? "Submitted" : "Submit Take 5"}

@@ -1,14 +1,68 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
+
+function addressSummaryFromRow(r) {
+  const a =
+    (r?.full_address || "").trim() ||
+    [r?.street_number, r?.street_name, r?.suburb].filter(Boolean).join(" ").trim() ||
+    (r?.suburb || "").trim() ||
+    "—";
+  return a;
+}
 
 function Take5Register() {
   const [rows, setRows] = useState([]);
   const [pdfMap, setPdfMap] = useState({}); // { [rowId]: signedUrl }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // ✅ Job filter with autosuggest (same approach as Jobs.jsx / Take5.jsx)
   const [jobFilter, setJobFilter] = useState("");
+  const [jobFilterSuggestions, setJobFilterSuggestions] = useState([]);
+  const [jobFilterLoading, setJobFilterLoading] = useState(false);
+  const debounceJobFilterRef = useRef(null);
+
   const [expandedJobs, setExpandedJobs] = useState({}); // { [jobNumber]: bool }
+
+  const runJobFilterSuggest = useCallback(async (query) => {
+    const q = (query || "").trim();
+    if (!q || !/^\d+$/.test(q)) {
+      setJobFilterSuggestions([]);
+      return;
+    }
+
+    setJobFilterLoading(true);
+    try {
+      const { data, error: sErr } = await supabase
+        .from("jobs")
+        .select("id, job_number, full_address, street_number, street_name, suburb")
+        .like("job_number_text", `${q}%`)
+        .order("job_number", { ascending: false })
+        .limit(20);
+
+      if (sErr) throw sErr;
+
+      setJobFilterSuggestions(
+        (data || []).map((r) => ({
+          id: r.id,
+          job_number: r.job_number,
+          address: addressSummaryFromRow(r),
+        }))
+      );
+    } catch (e) {
+      console.warn("Job filter suggest error", e);
+      setJobFilterSuggestions([]);
+    } finally {
+      setJobFilterLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (debounceJobFilterRef.current) clearTimeout(debounceJobFilterRef.current);
+    debounceJobFilterRef.current = setTimeout(() => runJobFilterSuggest(jobFilter), 160);
+    return () => debounceJobFilterRef.current && clearTimeout(debounceJobFilterRef.current);
+  }, [jobFilter, runJobFilterSuggest]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -25,6 +79,7 @@ function Take5Register() {
           .order("created_at", { ascending: false });
 
         if (jobFilter.trim()) {
+          // keep your existing flexible filter behaviour
           query = query.ilike("job_number", `%${jobFilter.trim()}%`);
         }
 
@@ -82,7 +137,8 @@ function Take5Register() {
   };
 
   return (
-    <PageLayout data-take5-register
+    <PageLayout
+      data-take5-register
       icon="📋"
       title="Take 5 Register"
       subtitle="List of submitted Take 5s with links to PDFs"
@@ -92,18 +148,88 @@ function Take5Register() {
         <p className="card-subtitle">
           Filter by job number. Leave blank to show all.
         </p>
-        <div className="card-row" style={{ marginTop: "0.4rem" }}>
-          <span className="card-row-label">Job number</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            aria-label="Filter by job number"
-            value={jobFilter}
-            onChange={(e) => setJobFilter(e.target.value)}
-            className="maps-search-input"
-            placeholder="e.g. 101441"
-            style={{ maxWidth: "200px" }}
-          />
+
+        <div className="card-row" style={{ marginTop: "0.4rem", alignItems: "flex-start" }}>
+          <span className="card-row-label" style={{ paddingTop: 8 }}>Job number</span>
+
+          <div style={{ width: "100%", maxWidth: 320 }}>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              aria-label="Filter by job number"
+              value={jobFilter}
+              onChange={(e) => setJobFilter(e.target.value)}
+              onFocus={() => runJobFilterSuggest(jobFilter)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") setJobFilterSuggestions([]);
+                if (e.key === "Escape") setJobFilterSuggestions([]);
+              }}
+              className="maps-search-input"
+              placeholder={`e.g. 101441${jobFilterLoading ? "…" : ""}`}
+              style={{ width: "100%" }}
+            />
+
+            {jobFilterSuggestions.length > 0 && (
+              <div
+                style={{
+                  marginTop: 8,
+                  borderRadius: 14,
+                  overflow: "hidden",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(20,20,25,0.95)",
+                  boxShadow: "0 12px 30px rgba(0,0,0,0.35)",
+                  maxHeight: 280,
+                  overflowY: "auto",
+                  WebkitOverflowScrolling: "touch",
+                }}
+              >
+                {jobFilterSuggestions.map((j) => (
+                  <button
+                    key={j.id}
+                    className="btn-pill"
+                    style={{
+                      width: "100%",
+                      justifyContent: "flex-start",
+                      borderRadius: 0,
+                      padding: "10px 12px",
+                      background: "transparent",
+                      textAlign: "left",
+                      whiteSpace: "normal",
+                    }}
+                    type="button"
+                    onClick={() => {
+                      setJobFilter(String(j.job_number));
+                      setJobFilterSuggestions([]);
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 950, color: "#fff" }}>#{j.job_number}</div>
+                      <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2, color: "#fff" }}>
+                        {j.address}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {jobFilter.trim() && (
+              <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="btn-pill"
+                  onClick={() => {
+                    setJobFilter("");
+                    setJobFilterSuggestions([]);
+                  }}
+                  style={{ fontSize: "0.8rem" }}
+                >
+                  Clear filter
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -138,7 +264,14 @@ function Take5Register() {
         )}
 
         {!loading && !error && rows.length > 0 && (
-          <div style={{ marginTop: "0.8rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+          <div
+            style={{
+              marginTop: "0.8rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.6rem",
+            }}
+          >
             {Object.entries(groupedByJob).map(([jobNumber, jobRows]) => {
               const expanded = !!expandedJobs[jobNumber];
 
@@ -230,18 +363,17 @@ function Take5Register() {
                           </thead>
                           <tbody>
                             {jobRows.map((row) => {
-                              const submittedAt =
-                                row.form_data?.submittedAt || row.created_at;
-                            const dateStr = submittedAt
-  ? new Date(submittedAt).toLocaleString("en-AU", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false
-    })
-  : "-";
+                              const submittedAt = row.form_data?.submittedAt || row.created_at;
+                              const dateStr = submittedAt
+                                ? new Date(submittedAt).toLocaleString("en-AU", {
+                                    day: "2-digit",
+                                    month: "2-digit",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    hour12: false,
+                                  })
+                                : "-";
 
                               const signedUrl = pdfMap[row.id];
 
@@ -291,13 +423,9 @@ function Take5Register() {
                                         View PDF
                                       </a>
                                     ) : row.pdf_path ? (
-                                      <span style={{ color: "#999" }}>
-                                        Generating…
-                                      </span>
+                                      <span style={{ color: "#999" }}>Generating…</span>
                                     ) : (
-                                      <span style={{ color: "#999" }}>
-                                        No PDF
-                                      </span>
+                                      <span style={{ color: "#999" }}>No PDF</span>
                                     )}
                                   </td>
                                 </tr>
