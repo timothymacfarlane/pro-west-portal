@@ -10,6 +10,7 @@ import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import Home from "./pages/Home.jsx";
 import Admin from "./pages/Admin.jsx";
 import Contacts from "./pages/Contacts.jsx";
+import Documents from "./pages/Documents.jsx";
 import Jobs from "./pages/Jobs.jsx";
 import MyJobs from "./pages/MyJobs.jsx"; // ✅ ADDED
 import Maps from "./pages/Maps.jsx";
@@ -200,6 +201,17 @@ function App() {
                   </NavLink>
                 </li>
 
+
+                <li>
+                  <NavLink
+                    to="/documents"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
+                    <span className="nav-icon">📄</span>
+                    <span className="nav-label">Documents</span>
+                  </NavLink>
+                </li>
                 {/* ✅ ADDED: My Jobs */}
                 <li>
                   <NavLink
@@ -348,6 +360,16 @@ function App() {
               }
             />
 
+
+
+            <Route
+              path="/documents"
+              element={
+                <ProtectedRoute>
+                  <Documents />
+                </ProtectedRoute>
+              }
+            />
             {/* ✅ ADDED: My Jobs route */}
             <Route
               path="/my-jobs"
