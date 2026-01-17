@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import proj4 from "proj4";
 import { supabase } from "../lib/supabaseClient.js";
+import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 
 /**
  * Safe Point constructor:
@@ -563,6 +564,8 @@ function Maps() {
   const infoWindowRef = useRef(null);
   const hoverInfoWindowRef = useRef(null);
 
+  const isAppVisible = useAppVisibilityContext();
+
   /* ================================
      ✅ Missing refs/state restored (full sweep)
      ================================ */
@@ -775,7 +778,7 @@ function Maps() {
     } catch {
       // ignore
     }
-  }, [mapNotes]);
+  }, [visibleNotes]);
 
   const fetchNotesFromSupabase = async () => {
     try {
@@ -796,36 +799,35 @@ function Maps() {
   };
 
   // Load + realtime sync for cross-device notes
-  useEffect(() => {
-    let mounted = true;
+useEffect(() => {
+  if (!isAppVisible) return;
 
-    (async () => {
-      if (!mounted) return;
-      await fetchNotesFromSupabase();
-    })();
+  let mounted = true;
 
-    const channel = supabase
-      .channel("pw-map-notes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "map_notes" },
-        (payload) => {
-          // Keep it simple & robust: refetch on changes (notes count will be small)
-          fetchNotesFromSupabase();
-        }
-      )
-      .subscribe();
+  (async () => {
+    if (!mounted) return;
+    await fetchNotesFromSupabase();
+  })();
 
-    return () => {
-      mounted = false;
-      try {
-        supabase.removeChannel(channel);
-      } catch {
-        // ignore
+  const channel = supabase
+    .channel("pw-map-notes")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "map_notes" },
+      () => {
+        fetchNotesFromSupabase();
       }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    )
+    .subscribe();
+
+  return () => {
+    mounted = false;
+    try {
+      supabase.removeChannel(channel);
+    } catch {}
+  };
+}, [isAppVisible]);
+
 // Persist UI state
   useEffect(() => {
     safeWriteState({
@@ -1604,6 +1606,26 @@ function Maps() {
       }, REFRESH_DEBOUNCE_MS);
     });
   }, []);
+  // Pause Google Maps interaction when app is backgrounded (mobile battery saver)
+useEffect(() => {
+  const map = mapRef.current;
+  if (!map) return;
+
+  if (!isAppVisible) {
+    map.setOptions({
+      gestureHandling: "none",
+      draggable: false,
+      clickableIcons: false,
+    });
+  } else {
+    map.setOptions({
+      gestureHandling: "greedy",
+      draggable: true,
+      clickableIcons: false,
+    });
+  }
+}, [isAppVisible]);
+
 
   // ✅ FIX: attach Places Autocomplete whenever the Job Layers tab is visible (input exists)
   useEffect(() => {
@@ -2659,6 +2681,8 @@ marker = new window.google.maps.Marker({
     const map = mapRef.current;
     if (!map || !window.google) return;
 
+    if (!isAppVisible) return;
+
     const ssmLayer = layers.find((l) => l.id === "ssm076");
     const bmLayer = layers.find((l) => l.id === "bm076");
     const rmLayer = layers.find((l) => l.id === "rm199");
@@ -2942,18 +2966,21 @@ marker = new window.google.maps.Marker({
       if (visibleMarkers.length) clustererRef.current.addMarkers(visibleMarkers);
     })();
 
+    if (!isAppVisible) return;
     const staleTimer = setInterval(() => {
       const anyVisible = ssmLayer?.visible || bmLayer?.visible || rmLayer?.visible;
       if (anyVisible) setViewTick((t) => t + 1);
     }, STALE_REFRESH_MS);
 
     return () => clearInterval(staleTimer);
-  }, [layers, viewTick]);
+  }, [layers, viewTick, isAppVisible]);
 
   // ✅ Cadastre (plain white, thin)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !window.google) return;
+   
+    if (!isAppVisible) return;
 
     if (!cadastreDataRef.current) {
       cadastreDataRef.current = new window.google.maps.Data();
@@ -3001,7 +3028,7 @@ marker = new window.google.maps.Marker({
     return () => {
       cancelled = true;
     };
-  }, [layers, viewTick]);
+  }, [layers, viewTick, isAppVisible]);
 
   const toggleLayer = (id) => {
     setLayers((prev) =>
