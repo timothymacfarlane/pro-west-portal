@@ -294,7 +294,7 @@ function Documents() {
       const pdf = isPdf(v.mime_type, v.file_name);
       const isOffice = !pdf && /(word|excel|spreadsheet|officedocument|msword|ms-excel)/i.test(v.mime_type);
       setOpenUrl(url);
-      setOpenFileName(v.file_name || "document");
+      setOpenFileName(v.file_name || "document");      
       setOpenKind(pdf ? "pdf" : isOffice ? "office" : "download");
       setViewerOpen(true);
     } catch (e) {

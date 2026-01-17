@@ -771,15 +771,6 @@ function Maps() {
   // Address card
   const [selectedAddress, setSelectedAddress] = useState(null);
 
-  // Keep a small cache for instant load + basic offline viewing
-  useEffect(() => {
-    try {
-      localStorage.setItem(MAP_NOTES_CACHE_KEY, JSON.stringify(visibleNotes || []));
-    } catch {
-      // ignore
-    }
-  }, [visibleNotes]);
-
   const fetchNotesFromSupabase = async () => {
     try {
       setNotesSyncError("");
@@ -1431,6 +1422,15 @@ useEffect(() => {
     });
   }, [mapNotes, showAllNotes, portalSelectedJobId, selectedPortalJobNumber]);
 
+    // Keep a small cache for instant load + basic offline viewing
+  useEffect(() => {
+    try {
+      localStorage.setItem(MAP_NOTES_CACHE_KEY, JSON.stringify(visibleNotes || []));
+    } catch {
+      // ignore
+    }
+  }, [visibleNotes]);
+
   // Keep map pins in sync with the filtered notes list
   useEffect(() => {
     try {
@@ -1762,7 +1762,7 @@ useEffect(() => {
     if (!mapRef.current) return;
     fetchPortalJobs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapRef.current]);
+  }, []);
 
   const ensurePortalClusterer = () => {
     const map = mapRef.current;
@@ -2966,7 +2966,6 @@ marker = new window.google.maps.Marker({
       if (visibleMarkers.length) clustererRef.current.addMarkers(visibleMarkers);
     })();
 
-    if (!isAppVisible) return;
     const staleTimer = setInterval(() => {
       const anyVisible = ssmLayer?.visible || bmLayer?.visible || rmLayer?.visible;
       if (anyVisible) setViewTick((t) => t + 1);

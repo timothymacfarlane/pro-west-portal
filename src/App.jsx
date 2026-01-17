@@ -27,6 +27,8 @@ import NotificationBell from "./components/NotificationBell.jsx"; // 🔔 ADDED
 
 import { useAuth } from "./context/AuthContext.jsx";
 
+import { AppVisibilityProvider } from "./context/AppVisibilityContext.jsx";
+
 function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -71,6 +73,7 @@ function App() {
   }, [location.pathname]);
 
   return (
+    <AppVisibilityProvider>
     <div className="app-root">
       {/* ---------- TOP HEADER ---------- */}
       <header className="app-header">
@@ -473,6 +476,7 @@ function App() {
         </main>
       </div>
     </div>
+    </AppVisibilityProvider>
   );
 }
 
