@@ -106,6 +106,9 @@ function Schedule() {
 
   const weekStartISO = formatISO(currentMonday);
 
+  const todayISO = formatISO(new Date());
+
+
   // Load staff list for schedule
   useEffect(() => {
     let cancelled = false;
@@ -548,74 +551,180 @@ function Schedule() {
         )}
 
         <div className="schedule-grid-wrapper" style={{ WebkitOverflowScrolling: "touch" }}>
-          <table className="schedule-grid">
-            <thead>
-              <tr>
-                <th className="schedule-col-person">Staff</th>
-                {weekDays.map((d) => {
-                  const iso = formatISO(d);
-                  const wx = weatherByDate[iso];
-                  return (
-                    <th key={iso} className="schedule-col-day">
-                      <div className="schedule-day-label">
-                        <span className="schedule-day-name">
-                          {d.toLocaleDateString("en-AU", { weekday: "short" })}
-                        </span>
-                        <span className="schedule-day-date">
-                          {d.toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
-                        </span>
-                        {wx && <span className="schedule-day-weather">{wx.line1}</span>}
-                      </div>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedPeople.map((p) => (
-                <tr key={p.id}>
-                  <td className="schedule-person-cell">
-                    <div className="schedule-person-avatar">{getInitialsFromName(p.name)}</div>
-                    <div className="schedule-person-name">{p.name}</div>
+<table className="schedule-grid">
+  {isFlipped ? (
+    <>
+      <thead>
+        <tr>
+          <th className="schedule-col-day schedule-day-col-header">Day</th>
+          {sortedPeople.map((p) => (
+            <th key={p.id} className="schedule-col-person">
+              <div className="schedule-day-label">
+                <span className="schedule-day-name">{p.name}</span>
+              </div>
+            </th>
+          ))}
+        </tr>
+      </thead>
+
+      <tbody>
+        {weekDays.map((d) => {
+          const iso = formatISO(d);
+          const wx = weatherByDate[iso];
+
+          return (
+             <tr key={iso}>
+              {/* Left column = Day */}
+              <td className={"schedule-person-cell schedule-day-cell" + (iso === todayISO ? " schedule-today-cell" : "")}>
+                <div className="schedule-person-name">
+                  {d.toLocaleDateString("en-AU", { weekday: "short" })}
+                </div>
+                <div style={{ fontSize: "0.8rem", opacity: 0.85 }}>
+                  {d.toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
+                </div>
+                {wx && (
+                  <div style={{ fontSize: "0.75rem", opacity: 0.85, marginTop: 4 }}>
+                    {wx.line1}
+                  </div>
+                )}
+              </td>
+
+              {/* Across = People */}
+              {sortedPeople.map((p) => {
+                const cell = getCellVisual(d, p.id);
+                const isSelected =
+                  selectedCell &&
+                  selectedCell.dateISO === cell.dateISO &&
+                  selectedCell.personId === p.id;
+
+                const tooltipText = buildTooltip(p.name, cell);
+
+                return (
+                  <td
+  key={cell.dateISO + "|" + p.id}
+ className={
+  "schedule-cell" +
+  (cell.isWeekend ? " schedule-weekend" : "") +
+  (isSelected ? " schedule-selected" : "")
+}
+                    style={{
+                      backgroundColor: cell.bg,
+                      border: `1px solid ${cell.border || PALETTE.GRID_LINE}`,
+                      cursor: isAdmin ? "pointer" : "default",
+                    }}
+                    onClick={() => onCellClick(cell.dateISO, p.id)}
+                    title={tooltipText}
+                  >
+                    <div className="schedule-cell-status" style={{ color: cell.statusColor }}>
+                      {cell.status}
+                    </div>
+                    {cell.region && <div className="schedule-cell-region">{cell.region}</div>}
+                    {cell.job_ref && <div className="schedule-cell-job">Job: {cell.job_ref}</div>}
                   </td>
-                  {weekDays.map((d) => {
-                    const cell = getCellVisual(d, p.id);
-                    const isSelected =
-                      selectedCell &&
-                      selectedCell.dateISO === cell.dateISO &&
-                      selectedCell.personId === p.id;
+                );
+              })}
+            </tr>
+          );
+        })}
+      </tbody>
+    </>
+  ) : (
+    <>
+      {/* your existing “normal view” head/body 그대로 */}
+      <thead>
+        <tr>
+          <th className="schedule-col-person">Staff</th>
+          {weekDays.map((d) => {
+            const iso = formatISO(d);
+            const wx = weatherByDate[iso];
+            return (
+              <th key={iso} className={"schedule-col-day" + (iso === todayISO ? " schedule-today-col-header" : "")}>
+                <div className="schedule-day-label">
+                  <span className="schedule-day-name">
+                    {d.toLocaleDateString("en-AU", { weekday: "short" })}
+                  </span>
+                  <span className="schedule-day-date">
+                    {d.toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
+                  </span>
+                  {wx && <span className="schedule-day-weather">{wx.line1}</span>}
+                </div>
+              </th>
+            );
+          })}
+        </tr>
+      </thead>
 
-                    const tooltipText = buildTooltip(p.name, cell);
+      <tbody>
+        {sortedPeople.map((p) => (
+          <tr key={p.id}>
+            <td className="schedule-person-cell">
+              <div className="schedule-person-avatar">{getInitialsFromName(p.name)}</div>
+              <div className="schedule-person-name">{p.name}</div>
+            </td>
 
-                    return (
-                      <td
-                        key={cell.dateISO + "|" + p.id}
-                        className={
-                          "schedule-cell" +
-                          (cell.isWeekend ? " schedule-weekend" : "") +
-                          (isSelected ? " schedule-selected" : "")
-                        }
-                        style={{
-                          backgroundColor: cell.bg,
-                          border: `1px solid ${cell.border || PALETTE.GRID_LINE}`,
-                          cursor: isAdmin ? "pointer" : "default",
-                        }}
-                        onClick={() => onCellClick(cell.dateISO, p.id)}
-                        title={tooltipText}
-                      >
-                        <div className="schedule-cell-status" style={{ color: cell.statusColor }}>
-                          {cell.status}
-                        </div>
-                        {cell.region && <div className="schedule-cell-region">{cell.region}</div>}
-                        {cell.job_ref && <div className="schedule-cell-job">Job: {cell.job_ref}</div>}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            {weekDays.map((d) => {
+              const cell = getCellVisual(d, p.id);
+              const isSelected =
+                selectedCell &&
+                selectedCell.dateISO === cell.dateISO &&
+                selectedCell.personId === p.id;
+
+              const tooltipText = buildTooltip(p.name, cell);
+
+              return (
+                <td
+                  key={cell.dateISO + "|" + p.id}
+                  className={
+  "schedule-cell" +
+  (cell.isWeekend ? " schedule-weekend" : "") +
+  (isSelected ? " schedule-selected" : "")
+}
+
+                  style={{
+                    backgroundColor: cell.bg,
+                    border: `1px solid ${cell.border || PALETTE.GRID_LINE}`,
+                    cursor: isAdmin ? "pointer" : "default",
+                  }}
+                  onClick={() => onCellClick(cell.dateISO, p.id)}
+                  title={tooltipText}
+                >
+                  <div className="schedule-cell-status" style={{ color: cell.statusColor }}>
+                    {cell.status}
+                  </div>
+                  {cell.region && <div className="schedule-cell-region">{cell.region}</div>}
+                  {cell.job_ref && <div className="schedule-cell-job">Job: {cell.job_ref}</div>}
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </>
+  )}
+</table>
+
         </div>
+<div className="schedule-legend">
+  {/* FIELD */}
+  <div className="schedule-legend-item">
+  <span
+    className="schedule-legend-swatch"
+    style={{ background: PALETTE.FIELD_TOUCHED_BG, borderColor: PALETTE.FIELD_BORDER }}
+  />
+  <span>FIELD</span>
+</div>
+
+  {/* Other statuses */}
+  {STATUSES.filter((st) => st !== "FIELD").map((st) => (
+    <div key={st} className="schedule-legend-item">
+      <span
+        className="schedule-legend-swatch"
+        style={{ background: PALETTE[st] || "#EEEEEE" }}
+      />
+      <span>{st}</span>
+    </div>
+  ))}
+</div>
 
         <p className="schedule-footer-note">
           Logged in as <strong>{user?.email}</strong>.{" "}
