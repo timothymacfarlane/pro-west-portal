@@ -557,13 +557,14 @@ function Schedule() {
       <thead>
         <tr>
           <th className="schedule-col-day schedule-day-col-header">Day</th>
-          {sortedPeople.map((p) => (
-            <th key={p.id} className="schedule-col-person">
-              <div className="schedule-day-label">
-                <span className="schedule-day-name">{p.name}</span>
-              </div>
-            </th>
-          ))}
+       {sortedPeople.map((p) => (
+  <th key={p.id} className="schedule-col-person">
+    <div className="schedule-flipped-header-person">
+      <div className="schedule-person-avatar">{getInitialsFromName(p.name)}</div>
+      <div className="schedule-flipped-person-name">{p.name}</div>
+    </div>
+  </th>
+))}
         </tr>
       </thead>
 
@@ -575,19 +576,26 @@ function Schedule() {
           return (
              <tr key={iso}>
               {/* Left column = Day */}
-              <td className={"schedule-person-cell schedule-day-cell" + (iso === todayISO ? " schedule-today-cell" : "")}>
-                <div className="schedule-person-name">
-                  {d.toLocaleDateString("en-AU", { weekday: "short" })}
-                </div>
-                <div style={{ fontSize: "0.8rem", opacity: 0.85 }}>
-                  {d.toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
-                </div>
-                {wx && (
-                  <div style={{ fontSize: "0.75rem", opacity: 0.85, marginTop: 4 }}>
-                    {wx.line1}
-                  </div>
-                )}
-              </td>
+             <td className={"schedule-person-cell schedule-day-cell" + (iso === todayISO ? " schedule-today-cell" : "")}>
+  <div className="schedule-person-cell-inner schedule-day-inner">
+
+    {/* Line 1: Day + date */}
+    <div className="schedule-day-line1">
+      <span className="schedule-day-name">
+        {d.toLocaleDateString("en-AU", { weekday: "short" })}
+      </span>
+      <span className="schedule-day-date-inline">
+        {d.toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
+      </span>
+    </div>
+
+    {/* Line 2: Weather */}
+    <div className="schedule-day-line2">
+      {wx ? wx.line1 : ""}
+    </div>
+
+  </div>
+</td>
 
               {/* Across = People */}
               {sortedPeople.map((p) => {
@@ -657,10 +665,12 @@ function Schedule() {
       <tbody>
         {sortedPeople.map((p) => (
           <tr key={p.id}>
-            <td className="schedule-person-cell">
-              <div className="schedule-person-avatar">{getInitialsFromName(p.name)}</div>
-              <div className="schedule-person-name">{p.name}</div>
-            </td>
+          <td className="schedule-person-cell">
+  <div className="schedule-person-cell-inner">
+    <div className="schedule-person-avatar">{getInitialsFromName(p.name)}</div>
+    <div className="schedule-person-name">{p.name}</div>
+  </div>
+</td>
 
             {weekDays.map((d) => {
               const cell = getCellVisual(d, p.id);

@@ -1104,17 +1104,22 @@
   padding: 0.25rem 0.25rem;
   vertical-align: top;
 }
-
-.schedule-col-person {
-  width: 18%;             /* fixed % so the rest can spread */
+/* Worker header cells (both views) */
+.schedule-grid th.schedule-col-person {
   background: #fafafa;
+  text-align: center;
+}
+
+/* Normal/flipped body: ONLY the first column cell should be sticky */
+.schedule-grid tbody td:first-child {
   position: sticky;
   left: 0;
-  z-index: 2;
+  z-index: 1;
+  background: #ffffff;
 }
 
 .schedule-col-day {
-  width: calc(82% / 7);   /* remaining width / 7 days */
+  width: calc(77% / 7);   /* remaining width / 7 days */
   text-align: center;
   background: #fafafa;
 }
@@ -1140,13 +1145,20 @@
 }
 
 .schedule-person-cell {
+  /* keep sticky if you want it */
   position: sticky;
   left: 0;
   z-index: 1;
+
+  background: #ffffff;
+  vertical-align: top;   /* important so it grows with row */
+}
+
+.schedule-person-cell-inner {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  background: #ffffff;
+  height: 100%;          /* makes it stretch with the row */
 }
 
 .schedule-person-avatar {
@@ -1224,6 +1236,32 @@
   flex-direction: column;
   align-items: center;
   gap: 0.2rem;
+}
+/* --- FIX: show avatars in flipped header --- */
+
+/* Let header size itself (required for flipped avatar + name) */
+.schedule-grid thead th {
+  height: auto;
+  min-height: 0;
+  vertical-align: middle;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+/* In flipped view, worker header cells need enough width to not crush avatar */
+.schedule-grid thead th.schedule-col-person {
+  min-width: 110px;
+}
+
+/* Ensure avatar never collapses inside <th> */
+.schedule-grid thead th .schedule-person-avatar {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .schedule-flipped-person-name {
@@ -1333,7 +1371,7 @@
 
 /* Flipped view: Day column controlled by header width */
 .schedule-day-col-header {
-  width: 150px;      /* 👈 adjust this */
+  width: 90px;      /* 👈 adjust this */
   min-width: 150px;
   max-width: 150px;
   text-align: left;
@@ -1345,6 +1383,34 @@
   text-overflow: ellipsis;
 }
 
+/* Flipped view: force 2-line day cell layout */
+.schedule-day-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.schedule-day-line1 {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.schedule-day-name {
+  font-weight: 600;
+}
+
+.schedule-day-date-inline {
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+
+.schedule-day-line2 {
+  font-size: 0.7rem;
+  opacity: 0.8;
+  line-height: 1.1;
+}
 
 /* ===============================
    PRINT LAYOUT FOR SCHEDULE
@@ -2057,6 +2123,39 @@ table {
     background: #fff;
     box-shadow: 0 -6px 16px rgba(0,0,0,0.12);
   }
+  /* SCHEDULE: on mobile, let the whole table slide together (no sticky headers/first column) */
+  .schedule-grid thead th,
+  .schedule-grid th:first-child,
+  .schedule-grid td:first-child {
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    z-index: auto !important;
+  }
+  /* Flipped view header: allow content to lay out properly */
+.schedule-flipped-header-person {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center; /* <-- add this */
+  gap: 0.25rem;
+}
+
+/* Ensure the avatar doesn't get squashed inside <th> */
+.schedule-grid th .schedule-person-avatar {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Flipped header cells: prevent clipping */
+.schedule-grid th.schedule-col-person {
+  overflow: visible;
+}
 }
 /* ==========================================================
    ADMIN – MOBILE FRIENDLY LAYOUT
