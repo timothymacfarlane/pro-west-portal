@@ -1146,9 +1146,6 @@
 
 .schedule-person-cell {
   /* keep sticky if you want it */
-  position: sticky;
-  left: 0;
-  z-index: 1;
 
   background: #ffffff;
   vertical-align: top;   /* important so it grows with row */
@@ -1410,6 +1407,31 @@
   font-size: 0.7rem;
   opacity: 0.8;
   line-height: 1.1;
+}
+/* Let the name actually take the remaining space next to the avatar */
+.schedule-person-cell-inner {
+  width: 100%;
+}
+
+.schedule-person-name {
+  flex: 1;          /* take remaining space */
+  min-width: 0;     /* critical: allows flex child to shrink/grow correctly */
+}
+/* Job number chips (selected job refs) */
+.schedule-job-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  height: 26px;            /* 👈 CHANGE THIS */
+  padding: 0 10px;         /* horizontal padding only */
+
+  border: 1px solid #ddd;
+  border-radius: 999px;
+  background: #fff;
+
+  font-size: 0.8rem;
+  line-height: 1;          /* keeps text vertically centered */
 }
 
 /* ===============================
@@ -1846,7 +1868,7 @@ table {
   }
 
   .schedule-person-name {
-    max-width: 80px;
+    max-width: none;
   }
 
   .schedule-day-weather {
@@ -2112,7 +2134,7 @@ table {
 
   /* Reduce name truncation pain */
   .schedule-person-name {
-    max-width: 80px;
+    max-width: none;
   }
 
   /* Sticky editor panel for field use */
@@ -2123,15 +2145,27 @@ table {
     background: #fff;
     box-shadow: 0 -6px 16px rgba(0,0,0,0.12);
   }
-  /* SCHEDULE: on mobile, let the whole table slide together (no sticky headers/first column) */
-  .schedule-grid thead th,
-  .schedule-grid th:first-child,
-  .schedule-grid td:first-child {
-    position: static !important;
-    left: auto !important;
-    top: auto !important;
-    z-index: auto !important;
-  }
+  /* SCHEDULE: on mobile, keep FIRST COLUMN sticky (Staff normal / Day flipped) */
+.schedule-grid th:first-child,
+.schedule-grid td:first-child {
+  position: sticky !important;
+  left: 0 !important;
+  z-index: 4 !important;
+  background: #ffffff !important;
+}
+
+/* Top-left corner header cell stays above the sticky column */
+.schedule-grid thead th:first-child {
+  z-index: 6 !important;
+  background: #fafafa !important;
+}
+
+/* (Optional) Let the rest of the header row scroll normally on mobile */
+.schedule-grid thead th {
+  position: static !important;
+  top: auto !important;
+  z-index: auto !important;
+}
   /* Flipped view header: allow content to lay out properly */
 .schedule-flipped-header-person {
   display: flex;
@@ -2155,6 +2189,14 @@ table {
 /* Flipped header cells: prevent clipping */
 .schedule-grid th.schedule-col-person {
   overflow: visible;
+}
+/* Mobile: narrower Staff column to free up space */
+@media (max-width: 768px) {
+  .schedule-col-person {
+    width: 120px;        /* 👈 adjust to taste */
+    min-width: 120px;
+    max-width: 120px;
+  }
 }
 }
 /* ==========================================================

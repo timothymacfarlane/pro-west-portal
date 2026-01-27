@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 import { supabase } from "../lib/supabaseClient";
 
 // --- Statuses & colours ---
@@ -75,6 +76,7 @@ function weatherPhrase(code) {
 
 function Schedule() {
   const { user, isAdmin } = useAuth();
+  const isAppVisible = useAppVisibilityContext();
 
   const [currentMonday, setCurrentMonday] = useState(() => getMonday(new Date()));
   const [people, setPeople] = useState([]);
@@ -161,6 +163,8 @@ function Schedule() {
   // Load assignments whenever the week changes
   useEffect(() => {
     let cancelled = false;
+    if (!isAppVisible) return;
+
 
     const loadAssignments = async () => {
       setLoading(true);
@@ -198,11 +202,13 @@ function Schedule() {
 
     loadAssignments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentMonday]);
+  }, [currentMonday, isAppVisible]);
 
   // Fetch weather for this week
   useEffect(() => {
     let cancelled = false;
+    if (!isAppVisible) return;
+
 
     const fetchWeather = async () => {
       setWeatherLoading(true);
@@ -268,7 +274,7 @@ function Schedule() {
     return () => {
       cancelled = true;
     };
-  }, [currentMonday]);
+  }, [currentMonday, isAppVisible]);
 
   const handlePrevWeek = () => {
     setCurrentMonday((prev) => addDays(prev, -7));
@@ -300,6 +306,11 @@ function Schedule() {
   const [editRegion, setEditRegion] = useState("");
   const [editJobRef, setEditJobRef] = useState("");
   const [editNotes, setEditNotes] = useState("");
+  const [jobQuery, setJobQuery] = useState("");
+  const [jobSuggestions, setJobSuggestions] = useState([]);
+  const [jobLoading, setJobLoading] = useState(false);
+  const [selectedJobs, setSelectedJobs] = useState([]); // array of strings e.g. ["12345","67890"]
+
 
   const getCellVisual = (dateInput, personId) => {
     const d =
@@ -366,12 +377,22 @@ function Schedule() {
       setEditStatus(current.status || "FIELD");
       setEditRegion(current.region || "");
       setEditJobRef(current.job_ref || "");
+      const parts = (current.job_ref || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+setSelectedJobs(parts);
+setJobQuery("");
+setJobSuggestions([]);
       setEditNotes(current.notes || "");
     } else {
       setEditStatus("FIELD");
       setEditRegion("");
       setEditJobRef("");
       setEditNotes("");
+      setSelectedJobs([]);
+setJobQuery("");
+setJobSuggestions([]);
     }
   }, [selectedCell, assignments]);
 
@@ -431,6 +452,81 @@ function Schedule() {
       setSaving(false);
     }
   };
+useEffect(() => {
+  let cancelled = false;
+  if (!isAppVisible) return;
+
+
+ if (!jobQuery || isNaN(Number(jobQuery))) {
+  setJobSuggestions([]);
+  return;
+}
+
+  const t = setTimeout(async () => {
+    setJobLoading(true);
+    try {
+      const q = jobQuery.trim();
+
+  const { data, error } = await supabase.rpc("search_jobs", {
+  p_q: q,
+  p_limit: 10,
+});
+
+
+      if (error) throw error;
+
+      if (!cancelled) {
+        setJobSuggestions(
+  (data || []).map((r) => ({
+    job_number: String(r.job_number),
+    full_address: r.full_address || "",
+  }))
+);
+      }
+    } catch (err) {
+      console.error("Job autocomplete failed:", err);
+      if (!cancelled) setJobSuggestions([]);
+    } finally {
+      if (!cancelled) setJobLoading(false);
+    }
+  }, 250); // waits 250ms after you stop typing
+
+  return () => {
+    cancelled = true;
+    clearTimeout(t);
+  };
+}, [jobQuery, isAppVisible]);
+const syncEditJobRef = (arr) => {
+  setEditJobRef(arr.join(", "));
+};
+
+const addJobNumber = (jobNumber) => {
+  setSelectedJobs((prev) => {
+    if (prev.includes(jobNumber)) return prev;
+    const next = [...prev, jobNumber];
+    syncEditJobRef(next);
+    return next;
+  });
+  setJobQuery("");
+  setJobSuggestions([]);
+};
+
+const removeJobNumber = (jobNumber) => {
+  setSelectedJobs((prev) => {
+    const next = prev.filter((j) => j !== jobNumber);
+    syncEditJobRef(next);
+    return next;
+  });
+};
+const handleJobKeyDown = (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+
+    if (jobSuggestions.length > 0) {
+    addJobNumber(jobSuggestions[0].job_number);
+    }
+  }
+};
 
   const handleClear = async () => {
     if (!selectedCell || !isAdmin) return;
@@ -779,15 +875,106 @@ function Schedule() {
             </div>
 
             <div className="schedule-editor-row">
-              <label className="schedule-editor-label">Job ref</label>
-              <input
-                className="maps-search-input"
-                type="text"
-                value={editJobRef}
-                onChange={(e) => setEditJobRef(e.target.value)}
-                placeholder="e.g. 12345"
-              />
+  <label className="schedule-editor-label">Job ref</label>
+
+  <div style={{ position: "relative" }}>
+    {/* Selected jobs */}
+    {selectedJobs.length > 0 && (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "6px" }}>
+        {selectedJobs.map((jn) => (
+          <span
+            key={jn}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "4px 8px",
+              border: "1px solid #ddd",
+              borderRadius: "999px",
+              fontSize: "0.8rem",
+              background: "#fff",
+            }}
+          >
+            {jn}
+            <button
+              type="button"
+              className="btn-pill"
+              style={{ padding: "2px 8px" }}
+              onClick={() => removeJobNumber(jn)}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+    )}
+
+    {/* Type to search */}
+    <input
+      className="maps-search-input"
+      type="text"
+      value={jobQuery}
+      onChange={(e) => setJobQuery(e.target.value)}
+      onKeyDown={handleJobKeyDown}
+      placeholder="Type job number (exact)…"
+    />
+
+{/* Dropdown suggestions */}
+{(jobLoading || jobSuggestions.length > 0) && (
+  <div
+    style={{
+      position: "absolute",
+      left: 0,
+      right: 0,
+      top: "100%",
+      marginTop: "4px",
+      background: "#fff",
+      border: "1px solid #ddd",
+      borderRadius: "8px",
+      zIndex: 50,
+      maxHeight: "200px",
+      overflowY: "auto",
+    }}
+  >
+    {jobLoading && (
+      <div style={{ padding: "8px", fontSize: "0.8rem", opacity: 0.7 }}>
+        Searching…
+      </div>
+    )}
+
+    {!jobLoading &&
+      jobSuggestions.map((job) => (
+        <button
+          key={job.job_number}
+          type="button"
+          onClick={() => addJobNumber(job.job_number)}
+          style={{
+            display: "block",
+            width: "100%",
+            textAlign: "left",
+            padding: "8px",
+            border: "none",
+            background: "transparent",
+            cursor: "pointer",
+          }}
+        >
+          <div style={{ fontWeight: 600 }}>{job.job_number}</div>
+          {job.full_address && (
+            <div style={{ fontSize: "0.75rem", opacity: 0.75 }}>
+              {job.full_address}
             </div>
+          )}
+        </button>
+      ))}
+  </div>
+)}
+
+    {/* This stays your real saved value */}
+    <div style={{ fontSize: "0.7rem", opacity: 0.7, marginTop: "6px" }}>
+      Saved as: {editJobRef || "—"}
+    </div>
+  </div>
+</div>
 
             <div className="schedule-editor-row">
               <label className="schedule-editor-label">Notes</label>
