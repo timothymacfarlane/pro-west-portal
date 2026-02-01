@@ -12,6 +12,32 @@ function startOfFortnightMonday(baseDate = new Date()) {
   d.setHours(0, 0, 0, 0);
   return d;
 }
+function startOfWeekMonday(baseDate = new Date()) {
+  const d = new Date(baseDate);
+  const day = d.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diffToMonday);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+// ✅ Anchor your payroll cycle to a known "Period 1 Monday"
+const PAY_CYCLE_ANCHOR_MONDAY = startOfWeekMonday(new Date("2026-01-12T00:00:00")); 
+// ^ change this date to whatever your real payroll cycle started on
+
+function startOfPayFortnightMonday(baseDate = new Date()) {
+  const chosenMonday = startOfWeekMonday(baseDate);
+
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const diffDays = Math.floor((chosenMonday - PAY_CYCLE_ANCHOR_MONDAY) / msPerDay);
+
+  // floor to the fortnight block index (can be negative if chosen is before anchor)
+  const blockIndex = Math.floor(diffDays / 14);
+
+  const start = new Date(PAY_CYCLE_ANCHOR_MONDAY);
+  start.setDate(start.getDate() + blockIndex * 14);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
 function addDays(date, days) {
   const d = new Date(date);
   d.setDate(d.getDate() + days);
@@ -19,13 +45,12 @@ function addDays(date, days) {
 }
 function formatDateLabel(date) {
   return date.toLocaleDateString("en-AU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
+    day: "numeric",
+    month: "short",
   });
 }
-function formatDayName(date) {
-  return date.toLocaleDateString("en-AU", { weekday: "long" });
+function formatDayName(date, short = false) {
+  return date.toLocaleDateString("en-AU", { weekday: short ? "short" : "long" });
 }
 function parseTimeToMinutes(str) {
   if (!str || typeof str !== "string") return null;
@@ -36,21 +61,57 @@ function parseTimeToMinutes(str) {
   if (Number.isNaN(h) || Number.isNaN(m)) return null;
   return h * 60 + m;
 }
+function minutesToHHMM(mins) {
+  if (mins == null || mins === "") return "";
+  const m = Number(mins);
+  if (!Number.isFinite(m) || m < 0) return "";
+  const hh = String(Math.floor(m / 60)).padStart(2, "0");
+  const mm = String(m % 60).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 function minutesToHoursDecimal(minutes) {
   if (minutes == null) return "";
   const decimal = minutes / 60;
   return decimal.toFixed(2).replace(/\.00$/, "");
 }
+function localIsoDate(d) {
+  const date = new Date(d);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function useIsMobile(breakpointPx = 520) {
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia(`(max-width: ${breakpointPx}px)`).matches;
+  });
 
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpointPx}px)`);
+    const handler = (e) => setIsMobile(e.matches);
+
+    if (mq.addEventListener) mq.addEventListener("change", handler);
+    else mq.addListener(handler);
+
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", handler);
+      else mq.removeListener(handler);
+    };
+  }, [breakpointPx]);
+
+  return isMobile;
+}
 function Timesheets() {
   const { user, isAdmin } = useAuth();
-
+  const isMobile = useIsMobile(520);
   const [staff, setStaff] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState(user?.id || "");
   const [selectedName, setSelectedName] = useState("");
 
-  const [periodStart, setPeriodStart] = useState(startOfFortnightMonday());
-  const periodStartIso = useMemo(() => periodStart.toISOString().slice(0, 10), [periodStart]);
+  const [periodStart, setPeriodStart] = useState(startOfPayFortnightMonday());
+  const periodStartIso = useMemo(() => localIsoDate(periodStart), [periodStart]);
 
   const [jumpDate, setJumpDate] = useState(periodStartIso);
   useEffect(() => setJumpDate(periodStartIso), [periodStartIso]);
@@ -60,6 +121,8 @@ function Timesheets() {
   const [busy, setBusy] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [statusError, setStatusError] = useState("");
+  const [savedFields, setSavedFields] = useState({});
+  const [dirtyFields, setDirtyFields] = useState({});
 
   // Load staff list (admin) for dropdown + colleague suggestions
   useEffect(() => {
@@ -112,12 +175,16 @@ function Timesheets() {
       setStatusMessage("");
       setStatusError("");
 
-      const { data, error } = await supabase
-        .from("timesheet_entries")
-        .select("*")
-        .eq("user_id", selectedUserId)
-        .eq("period_start", periodStartIso)
-        .order("entry_date", { ascending: true });
+      const endIso = localIsoDate(addDays(periodStart, 13));
+
+   const { data, error } = await supabase
+  .from("timesheet_entries")
+  .select("*")
+  .eq("user_id", selectedUserId)
+  .gte("entry_date", periodStartIso)
+  .lte("entry_date", endIso)
+  .order("entry_date", { ascending: true });
+
 
       if (error) {
         console.warn("Error loading timesheet entries:", error.message);
@@ -138,6 +205,8 @@ function Timesheets() {
       });
 
       setEntries(map);
+      setSavedFields({});
+      setDirtyFields({});
       setLoadingPeriod(false);
     };
 
@@ -157,16 +226,33 @@ function Timesheets() {
     () => Array.from({ length: 7 }, (_, i) => addDays(periodStart, 7 + i)),
     [periodStart]
   );
+const fieldKey = (dateKey, field) => `${dateKey}__${field}`;
 
-  const handleFieldChange = (dateKey, field, value) => {
-    setEntries((prev) => ({
-      ...prev,
-      [dateKey]: { ...(prev[dateKey] || {}), [field]: value },
-    }));
-  };
+ const handleFieldChange = (dateKey, field, value) => {
+  setEntries((prev) => ({
+    ...prev,
+    [dateKey]: { ...(prev[dateKey] || {}), [field]: value },
+  }));
 
-  const buildRowData = (date) => {
-    const isoKey = date.toISOString().slice(0, 10);
+
+  // mark this specific input as edited since last save
+  const k = fieldKey(dateKey, field);
+  setDirtyFields((prev) => ({ ...prev, [k]: true }));
+};
+const clearField = (dateKey, field) => {
+  handleFieldChange(dateKey, field, "");
+};
+
+  const inputClass = (dateKey, field) => {
+  const k = fieldKey(dateKey, field);
+  const isSaved = !!savedFields[k];
+  const isDirty = !!dirtyFields[k];
+  return `maps-search-input ${isSaved && !isDirty ? "ts-saved" : ""}`;
+};
+
+
+    const buildRowData = (date) => {
+    const isoKey = localIsoDate(date);
     const row = entries[isoKey] || {};
     const startMin = parseTimeToMinutes(row.start);
     const finishMin = parseTimeToMinutes(row.finish);
@@ -181,7 +267,7 @@ function Timesheets() {
     return {
       isoKey,
       date,
-      dayName: formatDayName(date),
+      dayName: formatDayName(date, isMobile),
       colleague: row.colleague || "",
       start: row.start || "",
       finish: row.finish || "",
@@ -195,29 +281,72 @@ function Timesheets() {
   const week1Rows = week1Days.map(buildRowData);
   const week2Rows = week2Days.map(buildRowData);
 
+  // Week 2 is "complete" when every day is either:
+// - completely blank (no fields touched), OR
+// - has a valid workedMinutes (start & finish make sense)
+const isWeek2Complete = useMemo(() => {
+  return week2Rows.every((r) => {
+    const hasAny =
+      (r.colleague && r.colleague.trim()) ||
+      (r.start && r.start.trim()) ||
+      (r.finish && r.finish.trim()) ||
+      (r.lunch && r.lunch.trim()) ||
+      (r.notes && r.notes.trim());
+
+    if (!hasAny) return true; // blank day is fine
+    return r.workedMinutes != null; // must have valid calculated minutes
+  });
+}, [week2Rows]);
+
+const canNavigateFortnight = isWeek2Complete;
+
   const week1TotalMinutes = week1Rows.reduce((sum, r) => sum + (r.workedMinutes || 0), 0);
   const week2TotalMinutes = week2Rows.reduce((sum, r) => sum + (r.workedMinutes || 0), 0);
   const fortnightTotalMinutes = week1TotalMinutes + week2TotalMinutes;
 
-  const goPreviousFortnight = () => !busy && setPeriodStart((prev) => addDays(prev, -14));
-  const goCurrentFortnight = () => {
-    if (busy) return;
-    setPeriodStart(startOfFortnightMonday());
-    setStatusMessage("");
-    setStatusError("");
-  };
-  const goNextFortnight = () => !busy && setPeriodStart((prev) => addDays(prev, 14));
+  const blockIfLocked = () => {
+  if (canNavigateFortnight) return false;
+  setStatusError("Fortnight is locked until Week 2 is complete.");
+  setStatusMessage("");
+  return true;
+};
 
-  const handleJumpDateChange = (e) => {
-    const val = e.target.value;
-    setJumpDate(val);
-    if (!val || busy) return;
-    const chosen = new Date(val + "T00:00:00");
-    if (Number.isNaN(chosen.getTime())) return;
-    setPeriodStart(startOfFortnightMonday(chosen));
-    setStatusMessage("");
-    setStatusError("");
-  };
+const goPreviousFortnight = () => {
+  if (busy) return;
+  setPeriodStart((prev) => startOfPayFortnightMonday(addDays(prev, -14)));
+  setStatusMessage("");
+  setStatusError("");
+};
+
+const goCurrentFortnight = () => {
+  if (busy) return;
+  setPeriodStart(startOfPayFortnightMonday());
+  setStatusMessage("");
+  setStatusError("");
+};
+
+const goNextFortnight = () => {
+  if (busy) return;
+  setPeriodStart((prev) => startOfPayFortnightMonday(addDays(prev, 14)));
+  setStatusMessage("");
+  setStatusError("");
+};
+
+const handleJumpDateChange = (e) => {
+  const val = e.target.value;
+  setJumpDate(val);
+
+  if (!val || busy) return;
+
+  const chosen = new Date(val + "T00:00:00");
+  if (Number.isNaN(chosen.getTime())) return;
+
+  // ✅ snap to the correct pay-cycle fortnight Monday
+  setPeriodStart(startOfPayFortnightMonday(chosen));
+  setStatusMessage("");
+  setStatusError("");
+};
+
 
   const buildFortnightEntries = () => {
     const rows = [...week1Rows, ...week2Rows];
@@ -238,17 +367,23 @@ function Timesheets() {
   };
 
   const saveFortnightToSupabase = async (payload) => {
-    const { error: delError } = await supabase
-      .from("timesheet_entries")
-      .delete()
-      .eq("user_id", selectedUserId)
-      .eq("period_start", periodStartIso);
+  const endIso = localIsoDate(addDays(periodStart, 13));
 
-    if (delError) throw delError;
+  const { error: delError } = await supabase
+    .from("timesheet_entries")
+    .delete()
+    .eq("user_id", selectedUserId)
+    .gte("entry_date", periodStartIso)
+    .lte("entry_date", endIso);
 
-    const { error: insertError } = await supabase.from("timesheet_entries").insert(payload);
-    if (insertError) throw insertError;
-  };
+  if (delError) throw delError;
+
+  const { error: insError } = await supabase
+    .from("timesheet_entries")
+    .insert(payload);
+
+  if (insError) throw insError;
+};
 
   const buildCsv = () => {
     const header = [
@@ -270,14 +405,11 @@ function Timesheets() {
     const lines = [header.join(",")];
 
     allRows.forEach((r) => {
-      const hasAny =
-        r.colleague || r.start || r.finish || r.lunch || r.notes || r.workedMinutes != null;
-      if (!hasAny) return;
-
+     
       const fields = [
         `"${(selectedName || "").replace(/"/g, '""')}"`,
         `"${periodStartIso}"`,
-        `"${endDate.toISOString().slice(0, 10)}"`,
+        `"${localIsoDate(endDate)}"`,
         `"${r.isoKey}"`,
         `"${r.dayName}"`,
         `"${(r.colleague || "").replace(/"/g, '""')}"`,
@@ -289,7 +421,34 @@ function Timesheets() {
       ];
       lines.push(fields.join(","));
     });
+// ---- TOTAL HOURS (sum all days in the fortnight) ----
+const totalMinutes = allRows.reduce((sum, r) => {
+  return sum + (Number.isFinite(r.workedMinutes) ? r.workedMinutes : 0);
+}, 0);
 
+const totalHoursDecimal = minutesToHoursDecimal(totalMinutes);
+
+// Add a blank spacer line (optional)
+lines.push("");
+
+// Add TOTAL row aligned to your columns
+// Your CSV columns are: Name, Period Start, Period End, Date, Day, Colleague, Start, Finish, Lunch, Hours, Notes
+// So we place TOTAL in Notes column and the number in Hours column (10th field)
+lines.push(
+  [
+    `"${(selectedName || "").replace(/"/g, '""')}"`,
+    `"${periodStartIso}"`,
+    `"${localIsoDate(endDate)}"`,
+    `""`,
+    `""`,
+    `""`,
+    `""`,
+    `""`,
+    `""`,
+    `"${totalHoursDecimal}"`,
+    `"TOTAL HOURS"`,
+  ].join(",")
+);
     return lines.join("\r\n");
   };
 
@@ -309,6 +468,28 @@ function Timesheets() {
 
     try {
       await saveFortnightToSupabase(payload);
+if (isWeek2Complete) {
+  setStatusMessage("Fortnight complete — exported.");
+  setStatusError("");
+  // stay on the current fortnight (no auto-advance)
+}
+
+      // mark all currently-entered fields as saved
+setSavedFields(() => {
+  const next = {};
+  Object.entries(entries).forEach(([dateKey, row]) => {
+    ["colleague", "start", "finish", "lunch", "notes"].forEach((f) => {
+      const v = row?.[f];
+      if (v && String(v).trim() !== "") {
+        next[fieldKey(dateKey, f)] = true;
+      }
+    });
+  });
+  return next;
+});
+
+// everything is now saved, so clear dirty flags
+setDirtyFields({});
       setStatusMessage("Fortnight saved.");
     } catch (err) {
       console.error("Error saving fortnight:", err);
@@ -335,6 +516,29 @@ function Timesheets() {
 
     try {
       await saveFortnightToSupabase(payload);
+     if (isWeek2Complete) {
+  setStatusMessage("Fortnight complete — saved.");
+  setStatusError("");
+  // stay on the current fortnight (no auto-advance)
+}
+
+      // mark all currently-entered fields as saved
+setSavedFields(() => {
+  const next = {};
+  Object.entries(entries).forEach(([dateKey, row]) => {
+    ["colleague", "start", "finish", "lunch", "notes"].forEach((f) => {
+      const v = row?.[f];
+      if (v && String(v).trim() !== "") {
+        next[fieldKey(dateKey, f)] = true;
+      }
+    });
+  });
+  return next;
+});
+
+// everything is now saved, so clear dirty flags
+setDirtyFields({});
+
 
       const csv = buildCsv();
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -360,11 +564,11 @@ function Timesheets() {
 
       if (uploadError) throw uploadError;
 
-      setStatusMessage("Fortnight submitted, CSV downloaded, and saved to server storage.");
+      setStatusMessage("Fortnight exported, CSV downloaded, and saved to server storage.");
     } catch (err) {
-      console.error("Error submitting fortnight:", err);
+      console.error("Error exporting fortnight:", err);
       const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
-      setStatusError(`There was a problem submitting this fortnight. (${msg})`);
+      setStatusError(`There was a problem exporting this fortnight. (${msg})`);
     } finally {
       setBusy(false);
     }
@@ -393,16 +597,16 @@ function Timesheets() {
             ◀ Previous
           </button>
           <button type="button" className="btn-pill" onClick={goCurrentFortnight} disabled={loadingPeriod || busy}>
-            Current fortnight
+            Current Fortnight
           </button>
           <button type="button" className="btn-pill" onClick={goNextFortnight} disabled={loadingPeriod || busy}>
             Next ▶
           </button>
           <button type="button" className="btn-pill" onClick={handleSaveFortnight} disabled={loadingPeriod || busy}>
-            {busy ? "Saving…" : "Save fortnight"}
+            {busy ? "Saving…" : "Save Fortnight"}
           </button>
           <button type="button" className="btn-pill primary" onClick={handleSubmitFortnight} disabled={loadingPeriod || busy}>
-            {busy ? "Working…" : "Submit fortnight"}
+            {busy ? "Working…" : "Export Fortnight"}
           </button>
         </>
       }
@@ -474,17 +678,17 @@ function Timesheets() {
         <h3 className="card-title">Week 1 (Mon–Sun)</h3>
 
         <div style={{ overflowX: "auto", marginTop: "0.5rem" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+        <table className="ts-table" style={{ borderCollapse: "collapse", fontSize: "0.85rem" }}>
             <thead>
               <tr>
-                <th className="ts-head">Day</th>
-                <th className="ts-head">Date</th>
-                <th className="ts-head">Work colleague</th>
-                <th className="ts-head">Start</th>
-                <th className="ts-head">Finish</th>
-                <th className="ts-head">Lunch</th>
-                <th className="ts-head">Hours</th>
-                <th className="ts-head">Notes</th>
+                <th className="ts-head ts-sticky ts-sticky-day">Day</th>
+                <th className="ts-head ts-sticky ts-sticky-date">Date</th>
+                <th className="ts-head ts-col-colleague">Work colleague</th>
+                <th className="ts-head ts-col-start">Start</th>
+                <th className="ts-head ts-col-finish">Finish</th>
+                <th className="ts-head ts-col-lunch">Lunch</th>
+                <th className="ts-head ts-col-hours">Hours</th>
+                <th className="ts-head ts-col-notes">Notes</th>
               </tr>
             </thead>
             <tbody>
@@ -492,50 +696,64 @@ function Timesheets() {
                 const row = buildRowData(date);
                 return (
                   <tr key={row.isoKey}>
-                    <td className="ts-cell ts-cell-day">{row.dayName}</td>
-                    <td className="ts-cell">{formatDateLabel(row.date)}</td>
-                    <td className="ts-cell">
+                    <td className="ts-cell ts-cell-day ts-sticky ts-sticky-day">{row.dayName}</td>
+                    <td className="ts-cell ts-cell-date ts-sticky ts-sticky-date">{formatDateLabel(row.date)}</td>
+                    <td className="ts-cell ts-col-colleague">
                       <input
                         type="text"
                         list="colleagues-list"
-                        className="maps-search-input"
+                        className={inputClass(row.isoKey, "colleague")}
                         value={row.colleague}
                         onChange={(e) => handleFieldChange(row.isoKey, "colleague", e.target.value)}
-                        placeholder="Who you worked with"
+                        placeholder="Worked with"
                       />
                     </td>
-                    <td className="ts-cell ts-cell-time">
+                    <td className="ts-cell ts-cell-time ts-col-start">
                       <input
-                        type="text"
-                        className="maps-search-input"
-                        value={row.start}
-                        onChange={(e) => handleFieldChange(row.isoKey, "start", e.target.value)}
-                        placeholder="07:00"
-                      />
+  type="time"
+  className={inputClass(row.isoKey, "start")}
+  value={row.start || ""}
+  step="300"
+  onChange={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
+  onInput={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
+  onBlur={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
+/>
+
                     </td>
-                    <td className="ts-cell ts-cell-time">
+                    <td className="ts-cell ts-cell-time ts-col-finish">
                       <input
-                        type="text"
-                        className="maps-search-input"
-                        value={row.finish}
-                        onChange={(e) => handleFieldChange(row.isoKey, "finish", e.target.value)}
-                        placeholder="15:00"
-                      />
+  type="time"
+  className={inputClass(row.isoKey, "finish")}
+  value={row.finish || ""}
+  onChange={(e) => handleFieldChange(row.isoKey, "finish", e.target.value || "")}
+  onInput={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
+  step="300"
+/>
                     </td>
-                    <td className="ts-cell ts-cell-time">
+                    <td className="ts-cell ts-cell-time ts-col-lunch">
                       <input
-                        type="text"
-                        className="maps-search-input"
-                        value={row.lunch}
-                        onChange={(e) => handleFieldChange(row.isoKey, "lunch", e.target.value)}
-                        placeholder="00:30"
-                      />
+  type="text"
+  className={inputClass(row.isoKey, "lunch")}
+  value={row.lunch}
+  inputMode="numeric"
+  pattern="[0-9]*"
+  placeholder="30"
+  onChange={(e) => {
+    const digits = e.target.value.replace(/[^\d]/g, "");
+    if (digits === "") {
+      handleFieldChange(row.isoKey, "lunch", "");
+      return;
+    }
+    const mins = parseInt(digits, 10);
+    handleFieldChange(row.isoKey, "lunch", minutesToHHMM(mins));
+  }}
+/>
                     </td>
-                    <td className="ts-cell ts-cell-hours">{row.workedHoursDecimal}</td>
-                    <td className="ts-cell">
+                    <td className="ts-cell ts-cell-hours ts-col-hours">{row.workedHoursDecimal}</td>
+                    <td className="ts-cell ts-col-notes">
                       <input
                         type="text"
-                        className="maps-search-input"
+                        className={inputClass(row.isoKey, "notes")}
                         value={row.notes}
                         onChange={(e) => handleFieldChange(row.isoKey, "notes", e.target.value)}
                         placeholder="Job / comments"
@@ -563,17 +781,17 @@ function Timesheets() {
         <h3 className="card-title">Week 2 (Mon–Sun)</h3>
 
         <div style={{ overflowX: "auto", marginTop: "0.5rem" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+        <table className="ts-table" style={{ borderCollapse: "collapse", fontSize: "0.85rem" }}>
             <thead>
               <tr>
-                <th className="ts-head">Day</th>
-                <th className="ts-head">Date</th>
-                <th className="ts-head">Work colleague</th>
-                <th className="ts-head">Start</th>
-                <th className="ts-head">Finish</th>
-                <th className="ts-head">Lunch</th>
-                <th className="ts-head">Hours</th>
-                <th className="ts-head">Notes</th>
+                <th className="ts-head ts-sticky ts-sticky-day">Day</th>
+                <th className="ts-head ts-sticky ts-sticky-date">Date</th>
+                <th className="ts-head ts-col-colleague">Work colleague</th>
+                <th className="ts-head ts-col-start">Start</th>
+                <th className="ts-head ts-col-finish">Finish</th>
+                <th className="ts-head ts-col-lunch">Lunch</th>
+                <th className="ts-head ts-col-hours">Hours</th>
+                <th className="ts-head ts-col-notes">Notes</th>
               </tr>
             </thead>
             <tbody>
@@ -581,50 +799,64 @@ function Timesheets() {
                 const row = buildRowData(date);
                 return (
                   <tr key={row.isoKey}>
-                    <td className="ts-cell ts-cell-day">{row.dayName}</td>
-                    <td className="ts-cell">{formatDateLabel(row.date)}</td>
-                    <td className="ts-cell">
+                    <td className="ts-cell ts-cell-day ts-sticky ts-sticky-day">{row.dayName}</td>
+                    <td className="ts-cell ts-cell-date ts-sticky ts-sticky-date">{formatDateLabel(row.date)}</td>
+                    <td className="ts-cell ts-col-colleague">
                       <input
                         type="text"
                         list="colleagues-list"
-                        className="maps-search-input"
+                        className={inputClass(row.isoKey, "colleague")}
                         value={row.colleague}
                         onChange={(e) => handleFieldChange(row.isoKey, "colleague", e.target.value)}
-                        placeholder="Who you worked with"
+                        placeholder="Worked with"
                       />
                     </td>
-                    <td className="ts-cell ts-cell-time">
+                    <td className="ts-cell ts-cell-time ts-col-start">
                       <input
-                        type="text"
-                        className="maps-search-input"
-                        value={row.start}
-                        onChange={(e) => handleFieldChange(row.isoKey, "start", e.target.value)}
-                        placeholder="07:00"
-                      />
+  type="time"
+  className={inputClass(row.isoKey, "start")}
+  value={row.start || ""}
+  step="300"
+  onChange={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
+  onInput={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
+  onBlur={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
+/>
                     </td>
-                    <td className="ts-cell ts-cell-time">
+                    <td className="ts-cell ts-cell-time ts-col-finish">
                       <input
-                        type="text"
-                        className="maps-search-input"
-                        value={row.finish}
-                        onChange={(e) => handleFieldChange(row.isoKey, "finish", e.target.value)}
-                        placeholder="15:00"
-                      />
+  type="time"
+  className={inputClass(row.isoKey, "finish")}
+  value={row.finish || ""}
+  step="300"
+  onChange={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
+  onInput={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
+  onBlur={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
+/>
                     </td>
-                    <td className="ts-cell ts-cell-time">
+                    <td className="ts-cell ts-cell-time ts-col-lunch">
                       <input
-                        type="text"
-                        className="maps-search-input"
-                        value={row.lunch}
-                        onChange={(e) => handleFieldChange(row.isoKey, "lunch", e.target.value)}
-                        placeholder="00:30"
-                      />
+  type="text"
+  className={inputClass(row.isoKey, "lunch")}
+  value={row.lunch}
+  inputMode="numeric"
+  pattern="[0-9]*"
+  placeholder="30"
+  onChange={(e) => {
+    const digits = e.target.value.replace(/[^\d]/g, "");
+    if (digits === "") {
+      handleFieldChange(row.isoKey, "lunch", "");
+      return;
+    }
+    const mins = parseInt(digits, 10);
+    handleFieldChange(row.isoKey, "lunch", minutesToHHMM(mins));
+  }}
+/>
                     </td>
-                    <td className="ts-cell ts-cell-hours">{row.workedHoursDecimal}</td>
-                    <td className="ts-cell">
+                    <td className="ts-cell ts-cell-hours ts-col-hours">{row.workedHoursDecimal}</td>
+                    <td className="ts-cell ts-col-notes">
                       <input
                         type="text"
-                        className="maps-search-input"
+                        className={inputClass(row.isoKey, "notes")}
                         value={row.notes}
                         onChange={(e) => handleFieldChange(row.isoKey, "notes", e.target.value)}
                         placeholder="Job / comments"
@@ -656,6 +888,116 @@ function Timesheets() {
 
       {statusError && <div style={{ marginTop: "0.6rem", fontSize: "0.85rem", color: "#b71c1c" }}>{statusError}</div>}
       {statusMessage && <div style={{ marginTop: "0.6rem", fontSize: "0.85rem", color: "#2e7d32" }}>{statusMessage}</div>}
+    <style>{`
+  /* --- Timesheets: sticky Day + Date columns for mobile horizontal scroll --- */
+
+  /* Set consistent widths so sticky offsets are reliable */
+  
+:root {
+  --ts-day-w: 80px;
+  --ts-date-w: 45px;
+}
+@media (max-width: 520px) {
+  :root { --ts-day-w: 35px; }
+}
+
+/* Make ALL header cells sticky to the top */
+th.ts-head {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 20; /* header layer */
+}
+
+/* Sticky base */
+.ts-sticky {
+  position: sticky;
+  background: #fff;
+}
+
+/* Sticky Day/Date body cells */
+td.ts-sticky-day {
+  left: 0;
+  z-index: 10; /* below headers */
+  min-width: var(--ts-day-w);
+  width: var(--ts-day-w);
+  max-width: var(--ts-day-w);
+  box-shadow: 1px 0 0 rgba(0,0,0,0.08);
+}
+
+td.ts-sticky-date {
+  left: var(--ts-day-w);
+  z-index: 10;
+  min-width: var(--ts-date-w);
+  width: var(--ts-date-w);
+  max-width: var(--ts-date-w);
+  box-shadow: 1px 0 0 rgba(0,0,0,0.08);
+}
+
+/* ✅ Sticky Day/Date header cells (top-left) MUST be above other headers */
+th.ts-sticky-day {
+  left: 0;
+  z-index: 40; /* higher than th.ts-head */
+  min-width: var(--ts-day-w);
+  width: var(--ts-day-w);
+  max-width: var(--ts-day-w);
+  box-shadow: 1px 0 0 rgba(0,0,0,0.12);
+}
+
+th.ts-sticky-date {
+  left: var(--ts-day-w);
+  z-index: 40;
+  min-width: var(--ts-date-w);
+  width: var(--ts-date-w);
+  max-width: var(--ts-date-w);
+  box-shadow: 1px 0 0 rgba(0,0,0,0.12);
+}
+/* ===============================
+   Timesheets column sizing
+   =============================== */
+
+:root {
+  --ts-colleague-w: 140px;
+  --ts-start-w: 120px;
+  --ts-finish-w: 120px;
+  --ts-lunch-w: 60px;
+  --ts-hours-w: 30px;
+  --ts-notes-w: 125px;
+}
+
+/* Mobile tightening */
+@media (max-width: 520px) {
+  :root {
+    --ts-colleague-w: 140px;
+    --ts-start-w: 60px;
+    --ts-finish-w: 60px;
+    --ts-lunch-w: 60px;
+    --ts-hours-w: 30px;
+    --ts-notes-w: 130px;
+  }
+}
+
+ /* ✅ critical: table must respect widths */
+  .ts-table{
+    table-layout: fixed;
+    width: max-content;
+  }
+
+  th.ts-col-colleague, td.ts-col-colleague { width: var(--ts-colleague-w); min-width: var(--ts-colleague-w); max-width: var(--ts-colleague-w); }
+  th.ts-col-start, td.ts-col-start { width: var(--ts-start-w); min-width: var(--ts-start-w); max-width: var(--ts-start-w); }
+  th.ts-col-finish, td.ts-col-finish { width: var(--ts-finish-w); min-width: var(--ts-finish-w); max-width: var(--ts-finish-w); }
+  th.ts-col-lunch, td.ts-col-lunch { width: var(--ts-lunch-w); min-width: var(--ts-lunch-w); max-width: var(--ts-lunch-w); }
+  th.ts-col-hours, td.ts-col-hours { width: var(--ts-hours-w); min-width: var(--ts-hours-w); max-width: var(--ts-hours-w); }
+  th.ts-col-notes, td.ts-col-notes { width: var(--ts-notes-w); min-width: var(--ts-notes-w); max-width: var(--ts-notes-w); }
+
+  td.ts-cell input,
+  td.ts-cell select,
+  td.ts-cell textarea{
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+`}</style>
     </PageLayout>
   </>
   );

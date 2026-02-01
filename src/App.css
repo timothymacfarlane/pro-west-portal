@@ -1026,6 +1026,10 @@
   font-size: 0.8rem;
   background: #fff8f8;
 }
+.ts-saved {
+  background: #e8f5e9 !important;
+  border-color: #2e7d32 !important;
+}
 
 /* ===============================
    SCHEDULE ADMIN STYLES
