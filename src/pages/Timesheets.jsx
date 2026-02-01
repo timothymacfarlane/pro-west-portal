@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabaseClient";
+import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 
 // ----- Helpers for dates & times -----
 function startOfFortnightMonday(baseDate = new Date()) {
@@ -123,10 +124,12 @@ function Timesheets() {
   const [statusError, setStatusError] = useState("");
   const [savedFields, setSavedFields] = useState({});
   const [dirtyFields, setDirtyFields] = useState({});
+  const isAppVisible = useAppVisibilityContext();
 
   // Load staff list (admin) for dropdown + colleague suggestions
   useEffect(() => {
     if (!user) return;
+    if (!isAppVisible) return;
 
     if (!isAdmin) {
       setSelectedUserId(user.id);
@@ -163,10 +166,14 @@ function Timesheets() {
     };
 
     loadStaff();
-  }, [user, isAdmin]);
+  }, [user, isAdmin, isAppVisible]);
 
   // Load existing entries for selected user + period
   useEffect(() => {
+    if (!isAppVisible) return;
+
+    let cancelled = false;
+
     const loadEntries = async () => {
       if (!user) return;
       if (!selectedUserId) return;
@@ -185,6 +192,7 @@ function Timesheets() {
   .lte("entry_date", endIso)
   .order("entry_date", { ascending: true });
 
+  if (cancelled) return;
 
       if (error) {
         console.warn("Error loading timesheet entries:", error.message);
@@ -211,7 +219,10 @@ function Timesheets() {
     };
 
     loadEntries();
-  }, [user, selectedUserId, periodStartIso]);
+    return () => {
+    cancelled = true;
+  };
+  }, [user, selectedUserId, periodStartIso, isAppVisible, periodStart]);
 
   const fortnightLabel = useMemo(() => {
     const end = addDays(periodStart, 13);
@@ -969,8 +980,8 @@ th.ts-sticky-date {
 @media (max-width: 520px) {
   :root {
     --ts-colleague-w: 140px;
-    --ts-start-w: 60px;
-    --ts-finish-w: 60px;
+    --ts-start-w: 70px;
+    --ts-finish-w: 70px;
     --ts-lunch-w: 60px;
     --ts-hours-w: 30px;
     --ts-notes-w: 130px;
@@ -997,6 +1008,85 @@ th.ts-sticky-date {
     max-width: 100%;
     box-sizing: border-box;
   }
+   /* ===============================
+   Mobile Table layout + column control sizing
+   =============================== */
+
+.ts-table{
+  table-layout: fixed;
+  width: max-content; /* allows horizontal scroll to size naturally */
+}
+
+/* Keep cells from letting inputs overlap neighbours */
+.ts-table td.ts-cell{
+  vertical-align: middle;
+}
+
+.ts-table td.ts-cell-time{
+  overflow: hidden; /* prevents time control bleeding outside cell */
+}
+
+/* Make ALL inputs/selects match height & padding (like Work colleague box) */
+:root{
+  --ts-control-h: 36px;
+  --ts-control-fs: 14px;
+  --ts-control-pad-x: 10px;
+  --ts-control-pad-y: 6px;
+  --ts-control-radius: 10px;
+}
+
+@media (max-width: 520px){
+  :root{
+    --ts-control-h: 34px;
+    --ts-control-fs: 14px;
+    --ts-control-pad-x: 8px;
+    --ts-control-pad-y: 6px;
+  }
+}
+
+/* Your inputs already use "maps-search-input" (from inputClass), so style that */
+.ts-table .maps-search-input{
+  height: var(--ts-control-h);
+  min-height: var(--ts-control-h);
+  padding: var(--ts-control-pad-y) var(--ts-control-pad-x);
+  font-size: var(--ts-control-fs);
+  border-radius: var(--ts-control-radius);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Normalize time inputs specifically (mobile Safari/Chrome differences) */
+.ts-table input[type="time"].maps-search-input{
+  -webkit-appearance: none;
+  appearance: none;
+  line-height: calc(var(--ts-control-h) - 2px);
+}
+
+/* Optional: ensure the time icon doesn’t squash the text */
+.ts-table input[type="time"].maps-search-input{
+  padding-right: 6px;
+}
+ @media (max-width: 520px){
+  .ts-table th.ts-head,
+  .ts-table td.ts-cell{
+    padding: 6px 6px !important;
+  }
+}
+  @media (max-width: 520px){
+  td.ts-col-notes .maps-search-input:focus{
+    width: 260px;              /* expands within scroll area */
+  }
+}
+ /* Force time inputs to use normal text colour */
+.ts-table input[type="time"]{
+  color: #111;              /* or var(--text-color) if you have one */
+  background-color: #fff;
+}
+.ts-table input[type="time"]:focus{
+  color: #111;
+  outline: none;
+}
 `}</style>
     </PageLayout>
   </>
