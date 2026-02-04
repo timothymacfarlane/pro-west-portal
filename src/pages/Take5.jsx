@@ -1797,7 +1797,7 @@ function Take5() {
               <div style={{ marginTop: "0.2rem" }}>
                 <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "1rem" }}>Likelihood</h4>
 
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
+                 <table className="ts-table" style={{ borderCollapse: "collapse", fontSize: "0.85rem" }}>
                   <thead>
                     <tr>
                       <th style={{ border: "1px solid #ddd", padding: "0.55rem", background: "#fafafa" }}>
@@ -1849,7 +1849,7 @@ function Take5() {
               <div style={{ marginTop: "0.2rem" }}>
                 <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "1rem" }}>Consequence</h4>
 
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
+                 <table className="ts-table" style={{ borderCollapse: "collapse", fontSize: "0.85rem" }}>
                   <thead>
                     <tr>
                       <th style={{ border: "1px solid #ddd", padding: "0.55rem", background: "#fafafa" }}>

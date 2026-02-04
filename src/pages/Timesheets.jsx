@@ -107,6 +107,8 @@ function useIsMobile(breakpointPx = 520) {
 function Timesheets() {
   const { user, isAdmin } = useAuth();
   const isMobile = useIsMobile(520);
+  const todayIso = localIsoDate(new Date());
+
   const [staff, setStaff] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState(user?.id || "");
   const [selectedName, setSelectedName] = useState("");
@@ -706,7 +708,8 @@ setDirtyFields({});
               {week1Days.map((date) => {
                 const row = buildRowData(date);
                 return (
-                  <tr key={row.isoKey}>
+                  <tr key={row.isoKey}
+                  className={row.isoKey === todayIso ? "ts-today" : ""}>
                     <td className="ts-cell ts-cell-day ts-sticky ts-sticky-day">{row.dayName}</td>
                     <td className="ts-cell ts-cell-date ts-sticky ts-sticky-date">{formatDateLabel(row.date)}</td>
                     <td className="ts-cell ts-col-colleague">
@@ -809,7 +812,8 @@ setDirtyFields({});
               {week2Days.map((date) => {
                 const row = buildRowData(date);
                 return (
-                  <tr key={row.isoKey}>
+                  <tr key={row.isoKey}
+                  className={row.isoKey === todayIso ? "ts-today" : ""}>
                     <td className="ts-cell ts-cell-day ts-sticky ts-sticky-day">{row.dayName}</td>
                     <td className="ts-cell ts-cell-date ts-sticky ts-sticky-date">{formatDateLabel(row.date)}</td>
                     <td className="ts-cell ts-col-colleague">
@@ -896,7 +900,35 @@ setDirtyFields({});
           </table>
         </div>
       </div>
+<div className="ts-help">
+  <div className="ts-help-title">How to complete & export your timesheet</div>
 
+  <ul className="ts-help-list">
+    <li>
+      <strong>Daily times:</strong> Enter Start and Finish times plus the duration of your Lunch Break for each day worked.
+      Times to be rounded to nearest 15 minute interval. Hours are calculated automatically.
+    </li>
+    <li>
+      <strong>Work colleague:</strong> Select who you worked with (if applicable).
+    </li>
+    <li>
+      <strong>Notes:</strong> Add brief notes if desired.
+    </li>
+    <li>
+      <strong>Save:</strong> YOU MUST SAVE your changes before navigating to another fortnight or page. Time entries will go green. Failing to do this will result in entries being unsaved.
+    </li>
+    <li>
+      <strong>Export:</strong> Export and download your timesheet once the fortnight is complete, then submit to payroll - <strong>admin@prowestsurveying.com.au</strong>  
+    </li>
+    <li>
+      <strong>Weekdays Not Worked:</strong> For weekdays not worked, leave time entries blank and place a Note saying, "Not Worked". Weekends don't require a note.
+    </li>
+  </ul>
+
+  <div className="ts-help-tip">
+    Tip: Selecting any date will automatically jump to the correct payroll fortnight.
+  </div>
+</div>
       {statusError && <div style={{ marginTop: "0.6rem", fontSize: "0.85rem", color: "#b71c1c" }}>{statusError}</div>}
       {statusMessage && <div style={{ marginTop: "0.6rem", fontSize: "0.85rem", color: "#2e7d32" }}>{statusMessage}</div>}
     <style>{`
@@ -1086,6 +1118,53 @@ th.ts-sticky-date {
 .ts-table input[type="time"]:focus{
   color: #111;
   outline: none;
+}
+  /* ===============================
+   Timesheet help section
+   =============================== */
+.ts-help{
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 12px;
+  background: #fff;
+  font-size: 0.75rem;   /* 👈 overall text size */
+}
+
+.ts-help-title{
+  font-weight: 700;
+  margin-bottom: 8px;
+  font-size: 0.9rem;   /* 👈 title size */
+}
+
+.ts-help-list{
+  margin: 0;
+  padding-left: 18px;
+}
+
+.ts-help-list li{
+  margin: 6px 0;
+  line-height: 1.35;
+}
+
+.ts-help-tip{
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0,0,0,0.08);
+  opacity: 0.9;
+  font-size: 0.92em;
+  opacity: 0.75;
+}
+  
+/* ===============================
+   Timesheets: current day text colour
+   =============================== */
+
+.ts-today td.ts-cell-day,
+.ts-today td.ts-col-date,
+.ts-today td:nth-child(2) {
+  color: #c62828;
+  font-weight: 600;
 }
 `}</style>
     </PageLayout>
