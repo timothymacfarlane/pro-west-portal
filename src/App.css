@@ -2377,3 +2377,62 @@ table {
     padding: 0.6rem;
   }
 }
+/* ----------------------------
+   Shared "Contacts-style" layout
+   Used by Contacts + Jobs pages
+----------------------------- */
+
+.contacts-selected {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 12px 14px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+}
+
+.contacts-avatar-large {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  font-weight: 900;
+  font-size: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+}
+
+.contacts-selected-name {
+  font-weight: 900;
+  font-size: 15px;
+}
+
+.contacts-selected-role {
+  font-size: 12px;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+.contacts-selected-lines {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+/* Mobile polish */
+@media (max-width: 720px) {
+  .contacts-selected {
+    padding: 10px 12px;
+  }
+
+  .contacts-avatar-large {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    font-size: 13px;
+  }
+}

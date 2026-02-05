@@ -100,6 +100,17 @@ function addressSummaryFromRow(r) {
 function norm(s) {
   return (s || "").toString().trim().replace(/\s+/g, " ");
 }
+function safeText(v, fallback = "—") {
+  if (v == null) return fallback;
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  return fallback; // don't try to render objects
+}
+function getJobBadge(jobNumber) {
+  const s = String(jobNumber ?? "").trim();
+  if (!s) return "#";
+  return s.length <= 3 ? s : s.slice(-4);
+}
 
 function clientLabel(c) {
   const first = norm(c.first_name);
@@ -447,6 +458,12 @@ function JobModal({ open, mode, isAdmin, onClose, onSaved, initial, staffOptions
 
     return candidate;
   }
+function getJobBadge(jobNumber) {
+  const s = String(jobNumber || "").trim();
+  if (!s) return "#";
+  // keep it short like initials — last 2–3 digits looks good
+  return s.length <= 3 ? s : s.slice(-4);
+}
 
 function buildStickerHtml(jobForPrint) {
   const j = jobForPrint || {};
@@ -818,7 +835,7 @@ const siteAddressText = deriveStickerSiteAddress(j);
             <div style={{ display: "grid", gap: 8 }}>
               {/* Type-to-search */}
               <input
-                className="input"
+                className="maps-search-input"
                 placeholder={`Search client… ${clientSearching ? "…" : ""}`}
                 value={clientSearch}
                 onChange={(e) => setClientSearch(e.target.value)}
@@ -1170,7 +1187,7 @@ function Jobs() {
 
   useEffect(() => {
     if (debounceGlobalRef.current) clearTimeout(debounceGlobalRef.current);
-    debounceGlobalRef.current = setTimeout(() => runGlobalSuggest(globalQuery), 180);
+    debounceGlobalRef.current = setTimeout(() => runGlobalSuggest(globalQuery), 160);
     return () => debounceGlobalRef.current && clearTimeout(debounceGlobalRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalQuery]);
@@ -1278,6 +1295,9 @@ function Jobs() {
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <div>
             <h3 className="card-title" style={{ marginBottom: 6 }}>Find a job</h3>
+            <p className="card-subtitle" style={{ marginTop: 6 }}>
+  Start typing a job number, client, suburb, lot/plan, notes, etc.
+</p>
             <div style={{ fontSize: 12, opacity: 0.75 }}>{headerStatusText}</div>
           </div>
 
@@ -1303,7 +1323,7 @@ function Jobs() {
           </button>
         </div>
 
-        <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }} className="jobs-two-col">
+        <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
           {/* Quick find */}
           <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
             <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>
@@ -1311,44 +1331,70 @@ function Jobs() {
             </div>
 
             <input
-              className="input"
+              className="maps-search-input"
               placeholder="Type job number… (e.g. 25123)"
               inputMode="numeric"
               pattern="[0-9]*"
               value={jobNoQuery}
-              onChange={(e) => setJobNoQuery(e.target.value)}
+              onChange={(e) => {
+  try {
+    setJobNoQuery(e.target.value);
+  } catch (err) {
+    console.error("jobNoQuery onChange error:", err);
+  }
+}}
               onFocus={() => runJobNoSuggest(jobNoQuery)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
-                  setJobNoSuggestions([]);
-                  jumpToJobByNumber(jobNoQuery);
-                }
+  if (debounceJobNoRef.current) clearTimeout(debounceJobNoRef.current);
+  setJobNoSuggestions([]);
+  jumpToJobByNumber(jobNoQuery);
+}if (globalSuggestions.length === 1)
                 if (e.key === "Escape") setJobNoSuggestions([]);
               }}
             />
 
-            {jobNoSuggestions.length > 0 && (
-              <div style={{ marginTop: 8, borderRadius: 14, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)", background: "rgba(20,20,25,0.95)" }}>
-                {jobNoSuggestions.map((j) => (
-                  <button
-                    key={j.id}
-                    className="btn-pill"
-                    style={{ width: "100%", justifyContent: "flex-start", borderRadius: 0, padding: "10px 12px", background: "transparent" }}
-                    type="button"
-                    onClick={() => {
-                      setJobNoQuery(String(j.job_number));
-                      setJobNoSuggestions([]);
-                      jumpToJobByNumber(j.job_number);
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 950 }}>#{j.job_number}</div>
-                      <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>{j.address}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+{Array.isArray(jobNoSuggestions) && jobNoSuggestions.length > 0 && (
+  <div
+    className="contacts-suggestions"
+    style={{
+      marginTop: "0.4rem",
+      maxHeight: "200px",
+      overflowY: "auto",
+      WebkitOverflowScrolling: "touch",
+      display: "flex",
+      flexDirection: "column",
+      gap: "0.35rem",
+    }}
+  >
+    {jobNoSuggestions.map((j) => (
+      <button
+        key={j.id}
+        type="button"
+        className="contacts-suggestion"
+        onClick={() => {
+          setJobNoQuery(String(j.job_number));
+          setJobNoSuggestions([]);
+          jumpToJobByNumber(j.job_number);
+        }}
+      >
+        <div className="contacts-suggestion-header">
+          <div className="contacts-avatar">{getJobBadge(j.job_number)}</div>
+          <div>
+            <div className="contacts-suggestion-name">Job #{j.job_number}</div>
+            <div className="contacts-suggestion-role">{safeText(j.address)}</div>
+          </div>
+        </div>
+
+        <div className="contacts-suggestion-meta">
+          <span>{safeText(j.suburb)}</span>
+          <span style={{ opacity: 0.6 }}>•</span>
+          <span>{safeText(j.client)}</span>
+        </div>
+      </button>
+    ))}
+  </div>
+)}
           </div>
 
           {/* Global search */}
@@ -1358,45 +1404,82 @@ function Jobs() {
             </div>
 
             <input
-              className="input"
+              className="maps-search-input"
               placeholder="Start typing… (client, suburb, lot/plan, notes, etc.)"
               value={globalQuery}
-              onChange={(e) => setGlobalQuery(e.target.value)}
+              onChange={(e) => {
+  try {
+    setGlobalQuery(e.target.value);
+  } catch (err) {
+    console.error("globalQuery onChange error:", err);
+  }
+}}
               onFocus={() => runGlobalSuggest(globalQuery)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  if (globalSuggestions.length === 1) {
-                    const only = globalSuggestions[0];
-                    setGlobalSuggestions([]);
-                    jumpToJobById(only.id);
-                  }
-                }
-                if (e.key === "Escape") setGlobalSuggestions([]);
-              }}
+           onKeyDown={async (e) => {
+  try {
+    if (e.key === "Enter") {
+      if (debounceGlobalRef.current) clearTimeout(debounceGlobalRef.current);
+
+      // Force the latest search immediately
+      await runGlobalSuggest(globalQuery);
+
+      // After forcing, use the latest suggestions
+      if (globalSuggestions.length === 1) {
+        const only = globalSuggestions[0];
+        setGlobalSuggestions([]);
+        await jumpToJobById(only.id);
+      }
+    }
+
+    if (e.key === "Escape") setGlobalSuggestions([]);
+  } catch (err) {
+    console.error("global onKeyDown error:", err);
+  }
+}}
             />
 
-            {globalSuggestions.length > 0 && (
-              <div style={{ marginTop: 8, borderRadius: 14, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)", background: "rgba(20,20,25,0.95)" }}>
-                {globalSuggestions.map((j) => (
-                  <button
-                    key={j.id}
-                    className="btn-pill"
-                    style={{ width: "100%", justifyContent: "flex-start", borderRadius: 0, padding: "10px 12px", background: "transparent" }}
-                    type="button"
-                    onClick={() => {
-                      setGlobalQuery(`#${j.job_number}`);
-                      setGlobalSuggestions([]);
-                      jumpToJobById(j.id);
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 950 }}>#{j.job_number}</div>
-                      <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>{j.address}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+{Array.isArray(globalSuggestions) && globalSuggestions.length > 0 && (
+  <div
+    className="contacts-suggestions"
+    style={{
+      marginTop: "0.4rem",
+      maxHeight: "200px",
+      overflowY: "auto",
+      WebkitOverflowScrolling: "touch",
+      display: "flex",
+      flexDirection: "column",
+      gap: "0.35rem",
+    }}
+  >
+    {globalSuggestions.map((j) => (
+      <button
+        key={j.id ?? j.job_id ?? j.job_number ?? j.address ?? "job"}
+        type="button"
+        className="contacts-suggestion"
+        onClick={() => {
+          // keep your previous onClick behaviour if it worked:
+          setGlobalQuery(`#${j.job_number ?? ""}`);
+          setGlobalSuggestions([]);
+
+          // Try id first; fallback to job_number
+          if (j.id != null) jumpToJobById(j.id);
+          else if (j.job_id != null) jumpToJobById(j.job_id);
+          else if (j.job_number != null) jumpToJobByNumber(j.job_number);
+        }}
+      >
+        <div className="contacts-suggestion-header">
+          <div className="contacts-avatar">{getJobBadge(j.job_number)}</div>
+          <div>
+            <div className="contacts-suggestion-name">
+              {j.job_number ? `Job #${j.job_number}` : "Job"}
+            </div>
+            <div className="contacts-suggestion-role">{safeText(j.address)}</div>
+          </div>
+        </div>
+      </button>
+    ))}
+  </div>
+)}
           </div>
         </div>
 
@@ -1423,30 +1506,52 @@ function Jobs() {
       {/* Selected job summary */}
       {selected && (
         <div className="card" style={{ marginTop: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-            <div>
-              <h3 className="card-title" style={{ marginBottom: 4 }}>Job #{selected.job_number}</h3>
-              <p className="card-subtitle" style={{ margin: 0 }}>
-                {(selected.client_company || selected.client_name || "—")} · {selected.status || "—"} · {selected.assigned_to || "Unassigned"}
-              </p>
-            </div>
+   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+  {/* Left: Contacts-style summary */}
+  <div style={{ display: "flex", gap: 12, alignItems: "center", flex: 1, minWidth: 260 }}>
+    <div
+      style={{
+        width: 46,
+        height: 46,
+        borderRadius: 14,
+        display: "grid",
+        placeItems: "center",
+        fontWeight: 900,
+        background: "rgba(255,255,255,0.08)",
+        border: "1px solid rgba(255,255,255,0.10)",
+      }}
+    >
+      {String(selected.job_number || "#")}
+    </div>
 
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button className="btn-pill" type="button" onClick={() => mapsHref && navigate(mapsHref)}>
-                View in Maps
-              </button>
+    <div>
+      <h3 className="card-title" style={{ marginBottom: 4 }}>
+        Job #{selected.job_number}
+      </h3>
+      <p className="card-subtitle" style={{ margin: 0 }}>
+        {(selected.client_company || selected.client_name || "—")} · {selected.status || "—"} ·{" "}
+        {selected.assigned_to || "Unassigned"}
+      </p>
+    </div>
+  </div>
 
-              {isAdmin && (
-                <button className="btn-pill primary" type="button" onClick={() => setModal({ open: true, mode: "edit" })}>
-                  Edit
-                </button>
-              )}
+  {/* Right: buttons */}
+  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+    <button className="btn-pill" type="button" onClick={() => mapsHref && navigate(mapsHref)}>
+      View in Maps
+    </button>
 
-              <button className="btn-pill" type="button" onClick={() => setSelected(null)}>
-                Close
-              </button>
-            </div>
-          </div>
+    {isAdmin && (
+      <button className="btn-pill primary" type="button" onClick={() => setModal({ open: true, mode: "edit" })}>
+        Edit
+      </button>
+    )}
+
+    <button className="btn-pill" type="button" onClick={() => setSelected(null)}>
+      Close
+    </button>
+  </div>
+</div>
 
           <div className="jobs-selected-grid" style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
