@@ -49,21 +49,49 @@ proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
 function loadGoogleMaps(apiKey) {
   return new Promise((resolve, reject) => {
     if (typeof window === "undefined") return reject(new Error("No window"));
+
+    // Already loaded (Places available)
     if (window.google?.maps?.places) return resolve(true);
 
-    const existing = document.getElementById("google-maps-js");
-    if (existing) {
-      existing.addEventListener("load", () => resolve(true));
-      existing.addEventListener("error", () => reject(new Error("Google Maps failed to load")));
+    // If index.html already has the Maps script, wait for it (DON'T add a second script)
+    const existingScript =
+      document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]') ||
+      document.getElementById("google-maps-js");
+
+    const waitUntilReady = () => {
+      const start = Date.now();
+      const tick = () => {
+        if (window.google?.maps?.places) return resolve(true);
+        if (Date.now() - start > 15000) {
+          return reject(new Error("Google Maps (Places) did not become ready in time"));
+        }
+        requestAnimationFrame(tick);
+      };
+      tick();
+    };
+
+    if (existingScript) {
+      // script exists; it may still be loading
+      existingScript.addEventListener("load", waitUntilReady, { once: true });
+      existingScript.addEventListener(
+        "error",
+        () => reject(new Error("Google Maps failed to load")),
+        { once: true }
+      );
+      // also start polling in case it already loaded but events already fired
+      waitUntilReady();
       return;
     }
+
+    // No script tag exists (fallback): inject one
+    if (!apiKey) return reject(new Error("Missing Google Maps API key"));
 
     const s = document.createElement("script");
     s.id = "google-maps-js";
     s.async = true;
     s.defer = true;
     s.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
-    s.onload = () => resolve(true);
+    s.onload = waitUntilReady;
     s.onerror = () => reject(new Error("Google Maps failed to load"));
     document.head.appendChild(s);
   });
@@ -87,7 +115,9 @@ function formatDateAU(v) {
   if (Number.isNaN(d.getTime())) return String(v);
   return d.toLocaleDateString("en-AU");
 }
-
+function stripAustralia(addr) {
+  return (addr || "").toString().replace(/,?\s*Australia\s*$/i, "").trim();
+}
 function addressSummaryFromRow(r) {
   const a =
     (r?.full_address || "").trim() ||
@@ -172,6 +202,8 @@ function ClientSuggestionDropdown({ items, onPick }) {
 
 function JobModal({ open, mode, isAdmin, onClose, onSaved, initial, staffOptions }) {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
+  console.log("GOOGLE MAPS KEY:", apiKey);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -268,57 +300,72 @@ function JobModal({ open, mode, isAdmin, onClose, onSaved, initial, staffOptions
     setClientSearch("");
     setClientSuggestions([]);
   }, [open, initial]);
+// Google Places (Jobs modal) — wait for index.html script, don't inject a second one
+useEffect(() => {
+  if (!open) return;
 
-  // Google Places
-  useEffect(() => {
-    if (!open) return;
+  if (!addressInputRef.current) return;
 
-    if (!apiKey) {
-      setError("Missing VITE_GOOGLE_MAPS_API_KEY. Add it to env vars and redeploy.");
-      return;
+  let cancelled = false;
+
+  const waitForPlaces = (timeoutMs = 12000) =>
+    new Promise((resolve, reject) => {
+      const start = Date.now();
+      const tick = () => {
+        if (window.google?.maps?.places?.Autocomplete) return resolve();
+        if (Date.now() - start > timeoutMs) {
+          return reject(new Error("Google Places not available (timeout). Check Maps script + Places library."));
+        }
+        requestAnimationFrame(tick);
+      };
+      tick();
+    });
+
+  (async () => {
+    try {
+      await waitForPlaces();
+      if (cancelled) return;
+
+      const input = addressInputRef.current;
+      if (!input) return;
+      if (autocompleteRef.current) return;
+
+      const ac = new window.google.maps.places.Autocomplete(input, {
+        fields: ["formatted_address", "place_id", "geometry"],
+        types: ["address"],
+        componentRestrictions: { country: "au" },
+      });
+
+      ac.addListener("place_changed", () => {
+        const place = ac.getPlace();
+        const formatted = place?.formatted_address ?? "";
+        const pid = place?.place_id ?? "";
+        const lat = place?.geometry?.location?.lat?.();
+        const lng = place?.geometry?.location?.lng?.();
+
+        setFullAddress(formatted);
+        setPlaceId(pid);
+
+        if (typeof lat === "number" && typeof lng === "number") {
+          const mga = wgsToMga(lat, lng);
+          setMgaZone(mga.zone);
+          setMgaE(mga.easting.toFixed(3));
+          setMgaN(mga.northing.toFixed(3));
+        }
+      });
+
+      autocompleteRef.current = ac;
+    } catch (e) {
+      setError(e?.message || "Google Places failed to initialise.");
     }
+  })();
 
-    let cancelled = false;
-
-    loadGoogleMaps(apiKey)
-      .then(() => {
-        if (cancelled) return;
-        if (!addressInputRef.current) return;
-        if (!window.google?.maps?.places?.Autocomplete) return;
-        if (autocompleteRef.current) return;
-
-        const ac = new window.google.maps.places.Autocomplete(addressInputRef.current, {
-          fields: ["formatted_address", "place_id", "geometry"],
-          types: ["address"],
-          componentRestrictions: { country: "au" },
-        });
-
-        ac.addListener("place_changed", () => {
-          const place = ac.getPlace();
-          const formatted = place?.formatted_address ?? "";
-          const pid = place?.place_id ?? "";
-          const lat = place?.geometry?.location?.lat?.();
-          const lng = place?.geometry?.location?.lng?.();
-
-          setFullAddress(formatted);
-          setPlaceId(pid);
-
-          if (typeof lat === "number" && typeof lng === "number") {
-            const mga = wgsToMga(lat, lng);
-            setMgaZone(mga.zone);
-            setMgaE(mga.easting.toFixed(3));
-            setMgaN(mga.northing.toFixed(3));
-          }
-        });
-
-        autocompleteRef.current = ac;
-      })
-      .catch((e) => setError(e?.message || "Google Maps failed to load."));
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, apiKey]);
+  return () => {
+    cancelled = true;
+    // Optional: clear instance ref so it can re-init next time modal opens
+    autocompleteRef.current = null;
+  };
+}, [open]);
 
   async function runClientSearch(q) {
     const s = (q || "").trim();
@@ -686,7 +733,7 @@ const siteAddressText = deriveStickerSiteAddress(j);
         assigned_to: assignedTo?.trim() || null,
         notes: notes?.trim() || null,
 
-        full_address: fullAddress?.trim() || null,
+        full_address: stripAustralia(fullAddress)?.trim() || null,
         place_id: placeId?.trim() || null,
 
         mga_zone: mgaZone ? Number(mgaZone) : null,
@@ -897,8 +944,8 @@ const siteAddressText = deriveStickerSiteAddress(j);
                 ref={addressInputRef}
                 className="input"
                 placeholder="Start typing an address…"
-                value={fullAddress || ""}
-                onChange={(e) => setFullAddress(e.target.value)}
+               value={fullAddress || ""}
+onChange={(e) => setFullAddress(e.target.value)}
                 disabled={!canEdit}
               />
 
@@ -952,7 +999,7 @@ const siteAddressText = deriveStickerSiteAddress(j);
 
           {/* MGA */}
           <div style={{ gridColumn: "1 / -1", padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
-            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>MGA (auto from Google address if available)</div>
+            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>MGA2020 (auto from Google address if available)</div>
             <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 1fr", gap: 8 }}>
               <input className="input" placeholder="Zone" value={mgaZone} onChange={(e) => setMgaZone(e.target.value)} disabled={!canEdit} />
               <input className="input" placeholder="Easting" value={mgaE} onChange={(e) => setMgaE(e.target.value)} disabled={!canEdit} />
@@ -1386,11 +1433,6 @@ function Jobs() {
           </div>
         </div>
 
-        <div className="contacts-suggestion-meta">
-          <span>{safeText(j.suburb)}</span>
-          <span style={{ opacity: 0.6 }}>•</span>
-          <span>{safeText(j.client)}</span>
-        </div>
       </button>
     ))}
   </div>
@@ -1575,7 +1617,9 @@ function Jobs() {
 
             <div style={{ gridColumn: "1 / -1" }}>
               <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Address</div>
-              <div style={{ marginTop: 4 }}>{selected.full_address || addressSummaryFromRow(selected)}</div>
+<div style={{ marginTop: 4 }}>
+  {stripAustralia(selected.full_address) || addressSummaryFromRow(selected)}
+</div>
               <div style={{ fontSize: 11, opacity: 0.75, marginTop: 6 }}>place_id: {selected.place_id || "—"}</div>
             </div>
 

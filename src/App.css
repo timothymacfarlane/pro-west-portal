@@ -2436,3 +2436,6 @@ table {
     font-size: 13px;
   }
 }
+.pac-container {
+  z-index: 999999 !important;
+}
