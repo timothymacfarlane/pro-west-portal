@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 import { supabase } from "../lib/supabaseClient.js";
 import { useNavigate, useLocation } from "react-router-dom";
 
@@ -203,10 +204,82 @@ function ClientSuggestionDropdown({ items, onPick }) {
 function JobModal({ open, mode, isAdmin, onClose, onSaved, initial, staffOptions }) {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
-  console.log("GOOGLE MAPS KEY:", apiKey);
-
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // ✅ Re-sync modal fields whenever the selected job changes (fixes blank fields on open)
+useEffect(() => {
+  if (!open) return;
+
+  const i = initial || {};
+
+  // If opening "new", reset to defaults
+  if (mode === "new") {
+    setJobTypeLegacy("");
+    setJobDateLegacy("");
+    setLotNumber("");
+    setPlanNumber("");
+    setStreetNumber("");
+    setStreetName("");
+    setSuburb("");
+    setLocalAuthority("");
+    setMapRef("");
+    setCt("");
+
+    setClientFirstName("");
+    setClientSurname("");
+    setClientCompany("");
+    setClientPhone("");
+    setClientMobile("");
+    setClientEmail("");
+    setClientName("");
+
+    setStatus("Planned");
+    setAssignedTo("");
+    setNotes("");
+
+    setFullAddress("");
+    setPlaceId("");
+    setMgaZone("");
+    setMgaE("");
+    setMgaN("");
+
+    setError("");
+    return;
+  }
+
+  // Otherwise populate from the job we just fetched
+  setJobTypeLegacy(i.job_type_legacy ?? "");
+  setJobDateLegacy(i.job_date_legacy ?? "");
+  setLotNumber(i.lot_number ?? "");
+  setPlanNumber(i.plan_number ?? "");
+  setStreetNumber(i.street_number ?? "");
+  setStreetName(i.street_name ?? "");
+  setSuburb(i.suburb ?? "");
+  setLocalAuthority(i.local_authority ?? "");
+  setMapRef(i.map_ref ?? "");
+  setCt(i.ct ?? "");
+
+  setClientFirstName(i.client_first_name ?? "");
+  setClientSurname(i.client_surname ?? "");
+  setClientCompany(i.client_company ?? "");
+  setClientPhone(i.client_phone ?? "");
+  setClientMobile(i.client_mobile ?? "");
+  setClientEmail(i.client_email ?? "");
+  setClientName(i.client_name ?? "");
+
+  setStatus(i.status ?? "Planned");
+  setAssignedTo(i.assigned_to ?? "");
+  setNotes(i.notes ?? "");
+
+  setFullAddress(i.full_address ?? "");
+  setPlaceId(i.place_id ?? "");
+  setMgaZone(i.mga_zone ?? "");
+  setMgaE(i.mga_easting ?? "");
+  setMgaN(i.mga_northing ?? "");
+
+  setError("");
+}, [open, mode, initial?.id]);
 
   const [jobTypeLegacy, setJobTypeLegacy] = useState(initial?.job_type_legacy ?? "");
   const [jobDateLegacy, setJobDateLegacy] = useState(initial?.job_date_legacy ?? "");
@@ -330,20 +403,43 @@ useEffect(() => {
       if (!input) return;
       if (autocompleteRef.current) return;
 
-      const ac = new window.google.maps.places.Autocomplete(input, {
-        fields: ["formatted_address", "place_id", "geometry"],
-        types: ["address"],
-        componentRestrictions: { country: "au" },
-      });
+     // Rough WA bounding box (south-west to north-east)
+const waBounds = new window.google.maps.LatLngBounds(
+  new window.google.maps.LatLng(-35.2, 112.9), // SW corner
+  new window.google.maps.LatLng(-13.5, 129.0)  // NE corner
+);
+
+const ac = new window.google.maps.places.Autocomplete(input, {
+  fields: ["formatted_address", "place_id", "geometry", "address_components"],
+  types: ["address"],
+  componentRestrictions: { country: "au" },
+  bounds: waBounds,
+  strictBounds: true, // makes suggestions stay inside the bounds
+});
 
       ac.addListener("place_changed", () => {
         const place = ac.getPlace();
+        const isWA =
+  (place?.address_components || []).some((c) =>
+    (c.types || []).includes("administrative_area_level_1") &&
+    (c.short_name === "WA" || c.long_name === "Western Australia")
+  );
+
+if (!isWA) {
+  setError("Please choose an address in Western Australia (WA).");
+  setFullAddress("");
+  setPlaceId("");
+  setMgaZone("");
+  setMgaE("");
+  setMgaN("");
+  return;
+}
         const formatted = place?.formatted_address ?? "";
         const pid = place?.place_id ?? "";
         const lat = place?.geometry?.location?.lat?.();
         const lng = place?.geometry?.location?.lng?.();
 
-        setFullAddress(formatted);
+setFullAddress(stripAustralia(formatted));
         setPlaceId(pid);
 
         if (typeof lat === "number" && typeof lng === "number") {
@@ -847,12 +943,15 @@ const siteAddressText = deriveStickerSiteAddress(j);
       >
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
           <div>
-            <h3 className="card-title" style={{ marginBottom: 4 }}>
-              {mode === "new" ? "New Job" : "Edit Job"}
-            </h3>
-            <p className="card-subtitle" style={{ margin: 0 }}>
-              {mode === "new" ? "Create a new job record" : `Job #${initial?.job_number ?? "—"}`}
-            </p>
+          <h3 className="card-title" style={{ marginBottom: 4 }}>
+  {mode === "new" ? "New Job" : mode === "view" ? "Job Details" : "Edit Job"}
+</h3>
+<p className="card-subtitle" style={{ margin: 0 }}>
+  {mode === "new"
+    ? "Create a new job record"
+    : `Job #${initial?.job_number ?? "—"}${mode === "view" ? " (read-only)" : ""}`}
+</p>
+
           </div>
 
           <button className="btn-pill" onClick={onClose} type="button">
@@ -954,10 +1053,6 @@ onChange={(e) => setFullAddress(e.target.value)}
                 <input className="input" placeholder="Street name" value={streetName} onChange={(e) => setStreetName(e.target.value)} disabled={!canEdit} />
                 <input className="input" placeholder="Suburb" value={suburb} onChange={(e) => setSuburb(e.target.value)} disabled={!canEdit} />
               </div>
-
-              <div style={{ fontSize: 12, opacity: 0.75 }}>
-                <b>place_id:</b> {placeId || "—"}
-              </div>
             </div>
           </div>
 
@@ -1028,17 +1123,35 @@ onChange={(e) => setFullAddress(e.target.value)}
           }
         `}</style>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
-          {isAdmin && (
-            <button className="btn-pill" onClick={handlePrintSticker} type="button" disabled={!canEdit || saving}>
-              Print Sticker
-            </button>
-          )}
-          <button className="btn-pill" onClick={onClose} type="button">Cancel</button>
-          <button className="btn-pill primary" onClick={handleSave} type="button" disabled={!canEdit || saving}>
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
+<div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
+  {canEdit && (
+    <>
+      <button className="btn-pill" onClick={handlePrintSticker} type="button" disabled={saving}>
+        Print Sticker
+      </button>
+
+      <button className="btn-pill" onClick={onClose} type="button">
+        Cancel
+      </button>
+
+      <button
+        className="btn-pill primary"
+        onClick={() => (mode === "new" ? handleSave({ closeAfter: false }) : handleSave())}
+        type="button"
+        disabled={saving}
+      >
+        {saving ? "Saving…" : "Save"}
+      </button>
+    </>
+  )}
+
+  {!canEdit && (
+    <button className="btn-pill primary" onClick={onClose} type="button">
+      Close
+    </button>
+  )}
+</div>
+
       </div>
     </div>
   );
@@ -1046,6 +1159,7 @@ onChange={(e) => setFullAddress(e.target.value)}
 
 function Jobs() {
   const { isAdmin } = useAuth();
+  const isAppVisible = useAppVisibilityContext();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -1058,12 +1172,45 @@ function Jobs() {
   const [globalQuery, setGlobalQuery] = useState("");
   const [globalSuggestions, setGlobalSuggestions] = useState([]);
   const [globalLoading, setGlobalLoading] = useState(false);
+ 
+  // ✅ keyboard highlight index for suggestion dropdowns
+  const [jobNoActiveIdx, setJobNoActiveIdx] = useState(-1);
+  const [globalActiveIdx, setGlobalActiveIdx] = useState(-1);
+
 
   const [selected, setSelected] = useState(null);
   const [modal, setModal] = useState({ open: false, mode: "new" });
 
   const [staffOptions, setStaffOptions] = useState([]);
   const [totalJobs, setTotalJobs] = useState(0);
+
+    // -----------------------------
+  // Job register table (paged)
+  // -----------------------------
+  const PAGE_SIZE = 30;
+
+  const JOB_COLUMNS = [
+    { key: "job_number", label: "Job #" },
+    { key: "client_company", label: "Client" },
+    { key: "full_address", label: "Address" },
+    { key: "local_authority", label: "LGA" },
+    { key: "job_type_legacy", label: "Job type" },
+    { key: "job_date_legacy", label: "Job date" },
+    { key: "status", label: "Status" },
+    { key: "assigned_to", label: "Assigned" },
+    { key: "notes", label: "Notes" },
+  ];
+
+  const [listRows, setListRows] = useState([]);
+  const [listLoading, setListLoading] = useState(false);
+  const [listError, setListError] = useState("");
+  const [pageIndex, setPageIndex] = useState(0);
+
+ 
+  // count for current filtered query (not totalJobs)
+  const [filteredCount, setFilteredCount] = useState(0);
+
+  const listDebounceRef = useRef(null);
 
   const debounceJobNoRef = useRef(null);
   const debounceGlobalRef = useRef(null);
@@ -1103,6 +1250,11 @@ function Jobs() {
     if (error) throw error;
     setTotalJobs(Number(count || 0));
   }
+   // sorting
+  const [sortKey, setSortKey] = useState("job_number");
+  const [sortAsc, setSortAsc] = useState(false);
+
+
 
   async function fetchJobById(id) {
     if (!id) return null;
@@ -1134,6 +1286,81 @@ function Jobs() {
     if (error) throw error;
     return data || null;
   }
+  async function fetchJobsPage({ page, sortBy, ascending, jobNo, globalQ }) {
+    setListError("");
+
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+
+    let q = supabase
+      .from("jobs")
+      .select(
+        "id, job_number, client_company, full_address, local_authority, job_type_legacy, job_date_legacy, status, assigned_to, notes",
+        { count: "exact" }
+      );
+
+    const jobNoTrim = (jobNo || "").trim();
+    const globalTrim = (globalQ || "").trim().replace(/^#/, "");
+
+    if (jobNoTrim && /^\d+$/.test(jobNoTrim)) {
+      q = q.like("job_number_text", `${jobNoTrim}%`);
+    }
+
+    if (globalTrim.length >= 3) {
+      const isNumeric = /^\d+$/.test(globalTrim);
+
+      if (isNumeric) {
+        const like = `%${globalTrim}%`;
+        q = q.or(
+          [
+            `job_number_text.ilike.${like}`,
+            `full_address.ilike.${like}`,
+            `suburb.ilike.${like}`,
+            `lot_number.ilike.${like}`,
+            `plan_number.ilike.${like}`,
+            `notes.ilike.${like}`,
+            `client_company.ilike.${like}`,
+          ].join(",")
+        );
+      } else {
+        const ts = globalTrim
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((w) => `${w}:*`)
+          .join(" & ");
+
+        q = q.textSearch("search_tsv", ts, { type: "tsquery" });
+      }
+    }
+
+    // ✅ order BEFORE range
+    q = q.order(sortBy, { ascending });
+
+    q = q.range(from, to);
+
+    const { data, error, count } = await q;
+    if (error) throw error;
+
+    setListRows(Array.isArray(data) ? data : []);
+    setFilteredCount(Number(count || 0));
+  }
+
+  const refreshRegister = async () => {
+    setListLoading(true);
+    try {
+      await fetchJobsPage({
+        page: pageIndex,
+        sortBy: sortKey,
+        ascending: sortAsc,
+        jobNo: jobNoQuery,
+        globalQ: globalQuery,
+      });
+    } catch (e) {
+      setListError(e?.message || "Failed to refresh job register.");
+    } finally {
+      setListLoading(false);
+    }
+  };
 
   async function jumpToJobById(id) {
     setErr("");
@@ -1193,62 +1420,183 @@ function Jobs() {
     }
   }
 
-  async function runGlobalSuggest(query) {
-    const q = (query || "").trim();
-    if (!q) {
-      setGlobalSuggestions([]);
-      return;
-    }
-
-    setGlobalLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from("jobs")
-        .select("id, job_number, full_address, street_number, street_name, suburb")
-        .textSearch("search_tsv", q, { type: "plain" })
-        .order("job_number", { ascending: false })
-        .limit(20);
-
-      if (error) throw error;
-
-      setGlobalSuggestions(
-        (data || []).map((r) => ({
-          id: r.id,
-          job_number: r.job_number,
-          address: addressSummaryFromRow(r),
-        }))
-      );
-    } catch {
-      setGlobalSuggestions([]);
-    } finally {
-      setGlobalLoading(false);
-    }
+async function runGlobalSuggest(query) {
+  const q = (query || "").trim().replace(/^#/, "");
+  if (q.length < 3) {
+    setGlobalSuggestions([]);
+    return;
   }
 
+  setGlobalLoading(true);
+  try {
+    const isNumeric = /^\d+$/.test(q);
+
+    let queryBuilder = supabase
+      .from("jobs")
+      .select("id, job_number, full_address, street_number, street_name, suburb")
+      .order("job_number", { ascending: false })
+      .limit(20);
+
+    if (isNumeric) {
+      const like = `%${q}%`;
+      queryBuilder = queryBuilder.or(
+        [
+          `job_number_text.ilike.${like}`,
+          `full_address.ilike.${like}`,
+          `suburb.ilike.${like}`,
+          `lot_number.ilike.${like}`,
+          `plan_number.ilike.${like}`,
+          `notes.ilike.${like}`,
+          `client_company.ilike.${like}`,
+        ].join(",")
+      );
+    } else {
+      const ts = q
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((w) => `${w}:*`)
+        .join(" & ");
+
+      queryBuilder = queryBuilder.textSearch("search_tsv", ts, { type: "tsquery" });
+    }
+
+    const { data, error } = await queryBuilder;
+    if (error) throw error;
+
+    setGlobalSuggestions(
+      (data || []).map((r) => ({
+        id: r.id,
+        job_number: r.job_number,
+        address: addressSummaryFromRow(r),
+      }))
+    );
+  } catch (e) {
+    console.error("Global search failed:", e);
+    setGlobalSuggestions([]);
+  } finally {
+    setGlobalLoading(false);
+  }
+}
+
+useEffect(() => {
+  if (debounceJobNoRef.current) clearTimeout(debounceJobNoRef.current);
+
+  debounceJobNoRef.current = setTimeout(() => {
+    if (!isAppVisible) return;
+    runJobNoSuggest(jobNoQuery);
+  }, 160);
+
+  return () => debounceJobNoRef.current && clearTimeout(debounceJobNoRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [jobNoQuery, isAppVisible]);
+
+
+useEffect(() => {
+  if (debounceGlobalRef.current) clearTimeout(debounceGlobalRef.current);
+
+  debounceGlobalRef.current = setTimeout(() => {
+    if (!isAppVisible) return;
+    runGlobalSuggest(globalQuery);
+  }, 160);
+
+  return () => debounceGlobalRef.current && clearTimeout(debounceGlobalRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [globalQuery, isAppVisible]);
+
+useEffect(() => {
+  if (isAppVisible) return;
+
+  // stop pending debounces
+  if (debounceJobNoRef.current) clearTimeout(debounceJobNoRef.current);
+  if (debounceGlobalRef.current) clearTimeout(debounceGlobalRef.current);
+  if (listDebounceRef.current) clearTimeout(listDebounceRef.current);
+
+  // drop suggestion UI so we stop extra renders
+  setJobNoSuggestions([]);
+  setGlobalSuggestions([]);
+  setJobNoActiveIdx(-1);
+  setGlobalActiveIdx(-1);
+
+  // optional: stop spinners if any were showing
+  setJobNoLoading(false);
+  setGlobalLoading(false);
+  setListLoading(false);
+}, [isAppVisible]);
+
+    // ✅ Reset keyboard highlight when query changes
   useEffect(() => {
-    if (debounceJobNoRef.current) clearTimeout(debounceJobNoRef.current);
-    debounceJobNoRef.current = setTimeout(() => runJobNoSuggest(jobNoQuery), 160);
-    return () => debounceJobNoRef.current && clearTimeout(debounceJobNoRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setJobNoActiveIdx(-1);
   }, [jobNoQuery]);
 
   useEffect(() => {
-    if (debounceGlobalRef.current) clearTimeout(debounceGlobalRef.current);
-    debounceGlobalRef.current = setTimeout(() => runGlobalSuggest(globalQuery), 160);
-    return () => debounceGlobalRef.current && clearTimeout(debounceGlobalRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setGlobalActiveIdx(-1);
   }, [globalQuery]);
 
+  // ✅ Keep highlight in range if suggestions list changes size
   useEffect(() => {
-    (async () => {
+    setJobNoActiveIdx((i) => Math.min(i, (jobNoSuggestions?.length || 0) - 1));
+  }, [jobNoSuggestions]);
+
+  useEffect(() => {
+    setGlobalActiveIdx((i) => Math.min(i, (globalSuggestions?.length || 0) - 1));
+  }, [globalSuggestions]);
+
+useEffect(() => {
+  if (!isAppVisible) return;
+
+  let cancelled = false;
+
+  (async () => {
+    try {
+      await Promise.all([fetchStaff(), fetchTotalJobs()]);
+    } catch (e) {
+      if (!cancelled) setErr(e?.message || "Failed to load Jobs page.");
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [isAppVisible]);
+
+
+  useEffect(() => {
+    if (listDebounceRef.current) clearTimeout(listDebounceRef.current);
+
+if (!isAppVisible) return;
+
+  let cancelled = false;
+
+    // Reset to page 0 whenever the filters or sort change
+    // (but not when just paging)
+    // We'll handle paging separately below by only resetting when those values change.
+    listDebounceRef.current = setTimeout(async () => {
+      setListLoading(true);
       try {
-        await Promise.all([fetchStaff(), fetchTotalJobs()]);
+        await fetchJobsPage({
+          page: pageIndex,
+          sortBy: sortKey,
+          ascending: sortAsc,
+          jobNo: jobNoQuery,
+          globalQ: globalQuery,
+        });
       } catch (e) {
-        setErr(e?.message || "Failed to load Jobs page.");
+        setListError(e?.message || "Failed to load job register page.");
+        setListRows([]);
+        setFilteredCount(0);
+      } finally {
+        setListLoading(false);
       }
-    })();
+    }, 180);
+
+    return () => listDebounceRef.current && clearTimeout(listDebounceRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [pageIndex, sortKey, sortAsc, jobNoQuery, globalQuery, isAppVisible]);
+  useEffect(() => {
+    setPageIndex(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobNoQuery, globalQuery, sortKey, sortAsc]);
 
   // ✅ Deep-link support: /jobs?job=12345 (+ optional from=maps&edit=1)
   useEffect(() => {
@@ -1390,16 +1738,57 @@ function Jobs() {
     console.error("jobNoQuery onChange error:", err);
   }
 }}
-              onFocus={() => runJobNoSuggest(jobNoQuery)}
+              onFocus={() => {
+  if (!isAppVisible) return;
+  runJobNoSuggest(jobNoQuery);
+}}
+
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
-  if (debounceJobNoRef.current) clearTimeout(debounceJobNoRef.current);
-  setJobNoSuggestions([]);
-  jumpToJobByNumber(jobNoQuery);
-}if (globalSuggestions.length === 1)
-                if (e.key === "Escape") setJobNoSuggestions([]);
-              }}
-            />
+  const hasList = Array.isArray(jobNoSuggestions) && jobNoSuggestions.length > 0;
+
+  if (e.key === "ArrowDown") {
+    if (!hasList) return;
+    e.preventDefault();
+    setJobNoActiveIdx((i) => (i < jobNoSuggestions.length - 1 ? i + 1 : 0));
+    return;
+  }
+
+  if (e.key === "ArrowUp") {
+    if (!hasList) return;
+    e.preventDefault();
+    setJobNoActiveIdx((i) => (i > 0 ? i - 1 : jobNoSuggestions.length - 1));
+    return;
+  }
+
+  if (e.key === "Enter") {
+    e.preventDefault();
+
+    // If an item is highlighted, pick it
+    if (hasList && jobNoActiveIdx >= 0) {
+      const picked = jobNoSuggestions[jobNoActiveIdx];
+      if (picked) {
+        setJobNoQuery(String(picked.job_number));
+        setJobNoSuggestions([]);
+        setJobNoActiveIdx(-1);
+        jumpToJobByNumber(picked.job_number);
+        return;
+      }
+    }
+
+    // Otherwise, use typed job number (your existing behaviour)
+    if (debounceJobNoRef.current) clearTimeout(debounceJobNoRef.current);
+    setJobNoSuggestions([]);
+    setJobNoActiveIdx(-1);
+    jumpToJobByNumber(jobNoQuery);
+    return;
+  }
+
+  if (e.key === "Escape") {
+    setJobNoSuggestions([]);
+    setJobNoActiveIdx(-1);
+  }
+}}
+ />
 
 {Array.isArray(jobNoSuggestions) && jobNoSuggestions.length > 0 && (
   <div
@@ -1414,11 +1803,11 @@ function Jobs() {
       gap: "0.35rem",
     }}
   >
-    {jobNoSuggestions.map((j) => (
+    {jobNoSuggestions.map((j, idx) => (
       <button
         key={j.id}
         type="button"
-        className="contacts-suggestion"
+        className={`contacts-suggestion ${idx === jobNoActiveIdx ? "is-active" : ""}`}
         onClick={() => {
           setJobNoQuery(String(j.job_number));
           setJobNoSuggestions([]);
@@ -1456,26 +1845,63 @@ function Jobs() {
     console.error("globalQuery onChange error:", err);
   }
 }}
-              onFocus={() => runGlobalSuggest(globalQuery)}
-           onKeyDown={async (e) => {
-  try {
-    if (e.key === "Enter") {
-      if (debounceGlobalRef.current) clearTimeout(debounceGlobalRef.current);
+              onFocus={() => {
+  if (!isAppVisible) return;
+  runGlobalSuggest(globalQuery);
+}}
 
-      // Force the latest search immediately
-      await runGlobalSuggest(globalQuery);
+onKeyDown={async (e) => {
+  const hasList = Array.isArray(globalSuggestions) && globalSuggestions.length > 0;
 
-      // After forcing, use the latest suggestions
-      if (globalSuggestions.length === 1) {
-        const only = globalSuggestions[0];
+  if (e.key === "ArrowDown") {
+    if (!hasList) return;
+    e.preventDefault();
+    setGlobalActiveIdx((i) => (i < globalSuggestions.length - 1 ? i + 1 : 0));
+    return;
+  }
+
+  if (e.key === "ArrowUp") {
+    if (!hasList) return;
+    e.preventDefault();
+    setGlobalActiveIdx((i) => (i > 0 ? i - 1 : globalSuggestions.length - 1));
+    return;
+  }
+
+  if (e.key === "Enter") {
+    e.preventDefault();
+
+    // If highlighted, pick it
+    if (hasList && globalActiveIdx >= 0) {
+      const picked = globalSuggestions[globalActiveIdx];
+      if (picked) {
+        setGlobalQuery(`#${picked.job_number ?? ""}`);
         setGlobalSuggestions([]);
-        await jumpToJobById(only.id);
+        setGlobalActiveIdx(-1);
+
+        if (picked.id != null) await jumpToJobById(picked.id);
+        else if (picked.job_id != null) await jumpToJobById(picked.job_id);
+        else if (picked.job_number != null) await jumpToJobByNumber(picked.job_number);
+
+        return;
       }
     }
 
-    if (e.key === "Escape") setGlobalSuggestions([]);
-  } catch (err) {
-    console.error("global onKeyDown error:", err);
+    // Otherwise keep your current "Enter" behaviour
+    if (debounceGlobalRef.current) clearTimeout(debounceGlobalRef.current);
+    await runGlobalSuggest(globalQuery);
+
+    if (globalSuggestions.length === 1) {
+      const only = globalSuggestions[0];
+      setGlobalSuggestions([]);
+      setGlobalActiveIdx(-1);
+      await jumpToJobById(only.id);
+    }
+    return;
+  }
+
+  if (e.key === "Escape") {
+    setGlobalSuggestions([]);
+    setGlobalActiveIdx(-1);
   }
 }}
             />
@@ -1493,11 +1919,11 @@ function Jobs() {
       gap: "0.35rem",
     }}
   >
-    {globalSuggestions.map((j) => (
+    {globalSuggestions.map((j, idx) => (
       <button
         key={j.id ?? j.job_id ?? j.job_number ?? j.address ?? "job"}
         type="button"
-        className="contacts-suggestion"
+        className={`contacts-suggestion ${idx === globalActiveIdx ? "is-active" : ""}`}
         onClick={() => {
           // keep your previous onClick behaviour if it worked:
           setGlobalQuery(`#${j.job_number ?? ""}`);
@@ -1524,8 +1950,146 @@ function Jobs() {
 )}
           </div>
         </div>
+        
+      {/* Job register list (paged + sortable) */}
+      <div className="card" style={{ marginTop: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div>
+            <h3 className="card-title" style={{ marginBottom: 6 }}>Job register</h3>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>
+              Showing page {pageIndex + 1} · {filteredCount ? `${filteredCount.toLocaleString()} matches` : "—"}
+              {listLoading ? " · loading…" : ""}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button
+              className="btn-pill"
+              type="button"
+              disabled={pageIndex === 0 || listLoading}
+              onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
+            >
+              ← Prev
+            </button>
+
+            <button
+              className="btn-pill"
+              type="button"
+              disabled={listLoading || (pageIndex + 1) * PAGE_SIZE >= filteredCount}
+              onClick={() => setPageIndex((p) => p + 1)}
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+
+        {listError ? (
+          <div style={{ marginTop: 12, padding: "0.7rem 0.8rem", borderRadius: 12, background: "rgba(255,0,0,0.08)", fontSize: "0.9rem" }}>
+            {listError}
+          </div>
+        ) : null}
+
+        <div style={{ marginTop: 12, overflowX: "auto" }}>
+<table className="jobs-reg-table">
+            <thead>
+              <tr>
+                {JOB_COLUMNS.map((c) => {
+                  const active = sortKey === c.key;
+                  const arrow = active ? (sortAsc ? " ▲" : " ▼") : "";
+                  return (
+                    <th
+  key={c.key}
+  onClick={() => {
+    if (sortKey === c.key) setSortAsc((v) => !v);
+    else {
+      setSortKey(c.key);
+      setSortAsc(c.key === "job_number" ? false : true);
+    }
+  }}
+  className={`jobs-reg-th ${active ? "is-active" : ""}`}
+  title="Sort"
+>
+   <span className="jobs-reg-th-label">
+    {c.label}
+    {arrow}
+  </span>
+</th>
+                  );
+                })}
+              </tr>
+            </thead>
+
+            <tbody>
+              {!listLoading && (!listRows || listRows.length === 0) ? (
+                <tr>
+                  <td colSpan={JOB_COLUMNS.length} style={{ padding: 14, opacity: 0.75 }}>
+                    No jobs found for the current filters.
+                  </td>
+                </tr>
+              ) : null}
+
+              {(listRows || []).map((r) => (
+                <tr
+                  key={r.id}
+                 onClick={async () => {
+  const job = await jumpToJobById(r.id);
+
+  // ✅ open modal for everyone
+  if (job) {
+    setModal({ open: true, mode: isAdmin ? "edit" : "view" });
+  }
+}}
+                  style={{
+                    cursor: "pointer",
+                  }}
+                  title="Click to open job"
+                >
+                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap", fontWeight: 900 }}>
+                    {r.job_number ?? "—"}
+                  </td>
+                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                    {r.client_company || "—"}
+                  </td>
+                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", minWidth: 260 }}>
+                    {stripAustralia(r.full_address) || "—"}
+                  </td>
+                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
+                    {r.local_authority || "—"}
+                  </td>
+                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
+                    {r.job_type_legacy || "—"}
+                  </td>
+                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
+                    {formatDateAU(r.job_date_legacy)}
+                  </td>
+                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
+                    {r.status || "—"}
+                  </td>
+                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
+                    {r.assigned_to || "—"}
+                  </td>
+                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", maxWidth: 420 }}>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.notes || "—"}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+          Tip: the table respects your current search inputs. Clear them to browse the full register.
+        </div>
+      </div>
 
         <style>{`
+          .contacts-suggestion.is-active {
+  outline: 2px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.08);
+}
+
           @media (max-width: 860px) {
             .jobs-two-col { grid-template-columns: 1fr !important; }
             .jobs-selected-grid { grid-template-columns: 1fr !important; }
@@ -1583,11 +2147,15 @@ function Jobs() {
       View in Maps
     </button>
 
-    {isAdmin && (
-      <button className="btn-pill primary" type="button" onClick={() => setModal({ open: true, mode: "edit" })}>
-        Edit
-      </button>
-    )}
+  {isAdmin ? (
+  <button className="btn-pill primary" type="button" onClick={() => setModal({ open: true, mode: "edit" })}>
+    Edit
+  </button>
+) : (
+  <button className="btn-pill primary" type="button" onClick={() => setModal({ open: true, mode: "view" })}>
+    Details
+  </button>
+)}
 
     <button className="btn-pill" type="button" onClick={() => setSelected(null)}>
       Close
@@ -1620,7 +2188,6 @@ function Jobs() {
 <div style={{ marginTop: 4 }}>
   {stripAustralia(selected.full_address) || addressSummaryFromRow(selected)}
 </div>
-              <div style={{ fontSize: 11, opacity: 0.75, marginTop: 6 }}>place_id: {selected.place_id || "—"}</div>
             </div>
 
             <div style={{ gridColumn: "1 / -1" }}>
@@ -1636,21 +2203,31 @@ function Jobs() {
         mode={modal.mode}
         isAdmin={isAdmin}
         staffOptions={staffOptions}
-        initial={modal.mode === "edit" ? selected : null}
+        initial={modal.mode === "new" ? null : selected}
         onClose={() => setModal({ open: false, mode: "new" })}
-        onSaved={async (updatedOrCreated) => {
-          if (updatedOrCreated?.id) {
-            setSelected((prev) =>
-              prev?.id === updatedOrCreated.id ? { ...prev, ...updatedOrCreated } : prev
-            );
-          }
-          try {
-            await fetchTotalJobs();
-          } catch {}
-        }}
+  onSaved={async (updatedOrCreated) => {
+  if (updatedOrCreated?.id) {
+    // Always set selected to the saved job (covers NEW + EDIT)
+    setSelected((prev) =>
+      prev?.id === updatedOrCreated.id ? { ...prev, ...updatedOrCreated } : updatedOrCreated
+    );
+
+    // If we just created a new job, flip the modal into EDIT mode so the header shows Job #...
+    setModal((m) => (m.mode === "new" ? { open: true, mode: "edit" } : m));
+  }
+
+  try {
+    await fetchTotalJobs();
+  } catch {}
+
+  // ✅ THIS is what refreshes the register immediately
+  try {
+    await refreshRegister();
+  } catch {}
+}}
+
       />
     </PageLayout>
   );
 }
-
 export default Jobs;

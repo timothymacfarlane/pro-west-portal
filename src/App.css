@@ -2439,3 +2439,89 @@ table {
 .pac-container {
   z-index: 999999 !important;
 }
+
+/* ============================= */
+/* Job Register (Portal Matched) */
+/* ============================= */
+
+.jobs-reg-th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+
+  padding: 10px 14px;
+  text-align: left;
+
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.25px;
+  white-space: nowrap;
+  cursor: pointer;
+
+  /* match portal card header */
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.jobs-reg-th-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.jobs-reg-th:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.jobs-reg-th.is-active {
+  background: rgba(255, 255, 255, 0.10);
+}
+
+/* Table container */
+.jobs-reg-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* Row styling */
+.jobs-reg-table tbody tr {
+  transition: background 0.15s ease;
+}
+
+.jobs-reg-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Cell styling */
+.jobs-reg-table td {
+  padding: 10px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  vertical-align: top;
+}
+
+/* First column (job number emphasis) */
+.jobs-reg-table td:first-child {
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+/* Keep desktop clean (checkbox only) */
+.admin-active-label {
+  display: none;
+}
+
+.admin-active-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Mobile: show the label so the tick is annotated */
+@media (max-width: 720px) {
+  .admin-active-label {
+    display: inline;
+    font-weight: 600;
+    opacity: 0.85;
+  }
+}

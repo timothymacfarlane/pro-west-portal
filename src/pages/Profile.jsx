@@ -4,11 +4,17 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabaseClient";
 
 function Profile() {
-  const { user } = useAuth();
+    const { user, profile, permissionLabel } = useAuth();
 
   const [displayName, setDisplayName] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileMessage, setProfileMessage] = useState("");
+  const [userRole, setUserRole] = useState("");
+    const [profileDetails, setProfileDetails] = useState({
+    display_name: "",
+    mobile: "",
+    job_title: "",
+  });
 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -21,6 +27,41 @@ function Profile() {
       setDisplayName(user.user_metadata.full_name);
     }
   }, [user]);
+
+    // Load role from profiles table
+  // Load profile fields from profiles table (role + display fields)
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const loadProfileRow = async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("role, display_name, mobile, job_title")
+        .eq("id", user.id)
+        .single();
+
+      if (error) {
+        console.error("Failed to load profile row:", error);
+        setUserRole("");
+        setProfileDetails({ display_name: "", mobile: "", job_title: "" });
+        return;
+      }
+
+      // role label
+      const r = String(data?.role || "").trim().toLowerCase();
+      setUserRole(r === "admin" ? "Admin" : "Basic");
+
+      // profile details
+      setProfileDetails({
+        display_name: data?.display_name || "",
+        mobile: data?.mobile || "",
+        job_title: data?.job_title || "",
+      });
+    };
+
+    loadProfileRow();
+  }, [user?.id]);
+
 
   if (!user) {
     // ProtectedRoute should prevent this, but just in case
@@ -112,6 +153,13 @@ function Profile() {
         </div>
 
         <div className="card-row">
+          <span className="card-row-label">Permission</span>
+          <span className="card-row-value">
+            {userRole || "Basic"}
+          </span>
+        </div>
+
+        <div className="card-row">
           <span className="card-row-label">User ID</span>
           <span
             className="card-row-value"
@@ -122,52 +170,29 @@ function Profile() {
         </div>
       </div>
 
-      {/* Display name card */}
+        {/* Profile card */}
       <div className="card">
         <h3 className="card-title">Profile</h3>
         <p className="card-subtitle">
-          Set a display name that can be shown on timesheets, Take 5s, etc.
+          Your worker details are managed in the Pro West Portal.
         </p>
 
-        <form onSubmit={handleSaveProfile} style={{ marginTop: "0.6rem" }}>
-          <div className="card-row">
-            <span className="card-row-label">Display name</span>
-            <input
-              type="text"
-              aria-label="Display name"
-              autoCapitalize="words"
-              className="maps-search-input"
-              style={{ maxWidth: "260px" }}
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="e.g. Tim Macfarlane"
-            />
-          </div>
+        <div className="card-row" style={{ marginTop: "0.6rem" }}>
+          <span className="card-row-label">Name</span>
+          <span className="card-row-value">{profile?.display_name || "—"}</span>
+        </div>
 
-          <button
-            type="submit"
-            className="btn-pill primary"
-            style={{ marginTop: "0.6rem" }}
-            disabled={savingProfile}
-          >
-            {savingProfile ? "Saving…" : "Save changes"}
-          </button>
+        <div className="card-row">
+          <span className="card-row-label">Mobile</span>
+          <span className="card-row-value">{profile?.mobile || "—"}</span>
+        </div>
 
-          {profileMessage && (
-            <div
-              style={{
-                marginTop: "0.4rem",
-                fontSize: "0.8rem",
-                color: profileMessage.includes("updated")
-                  ? "#2e7d32"
-                  : "#b71c1c",
-              }}
-            >
-              {profileMessage}
-            </div>
-          )}
-        </form>
+        <div className="card-row">
+          <span className="card-row-label">Position</span>
+          <span className="card-row-value">{profile?.job_title || "—"}</span>
+        </div>
       </div>
+
 
       {/* Change password card */}
       <div className="card">

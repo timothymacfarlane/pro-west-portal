@@ -163,14 +163,18 @@ function Admin() {
                     </label>
                   </span>
 
-                  <span>
-                    <input
-                      type="checkbox"
-                      checked={!!p.is_active}
-                      onChange={(e) => handleUpdate(p.id, { is_active: e.target.checked })}
-                      disabled={savingId === p.id}
-                    />
-                  </span>
+                  <span className="admin-active-cell">
+  <label className="admin-active-toggle">
+    <input
+      type="checkbox"
+      checked={!!p.is_active}
+      onChange={(e) => handleUpdate(p.id, { is_active: e.target.checked })}
+      disabled={savingId === p.id}
+    />
+    <span className="admin-active-label">Active</span>
+  </label>
+</span>
+
                 </div>
               ))}
             </div>

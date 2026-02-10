@@ -17,15 +17,21 @@ function normalizeRole(role) {
 }
 
 function buildFallbackProfile(user) {
-  // If a profiles row doesn't exist (or fetch fails), we still want the app usable.
-  // Default to basic unless your app expects something else.
+  const fallbackName = user?.user_metadata?.full_name ?? user?.email ?? "User";
+
   return {
     id: user?.id ?? null,
-    full_name: user?.user_metadata?.full_name ?? user?.email ?? "User",
+    // ✅ new canonical field
+    display_name: fallbackName,
+    // ✅ keep for legacy code (safe to remove later once you’ve migrated everything)
+    full_name: fallbackName,
     role: "basic",
     is_active: true,
+    mobile: "",
+    job_title: "",
   };
 }
+
 
 // Helper: promise timeout wrapper
 async function withTimeout(promise, ms, label = "operation") {
@@ -189,17 +195,28 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  const value = useMemo(() => {
+   const value = useMemo(() => {
     const role = normalizeRole(profile?.role);
+
+    // ✅ canonical display name for the whole app
+    const displayName =
+      profile?.display_name ||
+      profile?.full_name ||
+      user?.email ||
+      "";
+
     return {
       user,
       profile,
       role,
+      displayName,                 // ✅ add this
+      permissionLabel: role === "admin" ? "Admin" : "Basic", // optional but handy
       authLoading,
       authReady,
       isAdmin: role === "admin",
     };
   }, [user, profile, authLoading, authReady]);
+
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
