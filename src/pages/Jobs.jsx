@@ -793,6 +793,52 @@ const siteAddressText = deriveStickerSiteAddress(j);
     };
   }
 
+// -----------------------------
+// Notifications: assigned / reassigned
+// -----------------------------
+async function notifyJobAssignment({ jobId, jobNumber, prevAssigned, nextAssigned }) {
+  console.log("notifyJobAssignment called", { prevAssigned, nextAssigned, jobId, jobNumber });
+
+  const prev = (prevAssigned || "").trim().toLowerCase();
+  const next = (nextAssigned || "").trim().toLowerCase();
+
+  // only notify when someone is actually assigned AND it's changed
+  if (!next || next === prev) return;
+
+  const isReassign = !!prev && next !== prev;
+
+  // Resolve the target user_id from staffOptions (already loaded from profiles)
+  const target = (staffOptions || []).find(
+    (s) => (s.display_name || "").trim().toLowerCase() === next
+  );
+
+  if (!target?.id) {
+    console.warn("No matching profile found for assigned_to:", nextAssigned);
+    return;
+  }
+
+  // Who did it (optional, nice for message)
+  const { data: authData } = await supabase.auth.getUser();
+  const actor = authData?.user?.email || "Someone";
+
+  const type = "job_reassigned";
+  const title = isReassign ? "Job reassigned to you" : "New job assigned to you";
+  const body = `Job #${jobNumber || "—"} was ${isReassign ? "reassigned" : "assigned"} to you by ${actor}.`;
+  const link = `/jobs?job=${jobId}`; // your Jobs.jsx already supports ?job=...
+
+  const { error } = await supabase.from("notifications").insert([
+    {
+      user_id: target.id,
+      type,
+      title,
+      body,
+      link,
+      is_acknowledged: false,
+    },
+  ]);
+
+  if (error) console.warn("Failed to insert assignment notification:", error);
+}
 
   async function handleSave(opts = {}) {
     if (!canEdit) return;
@@ -837,6 +883,9 @@ const siteAddressText = deriveStickerSiteAddress(j);
         mga_northing: mgaN ? Number(mgaN) : null,
       };
 
+const prevAssigned = initial?.assigned_to || null;
+const nextAssigned = payload.assigned_to || null;
+
       if (mode === "new") {
         const { data, error: rpcErr } = await supabase.rpc("create_job", {
           p_job_type_legacy: payload.job_type_legacy,
@@ -865,41 +914,57 @@ const siteAddressText = deriveStickerSiteAddress(j);
         });
 
         if (rpcErr) throw rpcErr;
+const created = Array.isArray(data) ? data[0] : data;
+const jobId = created?.id || null;
+const jobNumber = created?.job_number || null;
 
-        const created = Array.isArray(data) ? data[0] : data;
+// Best-effort: write the extra client snapshot fields post-create
+let createdMerged = created;
 
-        // Best-effort: write the extra client snapshot fields post-create (if your RPC doesn't already)
-        let createdMerged = created;
-        if (created?.id) {
-          const { error: upErr } = await supabase
-            .from("jobs")
-            .update({
-              client_first_name: payload.client_first_name,
-              client_surname: payload.client_surname,
-              client_company: payload.client_company,
-              client_phone: payload.client_phone,
-              client_mobile: payload.client_mobile,
-              client_email: payload.client_email,
-              client_name: payload.client_name,
-            })
-            .eq("id", created.id);
+if (jobId) {
+  const { error: upErr } = await supabase
+    .from("jobs")
+    .update({
+      client_first_name: payload.client_first_name,
+      client_surname: payload.client_surname,
+      client_company: payload.client_company,
+      client_phone: payload.client_phone,
+      client_mobile: payload.client_mobile,
+      client_email: payload.client_email,
+      client_name: payload.client_name,
+    })
+    .eq("id", jobId);
 
-          if (upErr) console.warn("Post-create client snapshot update failed:", upErr);
+  if (upErr) console.warn("Post-create client snapshot update failed:", upErr);
 
-          createdMerged = { ...created, ...payload };
-          onSaved?.(createdMerged);
-        } else {
-          onSaved?.(created);
-        }
+  createdMerged = { ...created, ...payload };
 
-        if (closeAfter) onClose();
-        return returnSaved ? (createdMerged || created) : undefined;
+  // ✅ Notify after we have the jobId
+  await notifyJobAssignment({
+    jobId,
+    jobNumber,
+    prevAssigned: null,
+    nextAssigned,
+  });
+}
+
+// Always call onSaved
+onSaved?.(jobId ? createdMerged : created);
+
+if (closeAfter) onClose();
+return returnSaved ? (jobId ? createdMerged : created) : undefined;
       }
 
       const { error: upErr } = await supabase.from("jobs").update(payload).eq("id", initial.id);
       if (upErr) throw upErr;
 
       const updated = { ...initial, ...payload };
+      await notifyJobAssignment({
+  jobId: initial?.id,
+  jobNumber: initial?.job_number,
+  prevAssigned,
+  nextAssigned,
+});
       onSaved?.(updated);
       if (closeAfter) onClose();
       return returnSaved ? updated : undefined;
@@ -1727,7 +1792,7 @@ if (!isAppVisible) return;
 
             <input
               className="maps-search-input"
-              placeholder="Type job number… (e.g. 25123)"
+              placeholder="Type job number… (e.g. 1234)"
               inputMode="numeric"
               pattern="[0-9]*"
               value={jobNoQuery}

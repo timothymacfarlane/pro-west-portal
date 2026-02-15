@@ -2525,3 +2525,44 @@ table {
     opacity: 0.85;
   }
 }
+/* Make sure wrapper is an anchor for desktop absolute dropdown */
+.notification-wrapper {
+  position: relative;
+}
+
+/* Default (desktop): dropdown anchored to bell */
+.notification-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 360px;
+  max-width: calc(100vw - 16px);
+  max-height: 520px;
+  overflow-y: auto;
+  z-index: 9999;
+}
+
+/* Backdrop (only exists when open) */
+.notification-backdrop {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  z-index: 9998;
+}
+
+/* Mobile: dropdown becomes fixed and full-width so it never goes off-screen */
+@media (max-width: 600px) {
+  .notification-dropdown {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    top: 64px;              /* adjust if your header height differs */
+    width: auto;
+    max-width: none;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+  }
+}

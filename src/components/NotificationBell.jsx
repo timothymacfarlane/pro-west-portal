@@ -71,27 +71,67 @@ function NotificationBell() {
     setItems([]);
   }
 
-  useEffect(() => {
-    loadNotifications();
+ useEffect(() => {
+  if (!user?.id) return;
 
-    if (!user) return;
+  // initial load
+  loadNotifications();
 
-    const channel = supabase
-      .channel("notifications-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "notifications",
-          filter: `user_id=eq.${user.id}`,
-        },
-        () => loadNotifications()
-      )
-      .subscribe();
+  const channel = supabase
+    .channel(`notifications-realtime-${user.id}`)
 
-    return () => supabase.removeChannel(channel);
-  }, [user]);
+    // ✅ INSERT: push into state immediately (instant badge update)
+    .on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "notifications",
+        filter: `user_id=eq.${user.id}`,
+      },
+      (payload) => {
+        const row = payload?.new;
+        if (!row) return;
+
+        setItems((prev) => {
+          // prevent duplicates if loadNotifications also runs
+          if (prev.some((n) => n.id === row.id)) return prev;
+          return [row, ...prev];
+        });
+      }
+    )
+
+    // ✅ UPDATE: if another device clears/acknowledges, remove instantly
+    .on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "notifications",
+        filter: `user_id=eq.${user.id}`,
+      },
+      (payload) => {
+        const row = payload?.new;
+        if (!row) return;
+
+        if (row.is_acknowledged) {
+          setItems((prev) => prev.filter((n) => n.id !== row.id));
+        } else {
+          // optional: keep row fresh if it changes
+          setItems((prev) => prev.map((n) => (n.id === row.id ? row : n)));
+        }
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+  // IMPORTANT: depend on user.id, not the whole user object
+}, [user?.id]);
+
+
+ 
 
   const count = items.length;
 
@@ -118,6 +158,14 @@ function NotificationBell() {
         🔔
         {count > 0 && <span className="notification-badge">{count}</span>}
       </button>
+{open && (
+  <button
+    type="button"
+    className="notification-backdrop"
+    onClick={() => setOpen(false)}
+    aria-label="Close notifications"
+  />
+)}
 
       {open && (
         <div className="notification-dropdown" role="menu" aria-label="Notifications list">
