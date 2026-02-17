@@ -467,7 +467,7 @@ function MyJobs() {
   );
 
   return (
-    <PageLayout title="My Jobs" subtitle="See and manage assigned jobs" actions={actions}>
+    <PageLayout title="My Jobs" subtitle="View and Manage Jobs Assigned to yourself" actions={actions}>
       <div className="card">
         <h3 className="card-title">Filters</h3>
         <p className="card-subtitle">Default is your jobs. Switch to All or another worker when needed.</p>

@@ -5,7 +5,7 @@ function Weather() {
     <PageLayout data-weather
       icon="🌦️"
       title="Weather"
-      subtitle="Radar and marine conditions around Perth for Pro West jobs"
+      subtitle="Keep an eye on weather conditions around Perth before heading into the field"
     >
       {/* Intro / info card */}
       <div className="card">

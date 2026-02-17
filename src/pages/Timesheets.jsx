@@ -603,7 +603,7 @@ setDirtyFields({});
     <PageLayout
       icon="⏱️"
       title="Timesheets"
-      subtitle="Fortnightly working hours"
+      subtitle="Complete your fortnightly working hours"
       actions={
         <>
           <button type="button" className="btn-pill" onClick={goPreviousFortnight} disabled={loadingPeriod || busy}>
@@ -632,7 +632,7 @@ setDirtyFields({});
 
       <div className="card">
         <h3 className="card-title">Timesheet period</h3>
-        <p className="card-subtitle">This view covers a full 14 days (including weekends) across two weeks.</p>
+        <p className="card-subtitle">This view covers the full 14 days (including weekends) across your payroll cycle.</p>
 
         <div style={{ marginTop: "0.6rem", display: "flex", flexWrap: "wrap", gap: "0.6rem" }}>
           {isAdmin ? (
@@ -905,6 +905,8 @@ setDirtyFields({});
 
   <ul className="ts-help-list">
     <li>
+      <strong>Complete your timesheet daily:</strong> This is the most accurate way to keep a true representation of your hours worked.
+    </li><li>
       <strong>Daily times:</strong> Enter Start and Finish times plus the duration of your Lunch Break for each day worked.
       Times to be rounded to nearest 15 minute interval. Hours are calculated automatically.
     </li>

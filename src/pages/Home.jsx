@@ -5,7 +5,7 @@ function Home() {
     <PageLayout
       icon="🏠"
       title="Home"
-      subtitle="Quick overview of Pro West operations"
+      subtitle="Pro West Surveying - Licensed and Engineering Surveying Consultants"
       actions={
         <div className="home-actions">
           <button className="btn-pill primary">Today</button>

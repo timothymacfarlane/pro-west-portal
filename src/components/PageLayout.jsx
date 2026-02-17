@@ -1,6 +1,8 @@
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext.jsx";
 
+const APP_VERSION = "0.0.0-beta";
+
 function HeaderActions({ extraActions }) {
   // useAuth() might return null if AuthProvider is not set up yet,
   // so we don't destructure directly.
@@ -42,9 +44,14 @@ function PageLayout({ icon, title, subtitle, actions, children }) {
         <HeaderActions extraActions={actions} />
       </header>
 
-      <div className="page-body">{children}</div>
+            <div className="page-body">{children}</div>
+
+      <footer className="page-footer" role="contentinfo" aria-label="Footer">
+        <span className="page-footer-version">v{APP_VERSION}</span>
+      </footer>
     </div>
   );
 }
+
 
 export default PageLayout;

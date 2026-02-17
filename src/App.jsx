@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { Routes, Route, NavLink, useLocation } from "react-router-dom";
 import "./App.css";
 
@@ -7,21 +7,22 @@ import prowestLogo from "./assets/prowest-logo.png";
 import Login from "./pages/Login.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 
-import Home from "./pages/Home.jsx";
-import Admin from "./pages/Admin.jsx";
-import Contacts from "./pages/Contacts.jsx";
-import Documents from "./pages/Documents.jsx";
-import Jobs from "./pages/Jobs.jsx";
-import MyJobs from "./pages/MyJobs.jsx"; // ✅ ADDED
-import Maps from "./pages/Maps.jsx";
-import Profile from "./pages/Profile.jsx";
-import Schedule from "./pages/Schedule.jsx";
-import Take5 from "./pages/Take5.jsx";
-import Take5Register from "./pages/Take5Register.jsx";
-import Timesheets from "./pages/Timesheets.jsx";
-import VehiclePrestart from "./pages/VehiclePrestart.jsx";
-import VehiclePrestartRegister from "./pages/VehiclePrestartRegister.jsx";
-import Weather from "./pages/Weather.jsx";
+const Home = lazy(() => import("./pages/Home.jsx"));
+const Admin = lazy(() => import("./pages/Admin.jsx"));
+const Contacts = lazy(() => import("./pages/Contacts.jsx"));
+const Documents = lazy(() => import("./pages/Documents.jsx"));
+const Jobs = lazy(() => import("./pages/Jobs.jsx"));
+const MyJobs = lazy(() => import("./pages/MyJobs.jsx"));
+const Maps = lazy(() => import("./pages/Maps.jsx"));
+const Profile = lazy(() => import("./pages/Profile.jsx"));
+const Schedule = lazy(() => import("./pages/Schedule.jsx"));
+const Take5 = lazy(() => import("./pages/Take5.jsx"));
+const Take5Register = lazy(() => import("./pages/Take5Register.jsx"));
+const Timesheets = lazy(() => import("./pages/Timesheets.jsx"));
+const VehiclePrestart = lazy(() => import("./pages/VehiclePrestart.jsx"));
+const VehiclePrestartRegister = lazy(() => import("./pages/VehiclePrestartRegister.jsx"));
+const Weather = lazy(() => import("./pages/Weather.jsx"));
+
 
 import NotificationBell from "./components/NotificationBell.jsx"; // 🔔 ADDED
 
@@ -333,147 +334,148 @@ function App() {
         )}
 
         {/* ---------- MAIN CONTENT ---------- */}
-        <main className="main-content">
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route
-              path="/"
-              element={
-                <ProtectedRoute>
-                  <Home />
-                </ProtectedRoute>
-              }
-            />
+<main className="main-content">
+  <Suspense fallback={<div style={{ padding: 16 }}>Loading…</div>}>
+    <Routes>
+      <Route path="/login" element={<Login />} />
 
-            <Route
-              path="/admin"
-              element={
-                <ProtectedRoute>
-                  <Admin />
-                </ProtectedRoute>
-              }
-            />
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <Home />
+          </ProtectedRoute>
+        }
+      />
 
-            <Route
-              path="/contacts"
-              element={
-                <ProtectedRoute>
-                  <Contacts />
-                </ProtectedRoute>
-              }
-            />
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute>
+            <Admin />
+          </ProtectedRoute>
+        }
+      />
 
+      <Route
+        path="/contacts"
+        element={
+          <ProtectedRoute>
+            <Contacts />
+          </ProtectedRoute>
+        }
+      />
 
+      <Route
+        path="/documents"
+        element={
+          <ProtectedRoute>
+            <Documents />
+          </ProtectedRoute>
+        }
+      />
 
-            <Route
-              path="/documents"
-              element={
-                <ProtectedRoute>
-                  <Documents />
-                </ProtectedRoute>
-              }
-            />
-            {/* ✅ ADDED: My Jobs route */}
-            <Route
-              path="/my-jobs"
-              element={
-                <ProtectedRoute>
-                  <MyJobs />
-                </ProtectedRoute>
-              }
-            />
+      <Route
+        path="/my-jobs"
+        element={
+          <ProtectedRoute>
+            <MyJobs />
+          </ProtectedRoute>
+        }
+      />
 
-            <Route
-              path="/jobs"
-              element={
-                <ProtectedRoute>
-                  <Jobs />
-                </ProtectedRoute>
-              }
-            />
+      <Route
+        path="/jobs"
+        element={
+          <ProtectedRoute>
+            <Jobs />
+          </ProtectedRoute>
+        }
+      />
 
-            <Route
-              path="/maps"
-              element={
-                <ProtectedRoute>
-                  <Maps />
-                </ProtectedRoute>
-              }
-            />
+      <Route
+        path="/maps"
+        element={
+          <ProtectedRoute>
+            <Maps />
+          </ProtectedRoute>
+        }
+      />
 
-            <Route
-              path="/profile"
-              element={
-                <ProtectedRoute>
-                  <Profile />
-                </ProtectedRoute>
-              }
-            />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <Profile />
+          </ProtectedRoute>
+        }
+      />
 
-            <Route
-              path="/schedule"
-              element={
-                <ProtectedRoute>
-                  <Schedule />
-                </ProtectedRoute>
-              }
-            />
+      <Route
+        path="/schedule"
+        element={
+          <ProtectedRoute>
+            <Schedule />
+          </ProtectedRoute>
+        }
+      />
 
-            <Route
-              path="/take5"
-              element={
-                <ProtectedRoute>
-                  <Take5 />
-                </ProtectedRoute>
-              }
-            />
+      <Route
+        path="/take5"
+        element={
+          <ProtectedRoute>
+            <Take5 />
+          </ProtectedRoute>
+        }
+      />
 
-            <Route
-              path="/take5-register"
-              element={
-                <ProtectedRoute>
-                  <Take5Register />
-                </ProtectedRoute>
-              }
-            />
+      <Route
+        path="/take5-register"
+        element={
+          <ProtectedRoute>
+            <Take5Register />
+          </ProtectedRoute>
+        }
+      />
 
-            <Route
-              path="/timesheets"
-              element={
-                <ProtectedRoute>
-                  <Timesheets />
-                </ProtectedRoute>
-              }
-            />
+      <Route
+        path="/timesheets"
+        element={
+          <ProtectedRoute>
+            <Timesheets />
+          </ProtectedRoute>
+        }
+      />
 
-            <Route
-              path="/vehicle-prestart"
-              element={
-                <ProtectedRoute>
-                  <VehiclePrestart />
-                </ProtectedRoute>
-              }
-            />
+      <Route
+        path="/vehicle-prestart"
+        element={
+          <ProtectedRoute>
+            <VehiclePrestart />
+          </ProtectedRoute>
+        }
+      />
 
-            <Route
-              path="/vehicle-prestart-register"
-              element={
-                <ProtectedRoute>
-                  <VehiclePrestartRegister />
-                </ProtectedRoute>
-              }
-            />
+      <Route
+        path="/vehicle-prestart-register"
+        element={
+          <ProtectedRoute>
+            <VehiclePrestartRegister />
+          </ProtectedRoute>
+        }
+      />
 
-            <Route
-              path="/weather"
-              element={
-                <ProtectedRoute>
-                  <Weather />
-                </ProtectedRoute>
-              }
-            />
-          </Routes>
-        </main>
+      <Route
+        path="/weather"
+        element={
+          <ProtectedRoute>
+            <Weather />
+          </ProtectedRoute>
+        }
+      />
+    </Routes>
+  </Suspense>
+</main>
       </div>
     </div>
     </AppVisibilityProvider>

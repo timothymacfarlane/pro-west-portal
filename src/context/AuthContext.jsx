@@ -52,6 +52,8 @@ export function AuthProvider({ children }) {
   // authReady: once true, we never block route transitions with "checking login"
   const [authReady, setAuthReady] = useState(false);
 
+  const [profileLoading, setProfileLoading] = useState(false);
+
   // Refs to avoid stale closures in onAuthStateChange
   const userIdRef = useRef(null);
   const hasProfileRef = useRef(false);
@@ -114,18 +116,24 @@ export function AuthProvider({ children }) {
           return;
         }
 
-        const sessionUser = sessionData?.session?.user ?? null;
-        setUser(sessionUser);
+const sessionUser = sessionData?.session?.user ?? null;
+setUser(sessionUser);
 
-        if (!sessionUser) {
-          setProfile(null);
-          return;
-        }
+// ✅ session state is now known — routes should not redirect because we're "still checking"
+setAuthReady(true);
 
-        // 2) Fetch profile (network)
-        const p = await fetchProfile(sessionUser);
-        if (!isMounted) return;
-        setProfile(p);
+if (!sessionUser) {
+  setProfile(null);
+  return;
+}
+
+// 2) Fetch profile (network) — do NOT block authReady on this
+setProfileLoading(true);
+const p = await fetchProfile(sessionUser);
+if (!isMounted) return;
+setProfile(p);
+setProfileLoading(false);
+
       } catch (e) {
         console.warn("Auth bootstrap exception:", e?.message || e);
         if (!isMounted) return;
@@ -134,6 +142,7 @@ export function AuthProvider({ children }) {
       } finally {
         if (isMounted) {
           setAuthLoading(false);
+          setProfileLoading(false);
           setAuthReady(true);
         }
       }
@@ -150,11 +159,15 @@ export function AuthProvider({ children }) {
       const currentUserId = userIdRef.current;
 
       // ✅ Token refresh happens in the background — never show "Checking login"
-      if (event === "TOKEN_REFRESHED") {
-        setUser(newUser);
-        if (isMounted) setAuthReady(true);
-        return;
-      }
+   if (event === "TOKEN_REFRESHED") {
+  setUser(newUser);
+  if (isMounted) {
+    setProfileLoading(false); // ✅ add this
+    setAuthReady(true);
+  }
+  return;
+}
+
 
       const userChanged = newUserId !== currentUserId;
 
@@ -171,10 +184,12 @@ export function AuthProvider({ children }) {
         }
 
         // Only refetch profile if user changed OR we don't have one yet
-        if (userChanged || !hasProfileRef.current) {
-          const p = await fetchProfile(newUser);
-          if (!isMounted) return;
-          setProfile(p);
+       if (userChanged || !hasProfileRef.current) {
+  setProfileLoading(true);
+  const p = await fetchProfile(newUser);
+  if (!isMounted) return;
+  setProfile(p);
+  setProfileLoading(false);
         }
       } catch (e) {
         console.warn("Auth change handler exception:", e?.message || e);
@@ -184,6 +199,7 @@ export function AuthProvider({ children }) {
       } finally {
         if (isMounted) {
           setAuthLoading(false);
+          setProfileLoading(false); 
           setAuthReady(true);
         }
       }
@@ -205,17 +221,19 @@ export function AuthProvider({ children }) {
       user?.email ||
       "";
 
-    return {
-      user,
-      profile,
-      role,
-      displayName,                 // ✅ add this
-      permissionLabel: role === "admin" ? "Admin" : "Basic", // optional but handy
-      authLoading,
-      authReady,
-      isAdmin: role === "admin",
-    };
-  }, [user, profile, authLoading, authReady]);
+return {
+  user,
+  profile,
+  role,
+  displayName,
+  permissionLabel: role === "admin" ? "Admin" : "Basic",
+  authLoading,
+  authReady,
+  profileLoading,            // ✅ add this
+  isAdmin: role === "admin",
+};
+
+  }, [user, profile, authLoading, authReady, profileLoading]);
 
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

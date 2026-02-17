@@ -1739,7 +1739,7 @@ if (!isAppVisible) return;
   return (
     <PageLayout
       title="Jobs"
-      subtitle="Search → select → view → edit"
+      subtitle="Create, Edit and Manage Jobs"
       actions={
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           {showBackToMaps && (

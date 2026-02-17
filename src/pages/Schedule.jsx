@@ -594,7 +594,7 @@ const handleJobKeyDown = (e) => {
     <PageLayout
       icon="📅"
       title="Schedule"
-      subtitle={isAdmin ? "Weekly schedule – click a cell to edit" : "Weekly schedule – view only"}
+      subtitle={isAdmin ? "Weekly Schedule – click a cell to view or edit" : "Weekly Schedule"}
     >
       <div className="card schedule-card">
         <div className="schedule-header">

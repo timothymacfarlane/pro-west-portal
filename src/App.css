@@ -276,6 +276,22 @@
   gap: 0.75rem;
 }
 
+/* Page footer (version label) */
+.page-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--pw-border-soft);
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.page-footer-version {
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
 /* Reusable card style for content blocks */
 
 .card {

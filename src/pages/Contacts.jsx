@@ -386,7 +386,7 @@ function Contacts() {
     <PageLayout
       icon="📇"
       title="Contacts"
-      subtitle="Key Pro West staff contact details"
+      subtitle="Pro West Staff and Client contact details"
     >
       {/* Search + suggestions card */}
       <div className="card">
