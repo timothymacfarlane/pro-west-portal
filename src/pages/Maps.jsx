@@ -435,6 +435,29 @@ function mgaToWgs84(zone, easting, northing) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   return { lat, lng: lon };
 }
+function wgs84ToMga2020(lat, lng) {
+  const la = Number(lat);
+  const lo = Number(lng);
+  if (!Number.isFinite(la) || !Number.isFinite(lo)) return null;
+
+  // Standard UTM zone from longitude
+  const zone = Math.floor((lo + 180) / 6) + 1;
+
+  // Your EPSG defs only cover zones 50 & 51 (WA spans 49–52, but your portal uses 50/51)
+  const src = "EPSG:4326";
+  const dst = zone === 51 ? "EPSG:7851" : "EPSG:7850";
+
+  const [e, n] = proj4(src, dst, [lo, la]);
+  if (!Number.isFinite(e) || !Number.isFinite(n)) return null;
+
+  return { zone: zone === 51 ? 51 : 50, easting: e, northing: n };
+}
+
+function fmtMGA(x) {
+  const v = Number(x);
+  if (!Number.isFinite(v)) return "";
+  return v.toFixed(3); // mm precision; change to 0 if you want whole metres
+}
 
 function isSmallScreen() {
   if (typeof window === "undefined") return false;
@@ -637,6 +660,10 @@ function Maps() {
       return [];
     }
   });
+const mapNotesRef = useRef(mapNotes);
+useEffect(() => {
+  mapNotesRef.current = mapNotes;
+}, [mapNotes]);
 
   const [noteAddMode, setNoteAddMode] = useState(false);
   const [notesSyncError, setNotesSyncError] = useState("");
@@ -783,6 +810,9 @@ function Maps() {
       if (error) throw error;
 
       setMapNotes(data || []);
+            try {
+        localStorage.setItem(MAP_NOTES_CACHE_KEY, JSON.stringify(data || []));
+      } catch {}
     } catch (e) {
       console.error("Fetch notes failed:", e);
       setNotesSyncError("Notes are showing from device cache (not synced).");
@@ -968,7 +998,7 @@ useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    const note = (visibleNotes || []).find((n) => n.id === id);
+        const note = (mapNotesRef.current || []).find((n) => n.id === id);
     if (!note) return;
 
 
@@ -1046,7 +1076,10 @@ useEffect(() => {
     const safeBy = String(note.created_by_name || "")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
-
+const mga = wgs84ToMga2020(note.lat, note.lng);
+const mgaLine = mga
+  ? `MGA2020 (Zone ${mga.zone}) — E ${fmtMGA(mga.easting)}  N ${fmtMGA(mga.northing)}`
+  : "";
     const html = `
       <div style="font-family: Inter, system-ui, sans-serif; font-size: 12px; min-width: 220px;">
         <div data-pw-drag-handle="1" style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
@@ -1080,9 +1113,10 @@ useEffect(() => {
         <div style="margin-top:8px; font-size:11px; color:#444; font-weight:800;">${
           safeTime || ""
         }</div>
-        ${attachedJobLabel ? `<div style="margin-top:4px; font-size:11px; color:#444; font-weight:800;">Attached: ${attachedJobLabel}</div>` : ""}
-        ${safeBy ? `<div style="margin-top:4px; font-size:11px; color:#444; font-weight:800;">By: ${safeBy}</div>` : ""}
-      </div>
+      ${attachedJobLabel ? `<div style="margin-top:4px; font-size:11px; color:#444; font-weight:800;">Attached: ${attachedJobLabel}</div>` : ""}
+${mgaLine ? `<div style="margin-top:4px; font-size:11px; color:#444; font-weight:800;">${mgaLine}</div>` : ""}
+${safeBy ? `<div style="margin-top:4px; font-size:11px; color:#444; font-weight:800;">By: ${safeBy}</div>` : ""}
+</div>
     `;
 
     noteInfoWindowRef.current.setContent(html);
@@ -1129,49 +1163,95 @@ useEffect(() => {
       if (cancelBtn) cancelBtn.onclick = () => hideEdit();
 
       if (saveBtn) {
-        saveBtn.onclick = async () => {
-          const newText = String(ta?.value || "").trim();
-          if (!newText) {
-            if (ta) ta.style.borderColor = "#d32f2f";
-            return;
-          }
+  saveBtn.onclick = async () => {
+    const newText = String(ta?.value || "").trim();
+    if (!newText) {
+      if (ta) ta.style.borderColor = "#d32f2f";
+      return;
+    }
 
-          try {
-            saveBtn.disabled = true;
-            saveBtn.textContent = "Saving…";
-          } catch {
-            // ignore
-          }
+    // Disable immediately
+    try {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saving…";
+    } catch {}
 
-          const prevNotes = mapNotes || [];
-          setMapNotes((prev) =>
-            (prev || []).map((n) => (n.id === id ? { ...n, text: newText } : n))
-          );
+    // Optimistic UI update (instant)
+    const prevNotes = mapNotes || [];
+    setMapNotes((prev) =>
+      (prev || []).map((n) => (n.id === id ? { ...n, text: newText } : n))
+    );
 
-          try {
-            const { error } = await supabase
-              .from("map_notes")
-              .update({ text: newText })
-              .eq("id", id);
-            if (error) throw error;
+    // Update the open popup instantly too (so it "refreshes straight away")
+    try {
+      if (viewDiv) viewDiv.textContent = newText;
+    } catch {}
 
-            hideEdit();
-            // Refresh the popup view with the updated text
-            setTimeout(() => openNoteInfo(id, { zoom: false }), 0);
-          } catch (e) {
-            console.error("Edit note failed:", e);
-            setMapNotes(prevNotes);
-            alert("Couldn’t update note. Check your connection and try again.");
-          } finally {
-            try {
-              saveBtn.disabled = false;
-              saveBtn.textContent = "Save";
-            } catch {
-              // ignore
-            }
-          }
-        };
+        // ✅ Update pin tooltip/title immediately (so marker reflects edited text)
+    try {
+      const m = noteMarkersByIdRef.current.get(id);
+      if (m) {
+        m.setTitle(newText || "Note");
       }
+    } catch {}
+
+    try {
+      // Always read auth user (fixes notes created before currentUserId loaded)
+      let authUserId = currentUserId || null;
+      let authUserName = currentUserName || null;
+
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (data?.user?.id) authUserId = data.user.id;
+        if (!authUserName) authUserName = data?.user?.email || data?.user?.id || null;
+      } catch {}
+
+      // If note was created with created_by null, claim it now (prevents RLS update failures)
+      const payload = { text: newText };
+      if (!note.created_by && authUserId) {
+        payload.created_by = authUserId;
+        if (!note.created_by_name && authUserName) payload.created_by_name = authUserName;
+      }
+
+  const { data: updated, error } = await supabase
+  .from("map_notes")
+  .update(payload)
+  .eq("id", id)
+  .select(
+    "id, text, lat, lng, created_at, created_by, created_by_name, job_id, job_number, measure_mode, measure_path"
+  )
+  .maybeSingle(); // ✅ avoids PGRST116 when 0 rows are returned
+
+if (error) throw error;
+
+// ✅ If RLS blocks the returned row, updated will be null.
+// In that case, just refresh notes from Supabase (realtime will also fix it).
+if (updated) {
+  setMapNotes((prev) =>
+    (prev || []).map((n) => (n.id === id ? { ...n, ...updated } : n))
+  );
+} else {
+  await fetchNotesFromSupabase(); // ✅ fallback when 0 rows returned
+}
+
+      hideEdit();
+
+      // Rebuild popup HTML (updates By line etc)
+      setTimeout(() => openNoteInfo(id, { zoom: false }), 0);
+    } catch (e) {
+      console.error("Edit note failed:", e);
+
+      // Rollback optimistic UI if DB rejected update
+      setMapNotes(prevNotes);
+      alert("Couldn’t update note. (Permissions / connection) Try again.");
+    } finally {
+      try {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save";
+      } catch {}
+    }
+  };
+} 
 
       // If requested (e.g. from Notes list), jump straight into edit mode
       if (opts.startEdit) {
@@ -1422,14 +1502,14 @@ useEffect(() => {
     });
   }, [mapNotes, showAllNotes, portalSelectedJobId, selectedPortalJobNumber]);
 
-    // Keep a small cache for instant load + basic offline viewing
+      // Cache ALL notes (not the filtered view) so edits persist reliably across reloads/filters
   useEffect(() => {
     try {
-      localStorage.setItem(MAP_NOTES_CACHE_KEY, JSON.stringify(visibleNotes || []));
+      localStorage.setItem(MAP_NOTES_CACHE_KEY, JSON.stringify(mapNotes || []));
     } catch {
       // ignore
     }
-  }, [visibleNotes]);
+  }, [mapNotes]);
 
   // Keep map pins in sync with the filtered notes list
   useEffect(() => {
@@ -1557,8 +1637,7 @@ useEffect(() => {
       histBtn.onclick = () => {
         const c = map.getCenter();
         const url = buildGoogleEarthUrl(c.lat(), c.lng(), map.getZoom());
-        window.open(url, "_blank", "noreferrer");
-      };
+        openExternalNav(url);      };
       svBtn.onclick = () => {
         const sv = map.getStreetView();
         const c = map.getCenter();
@@ -1640,14 +1719,33 @@ useEffect(() => {
 
     if (addressAutocompleteRef.current) return;
 
-    const autocomplete = new window.google.maps.places.Autocomplete(input, {
-      types: ["geocode"],
-      componentRestrictions: { country: "au" },
-      fields: ["geometry", "formatted_address", "name"],
-    });
+    // WA bounds (rough SW -> NE). Keeps suggestions inside WA.
+const waBounds = new window.google.maps.LatLngBounds(
+  new window.google.maps.LatLng(-35.2, 112.9), // SW corner (near south coast)
+  new window.google.maps.LatLng(-13.5, 129.0)  // NE corner (Kimberley / NT border-ish)
+);
+
+   const autocomplete = new window.google.maps.places.Autocomplete(input, {
+  types: ["geocode"],
+  componentRestrictions: { country: "au" },
+  bounds: waBounds,
+  strictBounds: true,
+  fields: ["geometry", "formatted_address", "name", "address_components"],
+});
 
     autocomplete.addListener("place_changed", () => {
       const place = autocomplete.getPlace();
+      // Hard-stop if user selects something outside WA (extra safety)
+const isWA = (place?.address_components || []).some((c) =>
+  (c.types || []).includes("administrative_area_level_1") &&
+  (c.short_name === "WA" || c.long_name === "Western Australia")
+);
+
+if (!isWA) {
+  // clear input + do nothing
+  input.value = "";
+  return;
+}
       if (!place?.geometry?.location) return;
 
       const loc = place.geometry.location;
