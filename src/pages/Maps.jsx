@@ -586,6 +586,7 @@ function Maps() {
 
   const infoWindowRef = useRef(null);
   const hoverInfoWindowRef = useRef(null);
+  const addressInfoWindowRef = useRef(null);
 
   const isAppVisible = useAppVisibilityContext();
 
@@ -1104,6 +1105,20 @@ const mgaLine = mga
           style="display:none; width:100%; margin-top:8px; padding:8px; border-radius:10px; border:2px solid #111; font-size:12px; box-sizing:border-box; resize:vertical;">${
             safeText || ""
           }</textarea>
+                  <div style="display:flex; gap:8px; margin-top:10px;">
+          <a href="${buildLatLngSearchUrl(note.lat, note.lng)}"
+             target="_blank" rel="noreferrer"
+             style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:10px;
+                    border:2px solid #111; color:#111; background:#fff; font-weight:900; font-size:12px;">
+            📍 Go To
+          </a>
+          <a href="${buildDirectionsUrl(note.lat, note.lng)}"
+             target="_blank" rel="noreferrer"
+             style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:10px;
+                    border:2px solid #111; color:#fff; background:#111; font-weight:900; font-size:12px;">
+            🚗 Directions
+          </a>
+        </div>
         <div id="note-edit-actions-${id}" style="display:none; gap:8px; margin-top:8px;">
           <button id="note-cancel-${id}"
             style="flex:1; padding:6px 8px; border-radius:10px; border:2px solid #111; background:#fff; color:#111; font-weight:900; cursor:pointer; font-size:12px;">Cancel</button>
@@ -1231,7 +1246,7 @@ if (updated) {
     (prev || []).map((n) => (n.id === id ? { ...n, ...updated } : n))
   );
 } else {
-  await fetchNotesFromSupabase(); // ✅ fallback when 0 rows returned
+  throw new Error("Update blocked (no row returned). Check RLS/ownership for this note.");
 }
 
       hideEdit();
@@ -1340,13 +1355,24 @@ if (updated) {
             const attachEl = document.getElementById("note-attach-job");
             const attachToJob = !!(attachEl && attachEl.checked);
 
-            const notePayload = {
-              text,
-              lat,
-              lng,
-              created_by: currentUserId || null,
-              created_by_name: currentUserName || null,
-            };
+          let authUserId = null;
+let authUserEmail = null;
+
+try {
+  const { data } = await supabase.auth.getUser();
+  authUserId = data?.user?.id || null;
+  authUserEmail = data?.user?.email || null;
+} catch {}
+
+const notePayload = {
+  text,
+  lat,
+  lng,
+  // IMPORTANT: make ownership deterministic for RLS
+  created_by: authUserId,
+  // keep the friendly name you already fetch, but fall back to email
+  created_by_name: currentUserName || authUserEmail || null,
+};
 
             // Optional: attach to the currently selected job (recommended)
             const jobIdToAttach = portalSelectedJobIdRef.current;
@@ -1573,6 +1599,7 @@ if (updated) {
     });
     noteInfoWindowRef.current = new window.google.maps.InfoWindow();
     noteComposerIWRef.current = new window.google.maps.InfoWindow({ maxWidth: 320 });
+    addressInfoWindowRef.current = new window.google.maps.InfoWindow({ maxWidth: 320 });
 
     // ✅ Render saved notes immediately
     try {
@@ -1782,8 +1809,9 @@ if (!isWA) {
         lat: position.lat,
         lng: position.lng,
       });
+      openAddressInfo(addressString, position, addressMarkerRef.current);
     });
-
+    
     addressAutocompleteRef.current = autocomplete;
   }, [activeTab]);
 
@@ -1885,6 +1913,39 @@ if (!isWA) {
     };
   };
 
+  const openAddressInfo = (addressString, position, marker) => {
+  const map = mapRef.current;
+  if (!map || !window.google) return;
+
+  const html = `
+    <div style="font-family: Inter, system-ui, sans-serif; font-size: 13px; min-width: 250px;">
+      <div data-pw-drag-handle="1" style="font-weight:900; font-size:14px; margin-bottom:6px; color:#111;">
+        Address
+      </div>
+      <div style="color:#111; margin-top:6px;">${addressString || "—"}</div>
+
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <a href="${buildSearchUrl(addressString)}" target="_blank" rel="noreferrer"
+           style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:8px;
+                  border:1px solid #ccc; color:#111; background:#fff; font-weight:900; font-size:12px;">
+          🔍 Maps
+        </a>
+        <a href="${buildDirectionsUrl(position.lat, position.lng)}" target="_blank" rel="noreferrer"
+           style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:8px;
+                  border:1px solid #111; color:#fff; background:#111; font-weight:900; font-size:12px;">
+          🚗 Directions
+        </a>
+      </div>
+    </div>
+  `;
+
+  addressInfoWindowRef.current?.setContent(html);
+  addressInfoWindowRef.current?.open({ anchor: marker, map });
+
+  window.google.maps.event.addListenerOnce(addressInfoWindowRef.current, "domready", () => {
+    setTimeout(makeLatestInfoWindowDraggable, 0);
+  });
+};
   const openPortalInfo = (job, pt, marker) => {
     const map = mapRef.current;
     if (!map || !window.google) return;
@@ -3853,38 +3914,6 @@ marker = new window.google.maps.Marker({
             )}
           </div>
         </div>
-
-        
-
-        {/* Address card */}
-        {selectedAddress && (
-          <div
-            className="maps-selected-card"
-            style={{ bottom: "0.75rem" }}
-          >
-            <div className="maps-selected-title">Address search</div>
-            <div className="maps-selected-address">{selectedAddress.address}</div>
-
-            <div className="maps-selected-buttons">
-              <a
-                href={buildSearchUrl(selectedAddress.address)}
-                target="_blank"
-                rel="noreferrer"
-                className="maps-btn-outline"
-              >
-                🔍 Open in Google Maps
-              </a>
-              <a
-                href={buildDirectionsUrl(selectedAddress.lat, selectedAddress.lng)}
-                target="_blank"
-                rel="noreferrer"
-                className="maps-btn-solid"
-              >
-                🚗 Directions
-              </a>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
