@@ -391,11 +391,35 @@ function JobModal({ open, mode, isAdmin, onClose, onSaved, initial, staffOptions
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+function clientSearchLabelFromJob(i) {
+  const live = i?.client || null;
+  if (live) return clientLabel(live);
+
+  // fallback to snapshot fields already stored on jobs row
+  const company = norm(i?.client_company);
+  const person = norm(`${i?.client_first_name || ""} ${i?.client_surname || ""}`).trim();
+  const legacy = norm(i?.client_name);
+
+  return company || person || legacy || "";
+}
+
   // ✅ Re-sync modal fields whenever the selected job changes (fixes blank fields on open)
 useEffect(() => {
-  if (!open) return;
+  // ✅ when closing, wipe the client search UI so it doesn't persist
+  if (!open) {
+    setClientSearch("");
+    setClientSuggestions([]);
+    setClientSearching(false);
+    if (clientDebounceRef.current) clearTimeout(clientDebounceRef.current);
+    return;
+  }
 
   const i = initial || {};
+
+  // ✅ ALWAYS reset suggestions when switching jobs
+  setClientSuggestions([]);
+  setClientSearching(false);
+  if (clientDebounceRef.current) clearTimeout(clientDebounceRef.current);
 
   // If opening "new", reset to defaults
   if (mode === "new") {
@@ -453,6 +477,8 @@ useEffect(() => {
   setClientEmail(i.client_email ?? "");
   setClientName(i.client_name ?? "");
   setClientId(i.client_id ?? null);
+    // ✅ keep the search box showing the selected job's client (and not the previous job's)
+  setClientSearch(clientSearchLabelFromJob(i));
 
   setStatus(i.status ?? "Planned");
   setAssignedTo(i.assigned_to ?? "");
@@ -619,43 +645,71 @@ setFullAddress(stripAustralia(formatted));
   };
 }, [open]);
 
-  async function runClientSearch(q) {
-    const s = (q || "").trim();
-    if (!s) {
-      setClientSuggestions([]);
-      return;
-    }
-
-    setClientSearching(true);
-    try {
-      const like = `%${s}%`;
-
-      const { data, error: qErr } = await supabase
-        .from("clients")
-        .select("id, first_name, surname, company, phone, mobile, email")
-        .eq("is_active", true)
-        .eq("show_in_contacts", true)
-        .or(
-          [
-            `first_name.ilike.${like}`,
-            `surname.ilike.${like}`,
-            `company.ilike.${like}`,
-            `phone.ilike.${like}`,
-            `mobile.ilike.${like}`,
-            `email.ilike.${like}`,
-          ].join(",")
-        )
-        .limit(10);
-
-      if (qErr) throw qErr;
-      setClientSuggestions(data || []);
-    } catch (e) {
-      console.error("Client search failed:", e);
-      setClientSuggestions([]);
-    } finally {
-      setClientSearching(false);
-    }
+async function runClientSearch(q) {
+  const raw = (q || "").toString().trim();
+  if (!raw) {
+    setClientSuggestions([]);
+    return;
   }
+
+  const terms = raw.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) {
+    setClientSuggestions([]);
+    return;
+  }
+
+  setClientSearching(true);
+  try {
+    // ✅ Use first term for broad DB search
+    const firstTerm = terms[0];
+    const like = `%${firstTerm}%`;
+
+    const { data, error: qErr } = await supabase
+      .from("clients")
+      .select("id, first_name, surname, company, phone, mobile, email")
+      .eq("is_active", true)
+      .eq("show_in_contacts", true)
+      .or(
+        [
+          `first_name.ilike.${like}`,
+          `surname.ilike.${like}`,
+          `company.ilike.${like}`,
+          `phone.ilike.${like}`,
+          `mobile.ilike.${like}`,
+          `email.ilike.${like}`,
+        ].join(",")
+      )
+      .limit(50); // wider pool so multi-term filtering works
+
+    if (qErr) throw qErr;
+
+    const rows = data || [];
+
+    // ✅ Now enforce ALL terms across combined fields (multi-word search)
+    const filtered = rows.filter((c) => {
+      const haystack = [
+        c.first_name,
+        c.surname,
+        c.company,
+        c.phone,
+        c.mobile,
+        c.email,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return terms.every((t) => haystack.includes(t));
+    });
+
+    setClientSuggestions(filtered.slice(0, 10));
+  } catch (e) {
+    console.error("Client search failed:", e);
+    setClientSuggestions([]);
+  } finally {
+    setClientSearching(false);
+  }
+}
 
   useEffect(() => {
     if (!open) return;
@@ -780,17 +834,10 @@ const mobileText = ((live?.mobile || j.client_mobile || "")).toString();
  // Sticker SITE ADDRESS: Lot + street only (no suburb/state/postcode)
 const siteAddressText = deriveStickerSiteAddress(j);
 
-  // Suburb: use field first, otherwise derive from full_address "..., SUBURB STATE POSTCODE, Australia"
+  // ✅ Suburb (sticker): prefer stored suburb, else derive from Google full_address
   let suburbText = (j.suburb || "").toString().trim();
-  if (!suburbText && j.full_address) {
-    const parts = j.full_address.split(",").map((p) => p.trim()).filter(Boolean);
-    // Commonly: [street, suburb state postcode, Australia]
-    if (parts.length >= 3) {
-      const mid = parts[parts.length - 2]; // "Hillarys WA 6025"
-      suburbText = (mid.split(" WA ")[0] || mid.split(" W.A. ")[0] || mid).trim();
-      // If still has postcode/state format, take first token group as suburb
-      suburbText = suburbText.replace(/\s+(WA|W\.A\.)\s+\d{4}$/i, "").trim();
-    }
+  if (!suburbText) {
+    suburbText = parseSuburbFromFullAddress(j.full_address);
   }
 
   const planText = (j.plan_number || "").toString();
