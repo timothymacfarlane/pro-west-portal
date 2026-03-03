@@ -43,8 +43,10 @@ const LOCAL_AUTHORITIES = [
 ];
 
 // MGA2020 / GDA2020
+proj4.defs("EPSG:7849", "+proj=utm +zone=49 +south +ellps=GRS80 +units=m +no_defs");
 proj4.defs("EPSG:7850", "+proj=utm +zone=50 +south +ellps=GRS80 +units=m +no_defs");
 proj4.defs("EPSG:7851", "+proj=utm +zone=51 +south +ellps=GRS80 +units=m +no_defs");
+proj4.defs("EPSG:7852", "+proj=utm +zone=52 +south +ellps=GRS80 +units=m +no_defs");
 proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
 
 function loadGoogleMaps(apiKey) {
@@ -100,12 +102,15 @@ function loadGoogleMaps(apiKey) {
 
 function lonToMgaZone(lon) {
   const zone = Math.floor((lon + 180) / 6) + 1;
-  return zone <= 50 ? 50 : 51;
+  // clamp to Australian MGA range you want (WA spans 49–52)
+  if (zone < 49) return 49;
+  if (zone > 52) return 52;
+  return zone;
 }
 
 function wgsToMga(lat, lon) {
   const zone = lonToMgaZone(lon);
-  const epsg = zone === 50 ? "EPSG:7850" : "EPSG:7851";
+  const epsg = `EPSG:${7849 + (zone - 49)}`; // 49->7849, 50->7850 ...
   const [e, n] = proj4("EPSG:4326", epsg, [lon, lat]);
   return { zone, easting: e, northing: n };
 }
@@ -131,11 +136,62 @@ function addressSummaryFromRow(r) {
 function norm(s) {
   return (s || "").toString().trim().replace(/\s+/g, " ");
 }
+function normalizeSpace(s) {
+  return (s || "").toString().trim().replace(/\s+/g, " ");
+}
+
+// ✅ For relational client embedding (live) with snapshot fallback
+function getLiveClient(job) {
+  // We will embed as `client:clients(...)` so it will be `job.client`
+  return job?.client || null;
+}
+
+function jobClientSnapshot(job) {
+  const company = norm(job?.client_company);
+  if (company) return company;
+
+  const person = norm(`${job?.client_first_name || ""} ${job?.client_surname || ""}`).trim();
+  if (person) return person;
+
+  const legacy = norm(job?.client_name);
+  if (legacy) return legacy;
+
+  return "—";
+}
+
+function jobClientDisplayLiveFirst(job) {
+  const c = getLiveClient(job);
+  if (c) {
+    const company = norm(c.company);
+    if (company) return company;
+
+    const person = norm(`${c.first_name || ""} ${c.surname || ""}`).trim();
+    if (person) return person;
+
+    if (c.email) return c.email;
+  }
+
+  // fallback to what’s stored on the job row
+  return jobClientSnapshot(job);
+}
 function safeText(v, fallback = "—") {
   if (v == null) return fallback;
   if (typeof v === "string") return v;
   if (typeof v === "number") return String(v);
   return fallback; // don't try to render objects
+}
+function jobClientDisplay(r) {
+  const company = norm(r?.client_company);
+  if (company) return company;
+
+  const person = norm(`${r?.client_first_name || ""} ${r?.client_surname || ""}`).trim();
+  if (person) return person;
+
+  // optional legacy fallback (older jobs)
+  const legacy = norm(r?.client_name);
+  if (legacy) return legacy;
+
+  return "—";
 }
 function getJobBadge(jobNumber) {
   const s = String(jobNumber ?? "").trim();
@@ -200,6 +256,134 @@ function ClientSuggestionDropdown({ items, onPick }) {
     </div>
   );
 }
+function AddClientModal({ open, onClose, onCreated }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const [first_name, setFirstName] = useState("");
+  const [surname, setSurname] = useState("");
+  const [company, setCompany] = useState("");
+  const [phone, setPhone] = useState("");
+  const [mobile, setMobile] = useState("");
+  const [email, setEmail] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setSaving(false);
+    setError("");
+    setFirstName("");
+    setSurname("");
+    setCompany("");
+    setPhone("");
+    setMobile("");
+    setEmail("");
+  }, [open]);
+
+  if (!open) return null;
+
+  const canSave = Boolean(
+    normalizeSpace(first_name) ||
+      normalizeSpace(surname) ||
+      normalizeSpace(company) ||
+      normalizeSpace(phone) ||
+      normalizeSpace(mobile) ||
+      normalizeSpace(email)
+  );
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.35)",
+        zIndex: 80,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        className="card"
+        style={{
+          width: "min(720px, calc(100vw - 32px))",
+          padding: "1rem",
+          borderRadius: 16,
+          boxShadow: "0 12px 40px rgba(0,0,0,0.2)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div>
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Add client</h3>
+            <p className="card-subtitle" style={{ margin: 0 }}>Saves to Contacts register</p>
+          </div>
+          <button className="btn-pill" type="button" onClick={onClose}>Close</button>
+        </div>
+
+        {error && (
+          <div style={{ marginTop: 10, padding: "0.7rem 0.8rem", borderRadius: 12, background: "rgba(255,0,0,0.08)", fontSize: "0.9rem" }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <input className="maps-search-input" placeholder="First name" value={first_name} onChange={(e) => setFirstName(e.target.value)} />
+            <input className="maps-search-input" placeholder="Surname" value={surname} onChange={(e) => setSurname(e.target.value)} />
+          </div>
+
+          <input className="maps-search-input" placeholder="Company" value={company} onChange={(e) => setCompany(e.target.value)} />
+          <input className="maps-search-input" placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <input className="maps-search-input" placeholder="Mobile" value={mobile} onChange={(e) => setMobile(e.target.value)} />
+          <input className="maps-search-input" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
+          <button className="btn-pill" type="button" onClick={onClose} disabled={saving}>Cancel</button>
+
+          <button
+            className="btn-pill primary"
+            type="button"
+            disabled={!canSave || saving}
+            onClick={async () => {
+              setSaving(true);
+              setError("");
+              try {
+                const payload = {
+                  first_name: normalizeSpace(first_name),
+                  surname: normalizeSpace(surname),
+                  company: normalizeSpace(company),
+                  phone: normalizeSpace(phone),
+                  mobile: normalizeSpace(mobile),
+                  email: normalizeSpace(email),
+                  is_active: true,
+                  show_in_contacts: true,
+                };
+
+                const { data, error: insErr } = await supabase
+                  .from("clients")
+                  .insert(payload)
+                  .select("id, first_name, surname, company, phone, mobile, email")
+                  .single();
+
+                if (insErr) throw insErr;
+
+                onCreated?.(data);
+                onClose();
+              } catch (e) {
+                setError(e?.message || "Could not save client.");
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            {saving ? "Saving…" : "Save client"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function JobModal({ open, mode, isAdmin, onClose, onSaved, initial, staffOptions }) {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -245,6 +429,7 @@ useEffect(() => {
     setMgaN("");
 
     setError("");
+    setClientId(null);
     return;
   }
 
@@ -267,6 +452,7 @@ useEffect(() => {
   setClientMobile(i.client_mobile ?? "");
   setClientEmail(i.client_email ?? "");
   setClientName(i.client_name ?? "");
+  setClientId(i.client_id ?? null);
 
   setStatus(i.status ?? "Planned");
   setAssignedTo(i.assigned_to ?? "");
@@ -277,6 +463,7 @@ useEffect(() => {
   setMgaZone(i.mga_zone ?? "");
   setMgaE(i.mga_easting ?? "");
   setMgaN(i.mga_northing ?? "");
+
 
   setError("");
 }, [open, mode, initial?.id]);
@@ -299,6 +486,11 @@ useEffect(() => {
   const [clientPhone, setClientPhone] = useState(initial?.client_phone ?? "");
   const [clientMobile, setClientMobile] = useState(initial?.client_mobile ?? "");
   const [clientEmail, setClientEmail] = useState(initial?.client_email ?? "");
+  // ✅ relational key
+const [clientId, setClientId] = useState(initial?.client_id ?? null);
+
+// ✅ modal open state for adding a client
+const [addClientOpen, setAddClientOpen] = useState(false);
 
   // Keep legacy job columns (still used in your summaries / older data)
   const [clientName, setClientName] = useState(initial?.client_name ?? "");
@@ -336,43 +528,7 @@ useEffect(() => {
     };
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    setError("");
-
-    setJobTypeLegacy(initial?.job_type_legacy ?? "");
-    setJobDateLegacy(initial?.job_date_legacy ?? "");
-    setLotNumber(initial?.lot_number ?? "");
-    setPlanNumber(initial?.plan_number ?? "");
-    setStreetNumber(initial?.street_number ?? "");
-    setStreetName(initial?.street_name ?? "");
-    setSuburb(initial?.suburb ?? "");
-    setLocalAuthority(initial?.local_authority ?? "");
-    setMapRef(initial?.map_ref ?? "");
-    setCt(initial?.ct ?? "");
-
-    setClientFirstName(initial?.client_first_name ?? "");
-    setClientSurname(initial?.client_surname ?? "");
-    setClientCompany(initial?.client_company ?? "");
-    setClientPhone(initial?.client_phone ?? "");
-    setClientMobile(initial?.client_mobile ?? "");
-    setClientEmail(initial?.client_email ?? "");
-    setClientName(initial?.client_name ?? "");
-
-    setStatus(initial?.status ?? "Planned");
-    setAssignedTo(initial?.assigned_to ?? "");
-    setNotes(initial?.notes ?? "");
-
-    setFullAddress(initial?.full_address ?? "");
-    setPlaceId(initial?.place_id ?? "");
-
-    setMgaZone(initial?.mga_zone ?? "");
-    setMgaE(initial?.mga_easting ?? "");
-    setMgaN(initial?.mga_northing ?? "");
-
-    setClientSearch("");
-    setClientSuggestions([]);
-  }, [open, initial]);
+ 
 // Google Places (Jobs modal) — wait for index.html script, don't inject a second one
 useEffect(() => {
   if (!open) return;
@@ -526,6 +682,7 @@ setFullAddress(stripAustralia(formatted));
 
     setClientSearch(clientLabel(c));
     setClientSuggestions([]);
+    setClientId(c.id);
   }
   // -----------------------------
   // Sticker printing (admin only)
@@ -601,12 +758,6 @@ setFullAddress(stripAustralia(formatted));
 
     return candidate;
   }
-function getJobBadge(jobNumber) {
-  const s = String(jobNumber || "").trim();
-  if (!s) return "#";
-  // keep it short like initials — last 2–3 digits looks good
-  return s.length <= 3 ? s : s.slice(-4);
-}
 
 function buildStickerHtml(jobForPrint) {
   const j = jobForPrint || {};
@@ -615,13 +766,16 @@ function buildStickerHtml(jobForPrint) {
   const jobTypeText = (j.job_type_legacy || "").toString();
   const dateText = stickerDate(j.job_date_legacy);
 
-  const clientText = (j.client_company || "").toString();
-  const contactText =
-    (`${(j.client_first_name || "").toString()} ${(j.client_surname || "").toString()}`.trim() ||
-      (j.client_name || "").toString());
+  const live = getLiveClient(j);
 
-  const telephoneText = (j.client_phone || "").toString();
-  const mobileText = (j.client_mobile || "").toString();
+const clientText = ((live?.company || j.client_company || "")).toString();
+
+const contactText =
+  (norm(`${live?.first_name || j.client_first_name || ""} ${live?.surname || j.client_surname || ""}`).trim() ||
+    (j.client_name || "")).toString();
+
+const telephoneText = ((live?.phone || j.client_phone || "")).toString();
+const mobileText = ((live?.mobile || j.client_mobile || "")).toString();
 
  // Sticker SITE ADDRESS: Lot + street only (no suburb/state/postcode)
 const siteAddressText = deriveStickerSiteAddress(j);
@@ -849,6 +1003,11 @@ async function notifyJobAssignment({ jobId, jobNumber, prevAssigned, nextAssigne
     setSaving(true);
     setError("");
 
+    if (canEdit && !clientId) {
+  setSaving(false);
+  setError("Please select a client from Contacts (Search client… or + Add client).");
+  return;
+}
     try {
       const payload = {
         job_type_legacy: jobTypeLegacy?.trim() || null,
@@ -868,7 +1027,7 @@ async function notifyJobAssignment({ jobId, jobNumber, prevAssigned, nextAssigne
         client_phone: clientPhone?.trim() || null,
         client_mobile: clientMobile?.trim() || null,
         client_email: clientEmail?.trim() || null,
-
+        client_id: clientId || null, 
         client_name: clientName?.trim() || null, // legacy
 
         status,
@@ -925,6 +1084,7 @@ if (jobId) {
   const { error: upErr } = await supabase
     .from("jobs")
     .update({
+      client_id: payload.client_id,
       client_first_name: payload.client_first_name,
       client_surname: payload.client_surname,
       client_company: payload.client_company,
@@ -948,26 +1108,30 @@ if (jobId) {
   });
 }
 
-// Always call onSaved
-onSaved?.(jobId ? createdMerged : created);
+let refreshed = null;
+if (jobId) {
+  refreshed = await fetchJobById(jobId);
+}
+onSaved?.(refreshed || (jobId ? createdMerged : created));
 
 if (closeAfter) onClose();
-return returnSaved ? (jobId ? createdMerged : created) : undefined;
+return returnSaved ? (refreshed || (jobId ? createdMerged : created)) : undefined;
       }
 
       const { error: upErr } = await supabase.from("jobs").update(payload).eq("id", initial.id);
       if (upErr) throw upErr;
 
-      const updated = { ...initial, ...payload };
-      await notifyJobAssignment({
+const refreshed = await fetchJobById(initial.id); // ✅ includes embedded client
+await notifyJobAssignment({
   jobId: initial?.id,
   jobNumber: initial?.job_number,
   prevAssigned,
   nextAssigned,
 });
-      onSaved?.(updated);
-      if (closeAfter) onClose();
-      return returnSaved ? updated : undefined;
+onSaved?.(refreshed || { ...initial, ...payload });
+if (closeAfter) onClose();
+return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
+
     } catch (e) {
       setError(e?.message || "Failed to save job.");
     } finally {
@@ -995,6 +1159,14 @@ return returnSaved ? (jobId ? createdMerged : created) : undefined;
         padding: 16,
       }}
     >
+<AddClientModal
+  open={addClientOpen}
+  onClose={() => setAddClientOpen(false)}
+  onCreated={(newClient) => {
+    pickClient(newClient); // auto-select into the job (sets snapshot + clientId)
+  }}
+/>
+
       <div
         className="card"
         style={{
@@ -1041,7 +1213,15 @@ return returnSaved ? (jobId ? createdMerged : created) : undefined;
         <div className="jobmodal-grid" style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {/* Client */}
           <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
-            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Client</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+  <div style={{ fontWeight: 900, fontSize: 13 }}>Client</div>
+
+  {canEdit && (
+    <button className="btn-pill" type="button" onClick={() => setAddClientOpen(true)}>
+      + Add client
+    </button>
+  )}
+</div>
 
             <div style={{ display: "grid", gap: 8 }}>
               {/* Type-to-search */}
@@ -1060,18 +1240,18 @@ return returnSaved ? (jobId ? createdMerged : created) : undefined;
               <ClientSuggestionDropdown items={clientSuggestions} onPick={pickClient} />
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <input className="input" placeholder="First name" value={clientFirstName} onChange={(e) => setClientFirstName(e.target.value)} disabled={!canEdit} />
-                <input className="input" placeholder="Surname" value={clientSurname} onChange={(e) => setClientSurname(e.target.value)} disabled={!canEdit} />
+                <input className="input" placeholder="First name" value={clientFirstName} onChange={(e) => setClientFirstName(e.target.value)} disabled={true} />
+                <input className="input" placeholder="Surname" value={clientSurname} onChange={(e) => setClientSurname(e.target.value)} disabled={true} />
               </div>
 
-              <input className="input" placeholder="Company" value={clientCompany} onChange={(e) => setClientCompany(e.target.value)} disabled={!canEdit} />
+              <input className="input" placeholder="Company" value={clientCompany} onChange={(e) => setClientCompany(e.target.value)} disabled={true} />
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <input className="input" placeholder="Phone" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} disabled={!canEdit} />
-                <input className="input" placeholder="Mobile" value={clientMobile} onChange={(e) => setClientMobile(e.target.value)} disabled={!canEdit} />
+                <input className="input" placeholder="Phone" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} disabled={true} />
+                <input className="input" placeholder="Mobile" value={clientMobile} onChange={(e) => setClientMobile(e.target.value)} disabled={true} />
               </div>
 
-              <input className="input" placeholder="Email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} disabled={!canEdit} />
+              <input className="input" placeholder="Email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} disabled={true} />
             </div>
           </div>
 
@@ -1221,7 +1401,60 @@ onChange={(e) => setFullAddress(e.target.value)}
     </div>
   );
 }
+ async function fetchJobById(id) {
+  if (!id) return null;
 
+  const { data: jobData, error: jobErr } = await supabase
+    .from("jobs")
+    .select(
+      `
+      id,
+      job_number,
+      client_id,
+      client_name,
+      client_first_name,
+      client_surname,
+      client_company,
+      client_phone,
+      client_mobile,
+      client_email,
+      status,
+      assigned_to,
+      notes,
+      full_address,
+      place_id,
+      mga_zone,
+      mga_easting,
+      mga_northing,
+      job_type_legacy,
+      job_date_legacy,
+      lot_number,
+      plan_number,
+      street_number,
+      street_name,
+      suburb,
+      local_authority,
+      map_ref,
+      ct,
+      created_at,
+      updated_at,
+      client:clients (
+        id,
+        first_name,
+        surname,
+        company,
+        phone,
+        mobile,
+        email
+      )
+      `
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  if (jobErr) throw jobErr;
+  return jobData || null;
+}
 function Jobs() {
   const { isAdmin } = useAuth();
   const isAppVisible = useAppVisibilityContext();
@@ -1320,50 +1553,97 @@ function Jobs() {
   const [sortAsc, setSortAsc] = useState(false);
 
 
+async function fetchJobByNumber(jobNumber) {
+  const num = Number(jobNumber);
+  if (!Number.isFinite(num)) return null;
 
-  async function fetchJobById(id) {
-    if (!id) return null;
-
-    const { data, error } = await supabase
-      .from("jobs")
-      .select(
-        "id, job_number, client_name, client_first_name, client_surname, client_company, client_phone, client_mobile, client_email, status, assigned_to, notes, full_address, place_id, mga_zone, mga_easting, mga_northing, job_type_legacy, job_date_legacy, lot_number, plan_number, street_number, street_name, suburb, local_authority, map_ref, ct, created_at, updated_at"
+  const { data: jobData, error: jobErr } = await supabase
+    .from("jobs")
+    .select(
+      `
+      id,
+      job_number,
+      client_id,
+      client_name,
+      client_first_name,
+      client_surname,
+      client_company,
+      client_phone,
+      client_mobile,
+      client_email,
+      status,
+      assigned_to,
+      notes,
+      full_address,
+      place_id,
+      mga_zone,
+      mga_easting,
+      mga_northing,
+      job_type_legacy,
+      job_date_legacy,
+      lot_number,
+      plan_number,
+      street_number,
+      street_name,
+      suburb,
+      local_authority,
+      map_ref,
+      ct,
+      created_at,
+      updated_at,
+      client:clients (
+        id,
+        first_name,
+        surname,
+        company,
+        phone,
+        mobile,
+        email
       )
-      .eq("id", id)
-      .maybeSingle();
+      `
+    )
+    .eq("job_number", num)
+    .maybeSingle();
 
-    if (error) throw error;
-    return data || null;
-  }
-
-  async function fetchJobByNumber(jobNumber) {
-    const num = Number(jobNumber);
-    if (!Number.isFinite(num)) return null;
-
-    const { data, error } = await supabase
-      .from("jobs")
-      .select(
-        "id, job_number, client_name, client_first_name, client_surname, client_company, client_phone, client_mobile, client_email, status, assigned_to, notes, full_address, place_id, mga_zone, mga_easting, mga_northing, job_type_legacy, job_date_legacy, lot_number, plan_number, street_number, street_name, suburb, local_authority, map_ref, ct, created_at, updated_at"
-      )
-      .eq("job_number", num)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data || null;
-  }
+  if (jobErr) throw jobErr;
+  return jobData || null;
+}
   async function fetchJobsPage({ page, sortBy, ascending, jobNo, globalQ }) {
     setListError("");
 
     const from = page * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
-    let q = supabase
-      .from("jobs")
-      .select(
-        "id, job_number, client_company, full_address, local_authority, job_type_legacy, job_date_legacy, status, assigned_to, notes",
-        { count: "exact" }
-      );
-
+let q = supabase
+  .from("jobs")
+  .select(
+    `
+    id,
+    job_number,
+    client_id,
+    client_company,
+    client_first_name,
+    client_surname,
+    client_name,
+    full_address,
+    local_authority,
+    job_type_legacy,
+    job_date_legacy,
+    status,
+    assigned_to,
+    notes,
+    client:clients (
+      id,
+      first_name,
+      surname,
+      company,
+      phone,
+      mobile,
+      email
+    )
+    `,
+    { count: "exact" }
+  );
     const jobNoTrim = (jobNo || "").trim();
     const globalTrim = (globalQ || "").trim().replace(/^#/, "");
 
@@ -1489,10 +1769,11 @@ async function runGlobalSuggest(query) {
   const q = (query || "").trim().replace(/^#/, "");
   if (q.length < 3) {
     setGlobalSuggestions([]);
-    return;
+    return [];
   }
 
   setGlobalLoading(true);
+
   try {
     const isNumeric = /^\d+$/.test(q);
 
@@ -1528,16 +1809,19 @@ async function runGlobalSuggest(query) {
     const { data, error } = await queryBuilder;
     if (error) throw error;
 
-    setGlobalSuggestions(
-      (data || []).map((r) => ({
-        id: r.id,
-        job_number: r.job_number,
-        address: addressSummaryFromRow(r),
-      }))
-    );
+    const results = (data || []).map((r) => ({
+      id: r.id,
+      job_number: r.job_number,
+      address: addressSummaryFromRow(r),
+    }));
+
+    setGlobalSuggestions(results);
+    return results;   // ✅ IMPORTANT
+
   } catch (e) {
     console.error("Global search failed:", e);
     setGlobalSuggestions([]);
+    return [];
   } finally {
     setGlobalLoading(false);
   }
@@ -1625,6 +1909,68 @@ useEffect(() => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [isAppVisible]);
 
+useEffect(() => {
+  if (!isAppVisible) return;
+
+  const channel = supabase
+    .channel("clients-changes-jobs")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "clients" },
+      async (payload) => {
+        // refresh the register
+        await refreshRegister();
+
+        // if the currently selected job uses this client, refresh it too
+        const changedId = payload?.new?.id || payload?.old?.id;
+        if (changedId && selected?.client_id === changedId && selected?.id) {
+          const fresh = await fetchJobById(selected.id);
+          if (fresh) setSelected(fresh);
+        }
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [isAppVisible, selected?.id, selected?.client_id]);
+
+useEffect(() => {
+  if (!isAppVisible) return;
+
+  const channel = supabase
+    .channel("jobs-row-patch")
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "jobs" },
+      async (payload) => {
+        const updated = payload?.new;
+        if (!updated?.id) return;
+
+        // 1) Patch ONLY the affected row in the register list
+        setListRows((prev) =>
+          (prev || []).map((r) => (r.id === updated.id ? { ...r, ...updated } : r))
+        );
+
+        // 2) If this is the currently selected job, patch it too
+        if (selected?.id === updated.id) {
+          // If you want embedded `client:clients(...)` always correct, refetch selected job only:
+          const fresh = await fetchJobById(updated.id);
+          if (fresh) setSelected(fresh);
+          // or if you don't care about embedded, you could do:
+          // setSelected((prev) => (prev ? { ...prev, ...updated } : prev));
+        }
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [isAppVisible, selected?.id]);
 
   useEffect(() => {
     if (listDebounceRef.current) clearTimeout(listDebounceRef.current);
@@ -1752,36 +2098,48 @@ if (!isAppVisible) return;
       }
     >
       <div className="card">
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <div>
-            <h3 className="card-title" style={{ marginBottom: 6 }}>Find a job</h3>
-            <p className="card-subtitle" style={{ marginTop: 6 }}>
-  Start typing a job number, client, suburb, lot/plan, notes, etc.
-</p>
-            <div style={{ fontSize: 12, opacity: 0.75 }}>{headerStatusText}</div>
-          </div>
+<div
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    alignItems: "center",
+    flexWrap: "wrap",
+  }}
+>
+  <div style={{ flex: 1, minWidth: 240 }}>
+    <h3 className="card-title" style={{ marginBottom: 6 }}>Find a job</h3>
+    <p className="card-subtitle" style={{ marginTop: 6 }}>
+      Start typing a job number, client, suburb, lot/plan, notes, etc.
+    </p>
 
-          <button
-            className="btn-pill"
-            type="button"
-            onClick={async () => {
-              setErr("");
-              setSelected(null);
-              setJobNoQuery("");
-              setGlobalQuery("");
-              setJobNoSuggestions([]);
-              setGlobalSuggestions([]);
-              try {
-                await fetchTotalJobs();
-              } catch (e) {
-                setErr(e?.message || "Failed to refresh total job count.");
-              }
-            }}
-            title="Clear search + refresh total job count"
-          >
-            Refresh
-          </button>
-        </div>
+    {/* ✅ Total count + Refresh on the same row (nice on mobile) */}
+    <div className="jobs-header-meta">
+      <div style={{ fontSize: 12, opacity: 0.75 }}>{headerStatusText}</div>
+
+      <button
+        className="btn-pill"
+        type="button"
+        onClick={async () => {
+          setErr("");
+          setSelected(null);
+          setJobNoQuery("");
+          setGlobalQuery("");
+          setJobNoSuggestions([]);
+          setGlobalSuggestions([]);
+          try {
+            await fetchTotalJobs();
+          } catch (e) {
+            setErr(e?.message || "Failed to refresh total job count.");
+          }
+        }}
+        title="Clear search + refresh total job count"
+      >
+        Refresh
+      </button>
+    </div>
+  </div>
+</div>
 
         <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
           {/* Quick find */}
@@ -1951,18 +2309,19 @@ onKeyDown={async (e) => {
       }
     }
 
-    // Otherwise keep your current "Enter" behaviour
-    if (debounceGlobalRef.current) clearTimeout(debounceGlobalRef.current);
-    await runGlobalSuggest(globalQuery);
+  if (debounceGlobalRef.current) clearTimeout(debounceGlobalRef.current);
 
-    if (globalSuggestions.length === 1) {
-      const only = globalSuggestions[0];
-      setGlobalSuggestions([]);
-      setGlobalActiveIdx(-1);
-      await jumpToJobById(only.id);
-    }
-    return;
+  const results = await runGlobalSuggest(globalQuery);
+
+  if (results.length === 1) {
+    const only = results[0];
+    setGlobalSuggestions([]);
+    setGlobalActiveIdx(-1);
+    await jumpToJobById(only.id);
   }
+
+  return;
+}
 
   if (e.key === "Escape") {
     setGlobalSuggestions([]);
@@ -2112,9 +2471,9 @@ onKeyDown={async (e) => {
                   <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap", fontWeight: 900 }}>
                     {r.job_number ?? "—"}
                   </td>
-                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                    {r.client_company || "—"}
-                  </td>
+                 <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+  {jobClientDisplayLiveFirst(r)}
+</td>
                   <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", minWidth: 260 }}>
                     {stripAustralia(r.full_address) || "—"}
                   </td>
@@ -2159,6 +2518,20 @@ onKeyDown={async (e) => {
             .jobs-two-col { grid-template-columns: 1fr !important; }
             .jobs-selected-grid { grid-template-columns: 1fr !important; }
           }
+
+          .jobs-header-meta{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-top:6px;
+}
+
+@media (max-width: 860px){
+  .jobs-header-meta{
+    width:100%;
+  }
+}
         `}</style>
 
         {err ? (
@@ -2200,7 +2573,7 @@ onKeyDown={async (e) => {
         Job #{selected.job_number}
       </h3>
       <p className="card-subtitle" style={{ margin: 0 }}>
-        {(selected.client_company || selected.client_name || "—")} · {selected.status || "—"} ·{" "}
+        {jobClientDisplayLiveFirst(selected)} · {selected.status || "—"} ·{" "}
         {selected.assigned_to || "Unassigned"}
       </p>
     </div>
@@ -2232,13 +2605,26 @@ onKeyDown={async (e) => {
             <div>
               <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Client</div>
               <div style={{ marginTop: 4 }}>
-                {selected.client_first_name || selected.client_surname
-                  ? `${selected.client_first_name || ""} ${selected.client_surname || ""}`.trim()
-                  : (selected.client_name || "—")}
+                {(() => {
+  const c = getLiveClient(selected);
+  if (c) {
+    const person = norm(`${c.first_name || ""} ${c.surname || ""}`).trim();
+    return person || jobClientSnapshot(selected);
+  }
+  return (norm(`${selected.client_first_name || ""} ${selected.client_surname || ""}`).trim() || selected.client_name || "—");
+})()}
               </div>
-              <div style={{ marginTop: 4, fontSize: 12, opacity: 0.85 }}>{selected.client_company || "—"}</div>
+              <div style={{ marginTop: 4, fontSize: 12, opacity: 0.85 }}>{(() => {
+  const c = getLiveClient(selected);
+  return (c?.company || selected.client_company || "—");
+})()}</div>
               <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>
-                {(selected.client_mobile || selected.client_phone || "—")} · {(selected.client_email || "—")}
+                {(() => {
+  const c = getLiveClient(selected);
+  const phone = c?.mobile || c?.phone || selected.client_mobile || selected.client_phone || "—";
+  const email = c?.email || selected.client_email || "—";
+  return `${phone} · ${email}`;
+})()}
               </div>
             </div>
 

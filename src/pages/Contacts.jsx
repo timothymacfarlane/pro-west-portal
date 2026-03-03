@@ -108,6 +108,53 @@ function Contacts() {
     };
   }, []);
 
+useEffect(() => {
+  if (!showClients) return;
+
+  const channel = supabase
+    .channel("clients-live-patch")
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "clients" },
+      (payload) => {
+        const row = payload?.new;
+        if (!row?.id) return;
+
+        const { name, role } = buildClientDisplay(row);
+
+        setContacts((prev) => {
+          const list = Array.isArray(prev) ? [...prev] : [];
+          const id = `client:${row.id}`;
+
+          const patched = {
+            id,
+            source: "client",
+            source_id: row.id,
+            name,
+            role,
+            first_name: row.first_name || "",
+            surname: row.surname || "",
+            company: row.company || "",
+            phone: row.phone || "",
+            mobile: row.mobile || "",
+            email: row.email || "",
+          };
+
+          const idx = list.findIndex((c) => c.id === id);
+          if (idx >= 0) list[idx] = { ...list[idx], ...patched };
+          // if not in list, ignore (maybe clients toggle off earlier load)
+
+          return list;
+        });
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [showClients]);
+
   // Load contacts from Supabase
   useEffect(() => {
     let cancelled = false;
@@ -319,24 +366,71 @@ function Contacts() {
         show_in_contacts: Boolean(clientForm.show_in_contacts),
       };
 
-      if (clientFormMode === "add") {
-        const { error: insErr } = await supabase.from("clients").insert(payload);
-        if (insErr) throw insErr;
-      } else {
-        if (!selectedContact || selectedContact.source !== "client") return;
-        const clientId = selectedContact.source_id;
+   let savedRow = null;
 
-        const { error: updErr } = await supabase
-          .from("clients")
-          .update(payload)
-          .eq("id", clientId);
+if (clientFormMode === "add") {
+  const { data, error: insErr } = await supabase
+    .from("clients")
+    .insert(payload)
+    .select("id, first_name, surname, company, phone, mobile, email, is_active, show_in_contacts")
+    .single();
 
-        if (updErr) throw updErr;
-      }
+  if (insErr) throw insErr;
+  savedRow = data;
+} else {
+  if (!selectedContact || selectedContact.source !== "client") return;
+  const clientId = selectedContact.source_id;
+
+  const { data, error: updErr } = await supabase
+    .from("clients")
+    .update(payload)
+    .eq("id", clientId)
+    .select("id, first_name, surname, company, phone, mobile, email, is_active, show_in_contacts")
+    .single();
+
+  if (updErr) throw updErr;
+  savedRow = data;
+}
+
+if (savedRow) {
+  const { name, role } = buildClientDisplay(savedRow);
+
+  const patched = {
+    id: `client:${savedRow.id}`,
+    source: "client",
+    source_id: savedRow.id,
+    name,
+    role,
+    first_name: savedRow.first_name || "",
+    surname: savedRow.surname || "",
+    company: savedRow.company || "",
+    phone: savedRow.phone || "",
+    mobile: savedRow.mobile || "",
+    email: savedRow.email || "",
+  };
+
+  setContacts((prev) => {
+    const list = Array.isArray(prev) ? [...prev] : [];
+    const idx = list.findIndex((c) => c.id === patched.id);
+
+    if (idx >= 0) list[idx] = { ...list[idx], ...patched };
+    else list.push(patched); // add mode
+
+    // keep your existing sort behaviour
+    list.sort((a, b) =>
+      (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" })
+    );
+
+    return list;
+  });
+
+  // keep selection synced
+  setSelectedId(patched.id);
+  setQuery(patched.name || "");
+}
 
       setClientFormOpen(false);
       setClientForm(emptyClientForm());
-      setReloadKey((k) => k + 1);
     } catch (e) {
       console.error("Error saving client:", e);
       setError(
