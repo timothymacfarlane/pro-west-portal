@@ -211,44 +211,41 @@ function clientLabel(c) {
   return c.email || "Unnamed client";
 }
 
-function ClientSuggestionDropdown({ items, onPick }) {
+function ClientSuggestionDropdown({ items, onPick, activeIdx, setActiveIdx }) {
   if (!items?.length) return null;
 
   return (
     <div
+      className="contacts-suggestions"
       style={{
-        marginTop: 8,
-        borderRadius: 14,
-        overflow: "hidden",
-        border: "1px solid rgba(255,255,255,0.08)",
-        background: "rgba(20,20,25,0.95)",
-        boxShadow: "0 12px 30px rgba(0,0,0,0.35)",
-        maxHeight: 280,
+        marginTop: "0.4rem",
+        maxHeight: "280px",
         overflowY: "auto",
         WebkitOverflowScrolling: "touch",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.35rem",
       }}
     >
       {items.map((c, idx) => (
         <button
-          key={c.id ?? idx}
-          className="btn-pill"
-          style={{
-            width: "100%",
-            justifyContent: "flex-start",
-            textAlign: "left",
-            whiteSpace: "normal",
-            borderRadius: 0,
-            padding: "10px 12px",
-            borderBottom: "1px solid rgba(255,255,255,0.06)",
-            background: "transparent",
-          }}
-          type="button"
-          onClick={() => onPick(c)}
-        >
-          <div>
-            <div style={{ fontWeight: 950, letterSpacing: 0.2 }}>{clientLabel(c)}</div>
-            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
-              {(c.mobile || c.phone || "—")} · {(c.email || "—")}
+  key={c.id ?? idx}
+  type="button"
+  className={`contacts-suggestion ${idx === activeIdx ? "is-active" : ""}`}
+  onMouseEnter={() => setActiveIdx?.(idx)}
+  onClick={() => onPick(c)}
+>
+          <div className="contacts-suggestion-header">
+            {/* (optional) if you want an avatar like contacts, uncomment:
+            <div className="contacts-avatar">{(c.company || c.first_name || "?").charAt(0).toUpperCase()}</div>
+            */}
+            <div>
+              <div className="contacts-suggestion-name">{clientLabel(c)}</div>
+              <div className="contacts-suggestion-meta">
+                <span>{(c.mobile || c.phone || "—")}</span>
+                <span style={{ opacity: 0.6 }}>•</span>
+                <span>{(c.email || "—")}</span>
+              </div>
             </div>
           </div>
         </button>
@@ -256,6 +253,7 @@ function ClientSuggestionDropdown({ items, onPick }) {
     </div>
   );
 }
+
 function AddClientModal({ open, onClose, onCreated }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -454,6 +452,7 @@ useEffect(() => {
 
     setError("");
     setClientId(null);
+    setClientSearch("");
     return;
   }
 
@@ -477,8 +476,8 @@ useEffect(() => {
   setClientEmail(i.client_email ?? "");
   setClientName(i.client_name ?? "");
   setClientId(i.client_id ?? null);
-    // ✅ keep the search box showing the selected job's client (and not the previous job's)
-  setClientSearch(clientSearchLabelFromJob(i));
+   // ✅ default search box to blank (prevents auto-suggest dropdown on open)
+  setClientSearch("");
 
   setStatus(i.status ?? "Planned");
   setAssignedTo(i.assigned_to ?? "");
@@ -537,9 +536,11 @@ const [addClientOpen, setAddClientOpen] = useState(false);
   const [clientSuggestions, setClientSuggestions] = useState([]);
   const [clientSearching, setClientSearching] = useState(false);
   const clientDebounceRef = useRef(null);
+  const [clientActiveIdx, setClientActiveIdx] = useState(-1);
 
   const addressInputRef = useRef(null);
   const autocompleteRef = useRef(null);
+  const clientSearchWrapRef = useRef(null);
 
   const canEdit = isAdmin && (mode === "new" || mode === "edit");
 
@@ -712,12 +713,50 @@ async function runClientSearch(q) {
 }
 
   useEffect(() => {
-    if (!open) return;
-    if (clientDebounceRef.current) clearTimeout(clientDebounceRef.current);
-    clientDebounceRef.current = setTimeout(() => runClientSearch(clientSearch), 180);
-    return () => clientDebounceRef.current && clearTimeout(clientDebounceRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientSearch, open]);
+  if (!open) return;
+
+  // ✅ If a client is already selected, don't keep re-searching and re-opening dropdown
+  if (clientId) return;
+
+  if (clientDebounceRef.current) clearTimeout(clientDebounceRef.current);
+  clientDebounceRef.current = setTimeout(() => runClientSearch(clientSearch), 180);
+
+  return () => clientDebounceRef.current && clearTimeout(clientDebounceRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [clientSearch, open, clientId]);
+
+// reset highlight when typing
+useEffect(() => {
+  setClientActiveIdx(-1);
+}, [clientSearch]);
+
+// keep highlight in range if list size changes
+useEffect(() => {
+  setClientActiveIdx((i) => Math.min(i, (clientSuggestions?.length || 0) - 1));
+}, [clientSuggestions]);
+useEffect(() => {
+  if (!open) return;
+
+  const handler = (e) => {
+    if (!clientSuggestions?.length) return;
+
+    const wrap = clientSearchWrapRef.current;
+    if (!wrap) return;
+
+    if (!wrap.contains(e.target)) {
+      setClientSuggestions([]);
+      setClientSearching(false);
+    }
+  };
+
+  document.addEventListener("mousedown", handler);
+  document.addEventListener("touchstart", handler, { passive: true });
+
+  return () => {
+    document.removeEventListener("mousedown", handler);
+    document.removeEventListener("touchstart", handler);
+  };
+}, [open, clientSuggestions]);
 
   function pickClient(c) {
     const fn = norm(c.first_name);
@@ -738,6 +777,21 @@ async function runClientSearch(q) {
     setClientSuggestions([]);
     setClientId(c.id);
   }
+
+  function clearClient() {
+  setClientId(null);
+
+  setClientFirstName("");
+  setClientSurname("");
+  setClientCompany("");
+  setClientPhone("");
+  setClientMobile("");
+  setClientEmail("");
+  setClientName("");
+
+  setClientSearch("");
+  setClientSuggestions([]);
+}
   // -----------------------------
   // Sticker printing (admin only)
   // Uses hidden iframe (reliable in Chrome + mobile)
@@ -1050,11 +1104,12 @@ async function notifyJobAssignment({ jobId, jobNumber, prevAssigned, nextAssigne
     setSaving(true);
     setError("");
 
-    if (canEdit && !clientId) {
-  setSaving(false);
-  setError("Please select a client from Contacts (Search client… or + Add client).");
-  return;
-}
+    // Gives warning if no client is selected and forces to select a client
+    //if (canEdit && !clientId) {
+  //setSaving(false);
+  //setError("Please select a client from Contacts (Search client… or + Add client).");
+  //return;
+//}
     try {
       const payload = {
         job_type_legacy: jobTypeLegacy?.trim() || null,
@@ -1271,20 +1326,110 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
 </div>
 
             <div style={{ display: "grid", gap: 8 }}>
-              {/* Type-to-search */}
-              <input
-                className="maps-search-input"
-                placeholder={`Search client… ${clientSearching ? "…" : ""}`}
-                value={clientSearch}
-                onChange={(e) => setClientSearch(e.target.value)}
-                onFocus={() => runClientSearch(clientSearch)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setClientSuggestions([]);
-                }}
-                disabled={!canEdit}
-              />
+     <div ref={clientSearchWrapRef}>
+  <input
+    className="maps-search-input"
+    placeholder={`Search client… ${clientSearching ? "…" : ""}`}
+    value={clientSearch}
+   onChange={(e) => {
+  const v = e.target.value;
+  setClientSearch(v);
 
-              <ClientSuggestionDropdown items={clientSuggestions} onPick={pickClient} />
+  // ✅ If they start typing again, treat it as a new search (clear selection + snapshot)
+  if (clientId) {
+    setClientId(null);
+    setClientFirstName("");
+    setClientSurname("");
+    setClientCompany("");
+    setClientPhone("");
+    setClientMobile("");
+    setClientEmail("");
+    setClientName("");
+  }
+}}
+onFocus={() => {
+  // ✅ Only search when we DON'T already have a client selected
+  if (!clientId) runClientSearch(clientSearch);
+}}
+    onKeyDown={(e) => {
+  const hasList = Array.isArray(clientSuggestions) && clientSuggestions.length > 0;
+
+  if (e.key === "ArrowDown") {
+    if (!hasList) return;
+    e.preventDefault();
+    setClientActiveIdx((i) => (i < clientSuggestions.length - 1 ? i + 1 : 0));
+    return;
+  }
+
+  if (e.key === "ArrowUp") {
+    if (!hasList) return;
+    e.preventDefault();
+    setClientActiveIdx((i) => (i > 0 ? i - 1 : clientSuggestions.length - 1));
+    return;
+  }
+
+  if (e.key === "Enter") {
+    if (!hasList) return;
+    if (clientActiveIdx < 0) return; // only pick if something highlighted
+    e.preventDefault();
+    const picked = clientSuggestions[clientActiveIdx];
+    if (picked) pickClient(picked);
+    return;
+  }
+
+  if (e.key === "Escape") {
+    setClientSuggestions([]);
+    setClientActiveIdx(-1);
+  }
+}}
+    disabled={!canEdit}
+  />
+
+  <ClientSuggestionDropdown
+  items={clientSuggestions}
+  onPick={pickClient}
+  activeIdx={clientActiveIdx}
+  setActiveIdx={setClientActiveIdx}
+/>
+
+  {clientId && (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        marginTop: 6,
+        fontSize: 12,
+        opacity: 0.9,
+      }}
+    >
+      <div>
+        <b>Selected:</b>{" "}
+        {clientCompany ||
+          `${clientFirstName || ""} ${clientSurname || ""}`.trim() ||
+          "—"}
+      </div>
+
+      {canEdit && (
+        <button
+          type="button"
+          onClick={clearClient}
+          style={{
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            fontSize: 12,
+            cursor: "pointer",
+            textDecoration: "underline",
+            opacity: 0.8,
+          }}
+        >
+          Clear
+        </button>
+      )}
+    </div>
+  )}
+</div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 <input className="input" placeholder="First name" value={clientFirstName} onChange={(e) => setClientFirstName(e.target.value)} disabled={true} />
