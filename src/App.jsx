@@ -102,7 +102,7 @@ function App() {
             </div>
             <div className="header-text">
               <h1>Pro West Portal</h1>
-              <p>Internal Job &amp; Operations Hub</p>
+              <p>Pro West Surveying - Licensed and Engineering Surveying Consultants</p>
             </div>
           </div>
 
