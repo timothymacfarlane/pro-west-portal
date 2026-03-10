@@ -1,7 +1,7 @@
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext.jsx";
 
-const APP_VERSION = "0.2.0-beta";
+const APP_VERSION = "0.2.1-beta";
 
 function HeaderActions({ extraActions }) {
   // useAuth() might return null if AuthProvider is not set up yet,

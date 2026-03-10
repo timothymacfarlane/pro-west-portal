@@ -1885,7 +1885,7 @@ let q = supabase
         const like = `%${globalTrim}%`;
         q = q.or(
           [
-            `job_number_text.ilike.${like}`,
+            `street_number.ilike.${like}`,
             `full_address.ilike.${like}`,
             `suburb.ilike.${like}`,
             `lot_number.ilike.${like}`,
@@ -2017,7 +2017,7 @@ async function runGlobalSuggest(query) {
       const like = `%${q}%`;
       queryBuilder = queryBuilder.or(
         [
-          `job_number_text.ilike.${like}`,
+          `street_number.ilike.${like}`,
           `full_address.ilike.${like}`,
           `suburb.ilike.${like}`,
           `lot_number.ilike.${like}`,
@@ -2510,7 +2510,7 @@ setGlobalSuggestions([]);
 
             <input
               className="maps-search-input"
-              placeholder="Start typing… (client, suburb, lot/plan, notes, etc.)"
+              placeholder="Start typing… (client, suburb, lot/plan, address, notes, etc.)"
               value={globalQuery}
               onChange={(e) => {
   try {
