@@ -199,6 +199,36 @@ function getJobBadge(jobNumber) {
   return s.length <= 3 ? s : s.slice(-4);
 }
 
+function jobLotPlanText(row) {
+  const lot = (row?.lot_number || "").toString().trim();
+  const plan = (row?.plan_number || "").toString().trim();
+
+  if (lot && plan) return `(Lot ${lot} on ${plan})`;
+  if (lot) return `(Lot ${lot})`;
+  if (plan) return `(Plan ${plan})`;
+  return "";
+}
+
+function jobLotPlanRegisterText(row) {
+  const lot = (row?.lot_number || "").toString().trim();
+  const plan = (row?.plan_number || "").toString().trim();
+
+  if (lot && plan) return `Lot ${lot} on ${plan}`;
+  if (lot) return `Lot ${lot}`;
+  if (plan) return `Plan ${plan}`;
+  return "—";
+}
+
+function jobLotPlanSummaryText(row) {
+  const lot = (row?.lot_number || "").toString().trim();
+  const plan = (row?.plan_number || "").toString().trim();
+
+  if (lot && plan) return `Lot ${lot} on ${plan}`;
+  if (lot) return `Lot ${lot}`;
+  if (plan) return `Plan ${plan}`;
+  return "—";
+}
+
 function clientLabel(c) {
   const first = norm(c.first_name);
   const sur = norm(c.surname);
@@ -1679,17 +1709,18 @@ function Jobs() {
   // -----------------------------
   const PAGE_SIZE = 30;
 
-  const JOB_COLUMNS = [
-    { key: "job_number", label: "Job #" },
-    { key: "client_company", label: "Client" },
-    { key: "full_address", label: "Address" },
-    { key: "local_authority", label: "LGA" },
-    { key: "job_type_legacy", label: "Job type" },
-    { key: "job_date_legacy", label: "Job date" },
-    { key: "status", label: "Status" },
-    { key: "assigned_to", label: "Assigned" },
-    { key: "notes", label: "Notes" },
-  ];
+const JOB_COLUMNS = [
+  { key: "job_number", label: "Job #" },
+  { key: "client_company", label: "Client" },
+  { key: "full_address", label: "Address" },
+  { key: "lot_number", label: "Lot / Plan" },
+  { key: "local_authority", label: "LGA" },
+  { key: "job_type_legacy", label: "Job type" },
+  { key: "job_date_legacy", label: "Job date" },
+  { key: "status", label: "Status" },
+  { key: "assigned_to", label: "Assigned" },
+  { key: "notes", label: "Notes" },
+];
 
   const [listRows, setListRows] = useState([]);
   const [listLoading, setListLoading] = useState(false);
@@ -1700,10 +1731,12 @@ function Jobs() {
   // count for current filtered query (not totalJobs)
   const [filteredCount, setFilteredCount] = useState(0);
 
-  const listDebounceRef = useRef(null);
+ const listDebounceRef = useRef(null);
 
-  const debounceJobNoRef = useRef(null);
-  const debounceGlobalRef = useRef(null);
+const debounceJobNoRef = useRef(null);
+const debounceGlobalRef = useRef(null);
+const skipNextJobNoSuggestRef = useRef(false);
+const skipNextGlobalSuggestRef = useRef(false);
 
   // ✅ Deep-link / return flags
   const openedEditFromMapsRef = useRef(false);
@@ -1818,6 +1851,8 @@ let q = supabase
     client_surname,
     client_name,
     full_address,
+    lot_number,
+    plan_number,
     local_authority,
     job_type_legacy,
     job_date_legacy,
@@ -1936,7 +1971,7 @@ let q = supabase
     try {
       const { data, error } = await supabase
         .from("jobs")
-        .select("id, job_number, full_address, street_number, street_name, suburb")
+        .select("id, job_number, full_address, street_number, street_name, suburb, job_type_legacy, lot_number, plan_number")
         .like("job_number_text", `${q}%`)
         .order("job_number", { ascending: false })
         .limit(20);
@@ -1944,12 +1979,15 @@ let q = supabase
       if (error) throw error;
 
       setJobNoSuggestions(
-        (data || []).map((r) => ({
-          id: r.id,
-          job_number: r.job_number,
-          address: addressSummaryFromRow(r),
-        }))
-      );
+  (data || []).map((r) => ({
+    id: r.id,
+    job_number: r.job_number,
+    job_type_legacy: r.job_type_legacy || "",
+    address: addressSummaryFromRow(r),
+    lot_number: r.lot_number || "",
+    plan_number: r.plan_number || "",
+  }))
+);
     } catch {
       setJobNoSuggestions([]);
     } finally {
@@ -1971,7 +2009,7 @@ async function runGlobalSuggest(query) {
 
     let queryBuilder = supabase
       .from("jobs")
-      .select("id, job_number, full_address, street_number, street_name, suburb")
+      .select("id, job_number, full_address, street_number, street_name, suburb, client_company, client_first_name, client_surname, lot_number, plan_number, job_type_legacy, assigned_to")
       .order("job_number", { ascending: false })
       .limit(20);
 
@@ -2002,10 +2040,13 @@ async function runGlobalSuggest(query) {
     if (error) throw error;
 
     const results = (data || []).map((r) => ({
-      id: r.id,
-      job_number: r.job_number,
-      address: addressSummaryFromRow(r),
-    }));
+  id: r.id,
+  job_number: r.job_number,
+  job_type_legacy: r.job_type_legacy || "",
+  address: addressSummaryFromRow(r),
+  lot_number: r.lot_number || "",
+  plan_number: r.plan_number || "",
+}));
 
     setGlobalSuggestions(results);
     return results;   // ✅ IMPORTANT
@@ -2022,6 +2063,11 @@ async function runGlobalSuggest(query) {
 useEffect(() => {
   if (debounceJobNoRef.current) clearTimeout(debounceJobNoRef.current);
 
+  if (skipNextJobNoSuggestRef.current) {
+    skipNextJobNoSuggestRef.current = false;
+    return;
+  }
+
   debounceJobNoRef.current = setTimeout(() => {
     if (!isAppVisible) return;
     runJobNoSuggest(jobNoQuery);
@@ -2034,6 +2080,11 @@ useEffect(() => {
 
 useEffect(() => {
   if (debounceGlobalRef.current) clearTimeout(debounceGlobalRef.current);
+
+  if (skipNextGlobalSuggestRef.current) {
+    skipNextGlobalSuggestRef.current = false;
+    return;
+  }
 
   debounceGlobalRef.current = setTimeout(() => {
     if (!isAppVisible) return;
@@ -2206,10 +2257,11 @@ if (!isAppVisible) return;
     const jobParam = (queryFlags.jobParam || "").trim();
     if (!jobParam) return;
 
-    // Keep the UI consistent: show what was asked for
-    setJobNoQuery(jobParam);
-    setJobNoSuggestions([]);
-    setGlobalSuggestions([]);
+   // Keep the UI consistent: show what was asked for
+skipNextJobNoSuggestRef.current = true;
+setJobNoQuery(jobParam);
+setJobNoSuggestions([]);
+setGlobalSuggestions([]);
 
     (async () => {
       const job = await jumpToJobByNumber(jobParam);
@@ -2379,16 +2431,16 @@ if (!isAppVisible) return;
     e.preventDefault();
 
     // If an item is highlighted, pick it
-    if (hasList && jobNoActiveIdx >= 0) {
-      const picked = jobNoSuggestions[jobNoActiveIdx];
-      if (picked) {
-        setJobNoQuery(String(picked.job_number));
-        setJobNoSuggestions([]);
-        setJobNoActiveIdx(-1);
-        jumpToJobByNumber(picked.job_number);
-        return;
-      }
-    }
+ if (hasList && jobNoActiveIdx >= 0) {
+  const picked = jobNoSuggestions[jobNoActiveIdx];
+  if (picked) {
+    skipNextJobNoSuggestRef.current = true;
+    setJobNoSuggestions([]);
+    setJobNoActiveIdx(-1);
+    jumpToJobByNumber(picked.job_number);
+    return;
+  }
+}
 
     // Otherwise, use typed job number (your existing behaviour)
     if (debounceJobNoRef.current) clearTimeout(debounceJobNoRef.current);
@@ -2423,18 +2475,25 @@ if (!isAppVisible) return;
         key={j.id}
         type="button"
         className={`contacts-suggestion ${idx === jobNoActiveIdx ? "is-active" : ""}`}
-        onClick={() => {
-          setJobNoQuery(String(j.job_number));
-          setJobNoSuggestions([]);
-          jumpToJobByNumber(j.job_number);
-        }}
+ onClick={() => {
+  skipNextJobNoSuggestRef.current = true;
+  setJobNoSuggestions([]);
+  setJobNoActiveIdx(-1);
+  jumpToJobByNumber(j.job_number);
+}}
       >
         <div className="contacts-suggestion-header">
           <div className="contacts-avatar">{getJobBadge(j.job_number)}</div>
           <div>
-            <div className="contacts-suggestion-name">Job #{j.job_number}</div>
-            <div className="contacts-suggestion-role">{safeText(j.address)}</div>
-          </div>
+  <div className="contacts-suggestion-name">
+    {`Job #${j.job_number}`}
+    {j.job_type_legacy ? ` · ${j.job_type_legacy}` : ""}
+  </div>
+  <div className="contacts-suggestion-role">
+    {safeText(j.address)}
+    {jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}
+  </div>
+</div>
         </div>
 
       </button>
@@ -2486,20 +2545,20 @@ onKeyDown={async (e) => {
     e.preventDefault();
 
     // If highlighted, pick it
-    if (hasList && globalActiveIdx >= 0) {
-      const picked = globalSuggestions[globalActiveIdx];
-      if (picked) {
-        setGlobalQuery(`#${picked.job_number ?? ""}`);
-        setGlobalSuggestions([]);
-        setGlobalActiveIdx(-1);
+if (hasList && globalActiveIdx >= 0) {
+  const picked = globalSuggestions[globalActiveIdx];
+  if (picked) {
+    skipNextGlobalSuggestRef.current = true;
+    setGlobalSuggestions([]);
+    setGlobalActiveIdx(-1);
 
-        if (picked.id != null) await jumpToJobById(picked.id);
-        else if (picked.job_id != null) await jumpToJobById(picked.job_id);
-        else if (picked.job_number != null) await jumpToJobByNumber(picked.job_number);
+    if (picked.id != null) await jumpToJobById(picked.id);
+    else if (picked.job_id != null) await jumpToJobById(picked.job_id);
+    else if (picked.job_number != null) await jumpToJobByNumber(picked.job_number);
 
-        return;
-      }
-    }
+    return;
+  }
+}
 
   if (debounceGlobalRef.current) clearTimeout(debounceGlobalRef.current);
 
@@ -2540,25 +2599,28 @@ onKeyDown={async (e) => {
         key={j.id ?? j.job_id ?? j.job_number ?? j.address ?? "job"}
         type="button"
         className={`contacts-suggestion ${idx === globalActiveIdx ? "is-active" : ""}`}
-        onClick={() => {
-          // keep your previous onClick behaviour if it worked:
-          setGlobalQuery(`#${j.job_number ?? ""}`);
-          setGlobalSuggestions([]);
+onClick={() => {
+  skipNextGlobalSuggestRef.current = true;
+  setGlobalSuggestions([]);
+  setGlobalActiveIdx(-1);
 
-          // Try id first; fallback to job_number
-          if (j.id != null) jumpToJobById(j.id);
-          else if (j.job_id != null) jumpToJobById(j.job_id);
-          else if (j.job_number != null) jumpToJobByNumber(j.job_number);
-        }}
+  if (j.id != null) jumpToJobById(j.id);
+  else if (j.job_id != null) jumpToJobById(j.job_id);
+  else if (j.job_number != null) jumpToJobByNumber(j.job_number);
+}}
       >
         <div className="contacts-suggestion-header">
           <div className="contacts-avatar">{getJobBadge(j.job_number)}</div>
-          <div>
-            <div className="contacts-suggestion-name">
-              {j.job_number ? `Job #${j.job_number}` : "Job"}
-            </div>
-            <div className="contacts-suggestion-role">{safeText(j.address)}</div>
-          </div>
+         <div>
+  <div className="contacts-suggestion-name">
+    {j.job_number ? `Job #${j.job_number}` : "Job"}
+    {j.job_type_legacy ? ` · ${j.job_type_legacy}` : ""}
+  </div>
+  <div className="contacts-suggestion-role">
+    {safeText(j.address)}
+    {jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}
+  </div>
+</div>
         </div>
       </button>
     ))}
@@ -2667,11 +2729,14 @@ onKeyDown={async (e) => {
   {jobClientDisplayLiveFirst(r)}
 </td>
                   <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", minWidth: 260 }}>
-                    {stripAustralia(r.full_address) || "—"}
-                  </td>
-                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
-                    {r.local_authority || "—"}
-                  </td>
+  {stripAustralia(r.full_address) || "—"}
+</td>
+<td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
+  {jobLotPlanRegisterText(r)}
+</td>
+<td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
+  {r.local_authority || "—"}
+</td>
                   <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
                     {r.job_type_legacy || "—"}
                   </td>
@@ -2820,19 +2885,22 @@ onKeyDown={async (e) => {
               </div>
             </div>
 
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Status / Assigned</div>
-              <div style={{ marginTop: 4 }}><b>Status:</b> {selected.status || "—"}</div>
-              <div style={{ marginTop: 4 }}><b>Assigned:</b> {selected.assigned_to || "—"}</div>
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Address</div>
-<div style={{ marginTop: 4 }}>
-  {stripAustralia(selected.full_address) || addressSummaryFromRow(selected)}
+ <div>
+  <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Job details</div>
+  <div style={{ marginTop: 4 }}><b>Job type:</b> {selected.job_type_legacy || "—"}</div>
+  <div style={{ marginTop: 4 }}><b>Date:</b> {formatDateAU(selected.job_date_legacy)}</div>
+  <div style={{ marginTop: 8 }}><b>Status:</b> {selected.status || "—"}</div>
+  <div style={{ marginTop: 4 }}><b>Assigned:</b> {selected.assigned_to || "—"}</div>
 </div>
-            </div>
 
+<div style={{ gridColumn: "1 / -1" }}>
+  <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Address</div>
+  <div style={{ marginTop: 4 }}>
+    {stripAustralia(selected.full_address) || addressSummaryFromRow(selected)}
+  </div>
+  <div style={{ marginTop: 6 }}><b>Lot / Plan:</b> {jobLotPlanSummaryText(selected)}</div>
+  <div style={{ marginTop: 4 }}><b>LGA:</b> {selected.local_authority || "—"}</div>
+</div>
             <div style={{ gridColumn: "1 / -1" }}>
               <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Notes</div>
               <div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{selected.notes || "—"}</div>
