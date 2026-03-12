@@ -561,6 +561,8 @@ const [addClientOpen, setAddClientOpen] = useState(false);
   const [mgaE, setMgaE] = useState(initial?.mga_easting ?? "");
   const [mgaN, setMgaN] = useState(initial?.mga_northing ?? "");
 
+  const [stickerPosition, setStickerPosition] = useState("top-left");
+
   // ✅ Client autocomplete state
   const [clientSearch, setClientSearch] = useState("");
   const [clientSuggestions, setClientSuggestions] = useState([]);
@@ -897,7 +899,7 @@ useEffect(() => {
     return candidate;
   }
 
-function buildStickerHtml(jobForPrint) {
+function buildStickerHtml(jobForPrint, stickerPosition = "top-left") {
   const j = jobForPrint || {};
 
   const jobNumberText = j.job_number != null ? String(j.job_number) : "";
@@ -938,41 +940,54 @@ const siteAddressText = deriveStickerSiteAddress(j);
     <style>
       @page { size: A4 landscape; margin: 0; }
 
-      html, body { width: 297mm; height: 210mm; }
+      html, body {
+        width: 297mm;
+        height: 210mm;
+      }
+
       body {
         margin: 0;
         font-family: "Times New Roman", Times, serif;
         color: #000;
       }
 
-      /* A4 landscape page */
+      /* Full A4 sheet split into 4 quarters */
       .page {
         width: 297mm;
         height: 210mm;
+        display: grid;
+        grid-template-columns: 148.5mm 148.5mm;
+        grid-template-rows: 105mm 105mm;
         box-sizing: border-box;
-        padding-top: 10mm;  /* your measured top margin */
-        padding-left: 9mm;  /* your measured left margin */
       }
 
-      /* Top-left label area only (Avery L7169 / PPS 4-up) */
+      .cell {
+        box-sizing: border-box;
+        padding-top: 10mm;   /* your measured top offset within each quarter */
+        padding-left: 9mm;   /* your measured left offset within each quarter */
+      }
+
+      .cell.hidden {
+        visibility: hidden;
+      }
+
       .label-box {
-  width: 139mm;
-  height: 84mm; /* ≈ 4/5ths of original height */
-  box-sizing: border-box;
-  overflow: hidden;
-}
+        width: 139mm;
+        height: 84mm;
+        box-sizing: border-box;
+        overflow: hidden;
+      }
 
-     .row {
-  display: flex;
-  align-items: flex-start;
-  margin-bottom: 1.2mm;
-}
+      .row {
+        display: flex;
+        align-items: flex-start;
+        margin-bottom: 1.2mm;
+      }
 
-.row:last-child {
-  margin-bottom: 0; /* comments row doesn't waste space */
-}
+      .row:last-child {
+        margin-bottom: 0;
+      }
 
-      /* Left headers: NOT bold */
       .label {
         width: 50mm;
         font-size: 12pt;
@@ -980,7 +995,6 @@ const siteAddressText = deriveStickerSiteAddress(j);
         white-space: nowrap;
       }
 
-      /* Right values: bold */
       .value {
         flex: 1;
         font-size: 14pt;
@@ -988,26 +1002,26 @@ const siteAddressText = deriveStickerSiteAddress(j);
         line-height: 1.1;
       }
 
-   .value.address {
-  font-size: 13pt;
-  line-height: 1.1;
-}
+      .value.address {
+        font-size: 13pt;
+        line-height: 1.1;
+      }
 
-.value.comments {
-  font-size: 10pt;
-  line-height: 1.05;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
+      .value.comments {
+        font-size: 10pt;
+        line-height: 1.05;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
     </style>
   </head>
 
   <body>
     <div class="page">
-      <div class="label-box">
+      <div class="cell ${stickerPosition === "top-left" ? "" : "hidden"}">
+        <div class="label-box">
         <div class="row"><div class="label">JOB NUMBER:</div><div class="value">${escapeHtml(jobNumberText)}</div></div>
         <div class="row"><div class="label">JOB TYPE:</div><div class="value">${escapeHtml(jobTypeText)}</div></div>
         <div class="row"><div class="label">DATE:</div><div class="value">${escapeHtml(dateText)}</div></div>
@@ -1021,12 +1035,64 @@ const siteAddressText = deriveStickerSiteAddress(j);
         <div class="row"><div class="label">C/T:</div><div class="value">${escapeHtml(ctText)}</div></div>
         <div class="row"><div class="label">AUTHORITY:</div><div class="value">${escapeHtml(authorityText)}</div></div>
         <div class="row"><div class="label">JOB COMMENTS:</div><div class="value comments">${escapeHtml(commentsText)}</div></div>
+            </div>
+      </div>
+
+      <div class="cell ${stickerPosition === "top-right" ? "" : "hidden"}">
+        <div class="label-box">
+          <div class="row"><div class="label">JOB NUMBER:</div><div class="value">${escapeHtml(jobNumberText)}</div></div>
+          <div class="row"><div class="label">JOB TYPE:</div><div class="value">${escapeHtml(jobTypeText)}</div></div>
+          <div class="row"><div class="label">DATE:</div><div class="value">${escapeHtml(dateText)}</div></div>
+          <div class="row"><div class="label">CLIENT:</div><div class="value">${escapeHtml(clientText)}</div></div>
+          <div class="row"><div class="label">CONTACT:</div><div class="value">${escapeHtml(contactText)}</div></div>
+          <div class="row"><div class="label">TELEPHONE:</div><div class="value">${escapeHtml(telephoneText)}</div></div>
+          <div class="row"><div class="label">MOBILE:</div><div class="value">${escapeHtml(mobileText)}</div></div>
+          <div class="row"><div class="label">SITE ADDRESS:</div><div class="value address">${escapeHtml(siteAddressText)}</div></div>
+          <div class="row"><div class="label">SUBURB:</div><div class="value">${escapeHtml(suburbText)}</div></div>
+          <div class="row"><div class="label">PLAN:</div><div class="value">${escapeHtml(planText)}</div></div>
+          <div class="row"><div class="label">C/T:</div><div class="value">${escapeHtml(ctText)}</div></div>
+          <div class="row"><div class="label">AUTHORITY:</div><div class="value">${escapeHtml(authorityText)}</div></div>
+          <div class="row"><div class="label">JOB COMMENTS:</div><div class="value comments">${escapeHtml(commentsText)}</div></div>
+        </div>
+      </div>
+
+      <div class="cell ${stickerPosition === "bottom-left" ? "" : "hidden"}">
+        <div class="label-box">
+          <div class="row"><div class="label">JOB NUMBER:</div><div class="value">${escapeHtml(jobNumberText)}</div></div>
+          <div class="row"><div class="label">JOB TYPE:</div><div class="value">${escapeHtml(jobTypeText)}</div></div>
+          <div class="row"><div class="label">DATE:</div><div class="value">${escapeHtml(dateText)}</div></div>
+          <div class="row"><div class="label">CLIENT:</div><div class="value">${escapeHtml(clientText)}</div></div>
+          <div class="row"><div class="label">CONTACT:</div><div class="value">${escapeHtml(contactText)}</div></div>
+          <div class="row"><div class="label">TELEPHONE:</div><div class="value">${escapeHtml(telephoneText)}</div></div>
+          <div class="row"><div class="label">MOBILE:</div><div class="value">${escapeHtml(mobileText)}</div></div>
+          <div class="row"><div class="label">SITE ADDRESS:</div><div class="value address">${escapeHtml(siteAddressText)}</div></div>
+          <div class="row"><div class="label">SUBURB:</div><div class="value">${escapeHtml(suburbText)}</div></div>
+          <div class="row"><div class="label">PLAN:</div><div class="value">${escapeHtml(planText)}</div></div>
+          <div class="row"><div class="label">C/T:</div><div class="value">${escapeHtml(ctText)}</div></div>
+          <div class="row"><div class="label">AUTHORITY:</div><div class="value">${escapeHtml(authorityText)}</div></div>
+          <div class="row"><div class="label">JOB COMMENTS:</div><div class="value comments">${escapeHtml(commentsText)}</div></div>
+        </div>
+      </div>
+
+      <div class="cell ${stickerPosition === "bottom-right" ? "" : "hidden"}">
+        <div class="label-box">
+          <div class="row"><div class="label">JOB NUMBER:</div><div class="value">${escapeHtml(jobNumberText)}</div></div>
+          <div class="row"><div class="label">JOB TYPE:</div><div class="value">${escapeHtml(jobTypeText)}</div></div>
+          <div class="row"><div class="label">DATE:</div><div class="value">${escapeHtml(dateText)}</div></div>
+          <div class="row"><div class="label">CLIENT:</div><div class="value">${escapeHtml(clientText)}</div></div>
+          <div class="row"><div class="label">CONTACT:</div><div class="value">${escapeHtml(contactText)}</div></div>
+          <div class="row"><div class="label">TELEPHONE:</div><div class="value">${escapeHtml(telephoneText)}</div></div>
+          <div class="row"><div class="label">MOBILE:</div><div class="value">${escapeHtml(mobileText)}</div></div>
+          <div class="row"><div class="label">SITE ADDRESS:</div><div class="value address">${escapeHtml(siteAddressText)}</div></div>
+          <div class="row"><div class="label">SUBURB:</div><div class="value">${escapeHtml(suburbText)}</div></div>
+          <div class="row"><div class="label">PLAN:</div><div class="value">${escapeHtml(planText)}</div></div>
+          <div class="row"><div class="label">C/T:</div><div class="value">${escapeHtml(ctText)}</div></div>
+          <div class="row"><div class="label">AUTHORITY:</div><div class="value">${escapeHtml(authorityText)}</div></div>
+          <div class="row"><div class="label">JOB COMMENTS:</div><div class="value comments">${escapeHtml(commentsText)}</div></div>
+        </div>
       </div>
     </div>
-
-    <script>
-      setTimeout(() => { window.focus(); window.print(); }, 250);
-    </script>
+    
   </body>
 </html>
 `;
@@ -1044,7 +1110,7 @@ const siteAddressText = deriveStickerSiteAddress(j);
       return;
     }
 
-    const html = buildStickerHtml(saved);
+    const html = buildStickerHtml(saved, stickerPosition);
 
     const iframe = document.createElement("iframe");
     iframe.style.position = "fixed";
@@ -1590,9 +1656,22 @@ onChange={(e) => setFullAddress(e.target.value)}
           }
         `}</style>
 
-<div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
+<div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
   {canEdit && (
     <>
+      <select
+        className="input"
+        value={stickerPosition}
+        onChange={(e) => setStickerPosition(e.target.value)}
+        disabled={saving}
+        style={{ width: 170 }}
+      >
+        <option value="top-left">Sticker: Top left</option>
+        <option value="top-right">Sticker: Top right</option>
+        <option value="bottom-left">Sticker: Bottom left</option>
+        <option value="bottom-right">Sticker: Bottom right</option>
+      </select>
+
       <button className="btn-pill" onClick={handlePrintSticker} type="button" disabled={saving}>
         Print Sticker
       </button>

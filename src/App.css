@@ -2582,3 +2582,43 @@ table {
     overflow-y: auto;
   }
 }
+
+/* Logout Button*/
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 0.75rem;
+}
+
+.logout-nav-button {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+
+  /* EXACTLY match nav-link */
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 500;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--pw-primary);
+
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.logout-nav-button:hover {
+  background: #ffebee;
+}
+
+.sidebar.collapsed .logout-nav-button {
+  justify-content: center;
+  padding-inline: 0;
+}

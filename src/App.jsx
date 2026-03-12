@@ -3,6 +3,7 @@ import { Routes, Route, NavLink, useLocation } from "react-router-dom";
 import "./App.css";
 
 import prowestLogo from "./assets/prowest-logo.png";
+import { supabase } from "./lib/supabaseClient.js";
 
 import Login from "./pages/Login.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
@@ -37,7 +38,7 @@ function App() {
   const location = useLocation();
 
   // Updated: rely on AuthContext canonical flags rather than "ADMIN" string checks
-  const { isAdmin, authLoading } = useAuth();
+  const { isAdmin, authLoading, user } = useAuth();
 
   const isAuthPage = location.pathname === "/login";
 
@@ -57,6 +58,11 @@ function App() {
   };
 
   const closeMobileSidebar = () => setMobileSidebarOpen(false);
+
+  const handleLogout = async () => {
+  await supabase.auth.signOut();
+  closeMobileSidebar();
+};
 
   // Always close mobile drawer on route change (back/forward, programmatic nav, etc.)
   // Prevent background scroll when the mobile sidebar is open (better on iOS/Android)
@@ -328,7 +334,21 @@ function App() {
                     <span className="nav-label">Weather</span>
                   </NavLink>
                 </li>
-              </ul>
+               </ul>
+               {user && (
+  <div className="sidebar-footer">
+    <button
+      type="button"
+      className="nav-link logout-nav-button"
+      onClick={handleLogout}
+      title="Log out"
+      aria-label="Log out"
+    >
+      <span className="nav-icon">🚪</span>
+      <span className="nav-label">Logout</span>
+    </button>
+  </div>
+)}
             </nav>
           </>
         )}

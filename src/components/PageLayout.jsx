@@ -1,30 +1,9 @@
-import { supabase } from "../lib/supabaseClient";
-import { useAuth } from "../context/AuthContext.jsx";
-
-const APP_VERSION = "0.2.3-beta";
+const APP_VERSION = "0.3.0-beta";
 
 function HeaderActions({ extraActions }) {
-  // useAuth() might return null if AuthProvider is not set up yet,
-  // so we don't destructure directly.
-  const auth = useAuth();
-  const user = auth?.user || null;
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    // AuthContext will clear the user and ProtectedRoute will send them to /login
-  };
-
   return (
     <div className="page-actions" role="group" aria-label="Page actions">
-      {/* Page-specific actions (e.g. "Start Over") */}
       {extraActions}
-
-      {/* Global Logout button – only when logged in */}
-      {user && (
-        <button className="btn-pill" type="button" onClick={handleLogout} aria-label="Log out" title="Log out">
-          Logout
-        </button>
-      )}
     </div>
   );
 }
