@@ -1737,6 +1737,9 @@ const debounceJobNoRef = useRef(null);
 const debounceGlobalRef = useRef(null);
 const skipNextJobNoSuggestRef = useRef(false);
 const skipNextGlobalSuggestRef = useRef(false);
+const topScrollRef = useRef(null);
+const tableScrollRef = useRef(null);
+const topScrollInnerRef = useRef(null);
 
   // ✅ Deep-link / return flags
   const openedEditFromMapsRef = useRef(false);
@@ -2281,6 +2284,60 @@ setGlobalSuggestions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryFlags.jobParam, queryFlags.fromMaps, queryFlags.editRequested, isAdmin]);
 
+useEffect(() => {
+  const top = topScrollRef.current;
+  const bottom = tableScrollRef.current;
+  const inner = topScrollInnerRef.current;
+
+  if (!top || !bottom || !inner) return;
+
+  let syncingTop = false;
+  let syncingBottom = false;
+
+  const syncWidth = () => {
+    inner.style.width = `${bottom.scrollWidth}px`;
+  };
+
+  const handleTopScroll = () => {
+    if (syncingTop) {
+      syncingTop = false;
+      return;
+    }
+    syncingBottom = true;
+    bottom.scrollLeft = top.scrollLeft;
+  };
+
+  const handleBottomScroll = () => {
+    if (syncingBottom) {
+      syncingBottom = false;
+      return;
+    }
+    syncingTop = true;
+    top.scrollLeft = bottom.scrollLeft;
+  };
+
+  syncWidth();
+
+  top.addEventListener("scroll", handleTopScroll);
+  bottom.addEventListener("scroll", handleBottomScroll);
+  window.addEventListener("resize", syncWidth);
+
+  const ro = new ResizeObserver(() => {
+    syncWidth();
+  });
+
+  ro.observe(bottom);
+  const table = bottom.querySelector("table");
+  if (table) ro.observe(table);
+
+  return () => {
+    top.removeEventListener("scroll", handleTopScroll);
+    bottom.removeEventListener("scroll", handleBottomScroll);
+    window.removeEventListener("resize", syncWidth);
+    ro.disconnect();
+  };
+}, [listRows, filteredCount, sortKey, sortAsc]);
+
   const actions = (
     <>
       {isAdmin && (
@@ -2667,8 +2724,31 @@ onClick={() => {
           </div>
         ) : null}
 
-        <div style={{ marginTop: 12, overflowX: "auto" }}>
-<table className="jobs-reg-table">
+        <div
+  ref={topScrollRef}
+  className="jobs-top-scroll"
+  style={{
+    marginTop: 12,
+    overflowX: "auto",
+    overflowY: "hidden",
+  }}
+>
+  <div
+    ref={topScrollInnerRef}
+    style={{
+      height: 1,
+    }}
+  />
+</div>
+
+<div
+  ref={tableScrollRef}
+  style={{
+    marginTop: 8,
+    overflowX: "auto",
+  }}
+>
+  <table className="jobs-reg-table">
             <thead>
               <tr>
                 {JOB_COLUMNS.map((c) => {

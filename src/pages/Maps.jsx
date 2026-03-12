@@ -624,6 +624,7 @@ function Maps() {
   const markersRef = useRef([]);
   const userLocationMarkerRef = useRef(null);
   const addressMarkerRef = useRef(null);
+  const locationWatchIdRef = useRef(null);
 
   const addressInputRef = useRef(null);
   const addressAutocompleteRef = useRef(null);
@@ -799,6 +800,7 @@ useEffect(() => {
   });
   const [mobilePanelCollapsed, setMobilePanelCollapsed] = useState(false);
   const [mobileKeyboardOpen, setMobileKeyboardOpen] = useState(false);
+  const [isFollowingLocation, setIsFollowingLocation] = useState(false);
 
   useEffect(() => {
     const onResize = () => {
@@ -1648,6 +1650,12 @@ const notePayload = {
 
     mapRef.current = map;
     map.setTilt(0);
+
+    map.addListener("tilt_changed", () => {
+  if (map.getTilt() !== 0) {
+    map.setTilt(0);
+  }
+});
     infoWindowRef.current = new window.google.maps.InfoWindow();
     hoverInfoWindowRef.current = new window.google.maps.InfoWindow({
       disableAutoPan: true,
@@ -1746,14 +1754,11 @@ const notePayload = {
     }
 
     // Persist view/type on idle + tick
-  map.addListener("idle", () => {
+ map.addListener("idle", () => {
   if (idleDebounceRef.current) clearTimeout(idleDebounceRef.current);
 
   idleDebounceRef.current = setTimeout(() => {
     if (!mapRef.current) return;
-
-    // Keep map locked to birdseye/top-down view
-    mapRef.current.setTilt(0);
 
     const b = mapRef.current.getBounds();
     const z = mapRef.current.getZoom();
@@ -1875,26 +1880,27 @@ if (!isWA) {
 
   // ✅ Keep top tools visual state in sync
   useEffect(() => {
-    const div = toolsControlDivRef.current;
-    if (!div) return;
+  const div = toolsControlDivRef.current;
+  if (!div) return;
 
-    const btns = Array.from(div.querySelectorAll("button"));
-    btns.forEach((b) => {
-      const action = b.dataset.action;
-      const active =
-        (action === "distance" && measureMode === "distance") ||
-        (action === "area" && measureMode === "area");
+  const btns = Array.from(div.querySelectorAll("button"));
+  btns.forEach((b) => {
+    const action = b.dataset.action;
+    const active =
+      (action === "distance" && measureMode === "distance") ||
+      (action === "area" && measureMode === "area") ||
+      (action === "location" && isFollowingLocation);
 
-      b.style.background = active ? "#000" : "#fff";
-      b.style.color = active ? "#fff" : "#000";
-    });
+    b.style.background = active ? "#000" : "#fff";
+    b.style.color = active ? "#fff" : "#000";
+  });
 
-    const clearBtn = div.querySelector('button[data-action="clear"]');
-    if (clearBtn) clearBtn.style.display = hasMeasure ? "grid" : "none";
+  const clearBtn = div.querySelector('button[data-action="clear"]');
+  if (clearBtn) clearBtn.style.display = hasMeasure ? "grid" : "none";
 
-    const finishBtn = div.querySelector('button[data-action="finish"]');
-    if (finishBtn) finishBtn.style.display = measureMode ? "grid" : "none";
-  }, [measureMode, hasMeasure]);
+  const finishBtn = div.querySelector('button[data-action="finish"]');
+  if (finishBtn) finishBtn.style.display = measureMode ? "grid" : "none";
+}, [measureMode, hasMeasure, isFollowingLocation]);
 
 
   /* ======================================
@@ -2224,14 +2230,20 @@ marker = new window.google.maps.Marker({
     map.setZoom(Math.max(current, targetZoom));
   };
 
-  const handleSelectPortalJob = (job) => {
-    setPortalSelectedJobId(job.id);
-    focusPortalJob(job);
+const handleSelectPortalJob = (job) => {
+  setPortalSelectedJobId(job.id);
+  focusPortalJob(job);
 
-    // if "All Jobs" is OFF, still show ONLY this job (desired behaviour)
-    // if it's ON, it will remain ON and this pin will go green.
-    // (no extra action needed)
-  };
+  // Open the summary popup automatically after the map recentres
+  setTimeout(() => {
+    const pt = portalPointsByIdRef.current.get(job.id);
+    const marker = getOrCreatePortalMarker(job.id);
+
+    if (pt && marker) {
+      openPortalInfo(job, pt, marker);
+    }
+  }, 100);
+};
 
   // ✅ Deep link from Jobs page (same-tab navigation)
   const deepLinkDoneRef = useRef(false);
@@ -2361,46 +2373,87 @@ marker = new window.google.maps.Marker({
     }
   }, [location.search, portalJobs]);
 
-  const handleMyLocation = () => {
-    if (!navigator.geolocation) {
-      alert("Geolocation is not supported by your device.");
-      return;
-    }
+const stopFollowingLocation = () => {
+  if (locationWatchIdRef.current !== null) {
+    navigator.geolocation.clearWatch(locationWatchIdRef.current);
+    locationWatchIdRef.current = null;
+  }
+  setIsFollowingLocation(false);
+};
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const map = mapRef.current;
-        if (!map) return;
 
-        const position = {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        };
-        map.setCenter(position);
-        map.setZoom(17);
 
-        if (!userLocationMarkerRef.current) {
-          userLocationMarkerRef.current = new window.google.maps.Marker({
-            position,
-            map,
-            title: "Your Location",
-            icon: {
-              path: window.google.maps.SymbolPath.CIRCLE,
-              fillColor: "#4285F4",
-              fillOpacity: 1,
-              strokeColor: "#ffffff",
-              strokeWeight: 2,
-              scale: 7,
-            },
-          });
-        } else {
-          userLocationMarkerRef.current.setPosition(position);
-          if (!userLocationMarkerRef.current.getMap()) userLocationMarkerRef.current.setMap(map);
+const handleMyLocation = () => {
+  if (!navigator.geolocation) {
+    alert("Geolocation is not supported by your device.");
+    return;
+  }
+
+  const map = mapRef.current;
+  if (!map) return;
+
+  // Toggle off if already following
+  if (locationWatchIdRef.current !== null) {
+    stopFollowingLocation();
+    return;
+  }
+
+  setIsFollowingLocation(true);
+
+  locationWatchIdRef.current = navigator.geolocation.watchPosition(
+    (pos) => {
+      const liveMap = mapRef.current;
+      if (!liveMap) return;
+
+      const position = {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+      };
+
+      liveMap.setCenter(position);
+      liveMap.setZoom(Math.max(liveMap.getZoom() || 17, 17));
+
+      if (!userLocationMarkerRef.current) {
+        userLocationMarkerRef.current = new window.google.maps.Marker({
+          position,
+          map: liveMap,
+          title: "Your Location",
+          icon: {
+            path: window.google.maps.SymbolPath.CIRCLE,
+            fillColor: "#4285F4",
+            fillOpacity: 1,
+            strokeColor: "#ffffff",
+            strokeWeight: 2,
+            scale: 7,
+          },
+        });
+      } else {
+        userLocationMarkerRef.current.setPosition(position);
+        if (!userLocationMarkerRef.current.getMap()) {
+          userLocationMarkerRef.current.setMap(liveMap);
         }
-      },
-      () => alert("Unable to get your location (needs HTTPS).")
-    );
-  };
+      }
+    },
+        (err) => {
+      stopFollowingLocation();
+
+      if (err?.code === 1) {
+        alert("Location permission was denied on this device/browser.");
+      } else if (err?.code === 2) {
+        alert("Your location is currently unavailable. Try again in a moment.");
+      } else if (err?.code === 3) {
+        alert("Location request timed out. Try again in an open area or with better signal.");
+      } else {
+        alert("Unable to track your location on this device.");
+      }
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 5000,
+      timeout: 20000,
+    }
+  );
+};
 
   // ---------------- Measurement (custom) ----------------
   const clearMeasureListeners = () => {
@@ -3290,9 +3343,27 @@ marker = new window.google.maps.Marker({
     []
   );
 
-  const leftPanelFontSize = useMemo(() => (isSmallScreen() ? 12 : 13), []);
+ const leftPanelFontSize = useMemo(() => (isSmallScreen() ? 12 : 13), []);
 
-  return (
+// Step 3: stop tracking when Maps unmounts / page closes
+useEffect(() => {
+  return () => {
+    if (locationWatchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(locationWatchIdRef.current);
+      locationWatchIdRef.current = null;
+    }
+  };
+}, []);
+
+// Stop tracking when app goes into background
+useEffect(() => {
+  if (!isAppVisible && locationWatchIdRef.current !== null) {
+    navigator.geolocation.clearWatch(locationWatchIdRef.current);
+    locationWatchIdRef.current = null;
+  }
+}, [isAppVisible]);
+
+return (
     <div className="maps-fullscreen">
       <div className="maps-topbar" style={{ height: TOP_BAR_HEIGHT }}>
         <div className="maps-title-group">
