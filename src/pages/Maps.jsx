@@ -22,7 +22,29 @@ const GPoint =
 
 
 function buildDirectionsUrl(lat, lng) {
-  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+  const isAndroid = /Android/i.test(ua);
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+
+  if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+    return "";
+  }
+
+  // Android: opens navigation directly in Google Maps app
+  if (isAndroid) {
+    return `google.navigation:q=${latNum},${lngNum}`;
+  }
+
+  // iPhone/iPad: opens Google Maps app if installed
+  if (isIOS) {
+    return `comgooglemaps://?daddr=${latNum},${lngNum}&directionsmode=driving`;
+  }
+
+  // Desktop / fallback
+  return `https://www.google.com/maps/dir/?api=1&destination=${latNum},${lngNum}`;
 }
 function buildSearchUrl(address) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
@@ -30,7 +52,29 @@ function buildSearchUrl(address) {
   )}`;
 }
 function buildLatLngSearchUrl(lat, lng) {
-  return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+  const isAndroid = /Android/i.test(ua);
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+
+  if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+    return "";
+  }
+
+  // Android: opens maps app at the coordinate
+  if (isAndroid) {
+    return `geo:${latNum},${lngNum}?q=${latNum},${lngNum}`;
+  }
+
+  // iPhone/iPad: opens Google Maps app if installed
+  if (isIOS) {
+    return `comgooglemaps://?q=${latNum},${lngNum}`;
+  }
+
+  // Desktop / fallback
+  return `https://www.google.com/maps/search/?api=1&query=${latNum},${lngNum}`;
 }
 
 /**
@@ -343,7 +387,7 @@ function buildPopupHtmlExample({ layerTag, name, props }) {
         <a href="${buildDirectionsUrl(
           props.lat ?? props.latitude ?? "",
           props.lng ?? props.longitude ?? ""
-        )}" target="_blank" rel="noreferrer"
+        )}" rel="noreferrer"
            style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:8px;
                   border:1px solid #111; color:#fff; background:#111; font-weight:700; font-size:12px;">
           🚗 Directions
@@ -583,6 +627,7 @@ function Maps() {
 
   const addressInputRef = useRef(null);
   const addressAutocompleteRef = useRef(null);
+  const jobNumberInputRef = useRef(null);
 
   const infoWindowRef = useRef(null);
   const hoverInfoWindowRef = useRef(null);
@@ -753,6 +798,7 @@ useEffect(() => {
     }
   });
   const [mobilePanelCollapsed, setMobilePanelCollapsed] = useState(false);
+  const [mobileKeyboardOpen, setMobileKeyboardOpen] = useState(false);
 
   useEffect(() => {
     const onResize = () => {
@@ -1113,7 +1159,7 @@ const mgaLine = mga
             📍 Go To
           </a>
           <a href="${buildDirectionsUrl(note.lat, note.lng)}"
-             target="_blank" rel="noreferrer"
+             rel="noreferrer"
              style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:10px;
                     border:2px solid #111; color:#fff; background:#111; font-weight:900; font-size:12px;">
             🚗 Directions
@@ -1550,14 +1596,21 @@ const notePayload = {
 
 
 // ✅ Suggestions: job_number only
-  const jobNumberSuggestions = useMemo(() => {
-    const q = String(jobNumberQuery || "").trim();
-    if (!q) return [];
-    return (portalJobs || [])
-      .filter((j) => String(j.job_number ?? "").includes(q))
-      .sort((a, b) => Number(b.job_number) - Number(a.job_number))
-      .slice(0, 12);
-  }, [jobNumberQuery, portalJobs]);
+ const jobNumberSuggestions = useMemo(() => {
+  const q = String(jobNumberQuery || "").trim();
+  if (!q) return [];
+
+  const results = [];
+
+  for (const j of portalJobs || []) {
+    if (String(j.job_number ?? "").includes(q)) {
+      results.push(j);
+      if (results.length >= 12) break;
+    }
+  }
+
+  return results;
+}, [jobNumberQuery, portalJobs]);
 
   // ✅ Reset keyboard highlight when query/suggestions change
   useEffect(() => {
@@ -1580,19 +1633,21 @@ const notePayload = {
     const startMapType =
       typeof persisted?.mapTypeId === "string" ? persisted.mapTypeId : "hybrid";
 
-    const map = new window.google.maps.Map(mapDivRef.current, {
-      center: startCenter,
-      zoom: startZoom,
-      mapTypeId: startMapType,
-      mapTypeControl: true,
-      fullscreenControl: true,
-      streetViewControl: true,
-      clickableIcons: false,
-      controlSize: mobile ? 24 : 28,
-      gestureHandling: "greedy",
-    });
+   const map = new window.google.maps.Map(mapDivRef.current, {
+  center: startCenter,
+  zoom: startZoom,
+  mapTypeId: startMapType,
+  mapTypeControl: true,
+  fullscreenControl: true,
+  streetViewControl: true,
+  clickableIcons: false,
+  controlSize: mobile ? 24 : 28,
+  gestureHandling: "greedy",
+  tilt: 0,
+});
 
     mapRef.current = map;
+    map.setTilt(0);
     infoWindowRef.current = new window.google.maps.InfoWindow();
     hoverInfoWindowRef.current = new window.google.maps.InfoWindow({
       disableAutoPan: true,
@@ -1691,26 +1746,29 @@ const notePayload = {
     }
 
     // Persist view/type on idle + tick
-    map.addListener("idle", () => {
-      if (idleDebounceRef.current) clearTimeout(idleDebounceRef.current);
+  map.addListener("idle", () => {
+  if (idleDebounceRef.current) clearTimeout(idleDebounceRef.current);
 
-      idleDebounceRef.current = setTimeout(() => {
-        if (!mapRef.current) return;
+  idleDebounceRef.current = setTimeout(() => {
+    if (!mapRef.current) return;
 
-        const b = mapRef.current.getBounds();
-        const z = mapRef.current.getZoom();
-        viewRef.current = { bounds: b, zoom: z };
+    // Keep map locked to birdseye/top-down view
+    mapRef.current.setTilt(0);
 
-        const c = mapRef.current.getCenter();
-        safeWriteState({
-          mapCenter: { lat: c.lat(), lng: c.lng() },
-          mapZoom: z,
-          mapTypeId: mapRef.current.getMapTypeId(),
-        });
+    const b = mapRef.current.getBounds();
+    const z = mapRef.current.getZoom();
+    viewRef.current = { bounds: b, zoom: z };
 
-        setViewTick((t) => t + 1);
-      }, REFRESH_DEBOUNCE_MS);
+    const c = mapRef.current.getCenter();
+    safeWriteState({
+      mapCenter: { lat: c.lat(), lng: c.lng() },
+      mapZoom: z,
+      mapTypeId: mapRef.current.getMapTypeId(),
     });
+
+    setViewTick((t) => t + 1);
+  }, REFRESH_DEBOUNCE_MS);
+});
   }, []);
   // Pause Google Maps interaction when app is backgrounded (mobile battery saver)
 useEffect(() => {
@@ -1856,12 +1914,14 @@ if (!isWA) {
         .not("mga_easting", "is", null)
         .not("mga_northing", "is", null)
         .order("job_number", { ascending: false })
-        .limit(5000);
+        .limit(99999);
 
       if (error) throw error;
 
       const arr = Array.isArray(data) ? data : [];
-      setPortalJobs(arr);
+      setPortalJobs(
+  arr.sort((a, b) => Number(b.job_number) - Number(a.job_number))
+);
 
       // Build fast lookup caches (no markers created here)
       const byId = new Map();
@@ -1930,7 +1990,7 @@ if (!isWA) {
                   border:1px solid #ccc; color:#111; background:#fff; font-weight:900; font-size:12px;">
           🔍 Maps
         </a>
-        <a href="${buildDirectionsUrl(position.lat, position.lng)}" target="_blank" rel="noreferrer"
+        <a href="${buildDirectionsUrl(position.lat, position.lng)}" rel="noreferrer"
            style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:8px;
                   border:1px solid #111; color:#fff; background:#111; font-weight:900; font-size:12px;">
           🚗 Directions
@@ -1987,7 +2047,7 @@ const safeLA =
                     border:1px solid #ccc; color:#111; background:#fff; font-weight:900; font-size:12px;">
             🔍 Maps
           </a>
-          <a href="${buildDirectionsUrl(pt.lat, pt.lng)}" target="_blank" rel="noreferrer"
+          <a href="${buildDirectionsUrl(pt.lat, pt.lng)}" rel="noreferrer"
              style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:8px;
                     border:1px solid #111; color:#fff; background:#111; font-weight:900; font-size:12px;">
             🚗 Directions
@@ -3308,7 +3368,13 @@ marker = new window.google.maps.Marker({
           </button>
 
 
-          <div className="panel-content" style={{ fontSize: leftPanelFontSize }}>
+          <div
+  className="panel-content"
+  style={{
+    fontSize: leftPanelFontSize,
+    paddingBottom: isMobile && mobileKeyboardOpen ? 260 : undefined,
+  }}
+>
             <div className="maps-tabs">
               {renderTabButton("layers", "Layers")}
               {renderTabButton("jobLayers", "Job Layers")}
@@ -3331,15 +3397,53 @@ marker = new window.google.maps.Marker({
                   }}
                 >
                   <span>Search</span>
-                  <button
-                    type="button"
-                    className="btn-pill"
-                    style={{ padding: "6px 8px", fontSize: 11, flexShrink: 0 }}
-                    onClick={() => fetchPortalJobs()}
-                    title="Refresh jobs from Supabase"
-                  >
-                    Refresh
-                  </button>
+                 <button
+  type="button"
+  className="btn-pill"
+  style={{ padding: "6px 8px", fontSize: 11, flexShrink: 0 }}
+  onClick={() => {
+    fetchPortalJobs();
+
+    // Clear address search box
+    if (addressInputRef.current) {
+      addressInputRef.current.value = "";
+    }
+
+    // Clear selected address card/state
+    setSelectedAddress(null);
+
+    // Remove address marker
+    if (addressMarkerRef.current) {
+      addressMarkerRef.current.setMap(null);
+    }
+
+    // Close address popup
+    try {
+      addressInfoWindowRef.current?.close();
+    } catch {
+      // ignore
+    }
+
+    // Clear job number search box
+    setJobNumberQuery("");
+    setJobPicked(false);
+    setJobNumberActiveIndex(-1);
+
+    // Clear selected portal job
+    setPortalSelectedJobId(null);
+
+    // Close job popup/hover
+    try {
+      infoWindowRef.current?.close();
+      hoverInfoWindowRef.current?.close();
+    } catch {
+      // ignore
+    }
+  }}
+  title="Refresh jobs from Supabase"
+>
+  Refresh
+</button>
                 </div>
 
                 <div
@@ -3379,8 +3483,9 @@ marker = new window.google.maps.Marker({
                   </div>
 
                   <input
-                    type="text"
-                    value={jobNumberQuery}
+  ref={jobNumberInputRef}
+  type="text"
+  value={jobNumberQuery}
                     onChange={(e) => {
                       setJobNumberQuery(e.target.value);
                       setJobPicked(false);
@@ -3423,8 +3528,31 @@ marker = new window.google.maps.Marker({
                       }
                     }}
                     onFocus={() => {
-                      if (String(jobNumberQuery || "").trim()) setJobPicked(false);
-                    }}
+  if (String(jobNumberQuery || "").trim()) setJobPicked(false);
+
+  if (isMobile) {
+    setMobilePanelCollapsed(false);
+    setMobileKeyboardOpen(true);
+  }
+
+  setTimeout(() => {
+    try {
+      jobNumberInputRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    } catch {
+      // ignore
+    }
+  }, 250);
+}}
+onBlur={() => {
+  if (isMobile) {
+    setTimeout(() => {
+      setMobileKeyboardOpen(false);
+    }, 150);
+  }
+}}
                   />
 
                   {/* Dropdown hides after selection, but job number stays */}
