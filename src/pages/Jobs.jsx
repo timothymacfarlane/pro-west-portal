@@ -284,7 +284,7 @@ function ClientSuggestionDropdown({ items, onPick, activeIdx, setActiveIdx }) {
   );
 }
 
-function AddClientModal({ open, onClose, onCreated }) {
+function ClientFormModal({ open, mode = "add", initialClient = null, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -297,15 +297,17 @@ function AddClientModal({ open, onClose, onCreated }) {
 
   useEffect(() => {
     if (!open) return;
+
     setSaving(false);
     setError("");
-    setFirstName("");
-    setSurname("");
-    setCompany("");
-    setPhone("");
-    setMobile("");
-    setEmail("");
-  }, [open]);
+
+    setFirstName(initialClient?.first_name || "");
+    setSurname(initialClient?.surname || "");
+    setCompany(initialClient?.company || "");
+    setPhone(initialClient?.phone || "");
+    setMobile(initialClient?.mobile || "");
+    setEmail(initialClient?.email || "");
+  }, [open, initialClient, mode]);
 
   if (!open) return null;
 
@@ -342,32 +344,78 @@ function AddClientModal({ open, onClose, onCreated }) {
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <div>
-            <h3 className="card-title" style={{ marginBottom: 4 }}>Add client</h3>
-            <p className="card-subtitle" style={{ margin: 0 }}>Saves to Contacts register</p>
+            <h3 className="card-title" style={{ marginBottom: 4 }}>
+              {mode === "edit" ? "Edit client" : "Add client"}
+            </h3>
+            <p className="card-subtitle" style={{ margin: 0 }}>
+              Saves to Contacts register
+            </p>
           </div>
-          <button className="btn-pill" type="button" onClick={onClose}>Close</button>
+          <button className="btn-pill" type="button" onClick={onClose}>
+            Close
+          </button>
         </div>
 
         {error && (
-          <div style={{ marginTop: 10, padding: "0.7rem 0.8rem", borderRadius: 12, background: "rgba(255,0,0,0.08)", fontSize: "0.9rem" }}>
+          <div
+            style={{
+              marginTop: 10,
+              padding: "0.7rem 0.8rem",
+              borderRadius: 12,
+              background: "rgba(255,0,0,0.08)",
+              fontSize: "0.9rem",
+            }}
+          >
             {error}
           </div>
         )}
 
         <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <input className="maps-search-input" placeholder="First name" value={first_name} onChange={(e) => setFirstName(e.target.value)} />
-            <input className="maps-search-input" placeholder="Surname" value={surname} onChange={(e) => setSurname(e.target.value)} />
+            <input
+              className="maps-search-input"
+              placeholder="First name"
+              value={first_name}
+              onChange={(e) => setFirstName(e.target.value)}
+            />
+            <input
+              className="maps-search-input"
+              placeholder="Surname"
+              value={surname}
+              onChange={(e) => setSurname(e.target.value)}
+            />
           </div>
 
-          <input className="maps-search-input" placeholder="Company" value={company} onChange={(e) => setCompany(e.target.value)} />
-          <input className="maps-search-input" placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
-          <input className="maps-search-input" placeholder="Mobile" value={mobile} onChange={(e) => setMobile(e.target.value)} />
-          <input className="maps-search-input" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input
+            className="maps-search-input"
+            placeholder="Company"
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+          />
+          <input
+            className="maps-search-input"
+            placeholder="Phone"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+          />
+          <input
+            className="maps-search-input"
+            placeholder="Mobile"
+            value={mobile}
+            onChange={(e) => setMobile(e.target.value)}
+          />
+          <input
+            className="maps-search-input"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
-          <button className="btn-pill" type="button" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn-pill" type="button" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
 
           <button
             className="btn-pill primary"
@@ -376,6 +424,7 @@ function AddClientModal({ open, onClose, onCreated }) {
             onClick={async () => {
               setSaving(true);
               setError("");
+
               try {
                 const payload = {
                   first_name: normalizeSpace(first_name),
@@ -388,15 +437,32 @@ function AddClientModal({ open, onClose, onCreated }) {
                   show_in_contacts: true,
                 };
 
-                const { data, error: insErr } = await supabase
-                  .from("clients")
-                  .insert(payload)
-                  .select("id, first_name, surname, company, phone, mobile, email")
-                  .single();
+                let saved = null;
 
-                if (insErr) throw insErr;
+                if (mode === "edit") {
+                  if (!initialClient?.id) throw new Error("No client selected.");
 
-                onCreated?.(data);
+                  const { data, error: updErr } = await supabase
+                    .from("clients")
+                    .update(payload)
+                    .eq("id", initialClient.id)
+                    .select("id, first_name, surname, company, phone, mobile, email")
+                    .single();
+
+                  if (updErr) throw updErr;
+                  saved = data;
+                } else {
+                  const { data, error: insErr } = await supabase
+                    .from("clients")
+                    .insert(payload)
+                    .select("id, first_name, surname, company, phone, mobile, email")
+                    .single();
+
+                  if (insErr) throw insErr;
+                  saved = data;
+                }
+
+                onSaved?.(saved);
                 onClose();
               } catch (e) {
                 setError(e?.message || "Could not save client.");
@@ -405,7 +471,7 @@ function AddClientModal({ open, onClose, onCreated }) {
               }
             }}
           >
-            {saving ? "Saving…" : "Save client"}
+            {saving ? "Saving…" : mode === "edit" ? "Save changes" : "Save client"}
           </button>
         </div>
       </div>
@@ -418,6 +484,54 @@ function JobModal({ open, mode, isAdmin, onClose, onSaved, initial, staffOptions
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const MAX_STICKER_NOTES = 143;
+  const STICKER_CHARS_PER_LINE = 35;
+  const STICKER_MAX_LINES = 4;
+  function wrapStickerInput(text) {
+  const inputLines = (text || "").split("\n");
+  const outputLines = [];
+
+  for (const inputLine of inputLines) {
+    if (outputLines.length >= STICKER_MAX_LINES) break;
+
+    if (inputLine === "") {
+      outputLines.push("");
+      continue;
+    }
+
+    const words = inputLine.split(" ");
+    let currentLine = "";
+
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + " " + word : word;
+
+      if (testLine.length <= STICKER_CHARS_PER_LINE) {
+        currentLine = testLine;
+      } else {
+        if (currentLine) {
+          outputLines.push(currentLine);
+          if (outputLines.length >= STICKER_MAX_LINES) break;
+        }
+
+        if (word.length > STICKER_CHARS_PER_LINE) {
+          outputLines.push(word.slice(0, STICKER_CHARS_PER_LINE));
+          if (outputLines.length >= STICKER_MAX_LINES) break;
+          currentLine = word.slice(STICKER_CHARS_PER_LINE);
+        } else {
+          currentLine = word;
+        }
+      }
+    }
+
+    if (outputLines.length >= STICKER_MAX_LINES) break;
+
+    if (currentLine !== "") {
+      outputLines.push(currentLine);
+    }
+  }
+
+  return outputLines.slice(0, STICKER_MAX_LINES);
+}
 
 function clientSearchLabelFromJob(i) {
   const live = i?.client || null;
@@ -521,7 +635,7 @@ useEffect(() => {
 
 
   setError("");
-}, [open, mode, initial?.id]);
+}, [open, mode, initial]);
 
   const [jobTypeLegacy, setJobTypeLegacy] = useState(initial?.job_type_legacy ?? "");
   const [jobDateLegacy, setJobDateLegacy] = useState(initial?.job_date_legacy ?? "");
@@ -546,6 +660,8 @@ const [clientId, setClientId] = useState(initial?.client_id ?? null);
 
 // ✅ modal open state for adding a client
 const [addClientOpen, setAddClientOpen] = useState(false);
+const [editClientOpen, setEditClientOpen] = useState(false);
+const [deletingClient, setDeletingClient] = useState(false);
 
   // Keep legacy job columns (still used in your summaries / older data)
   const [clientName, setClientName] = useState(initial?.client_name ?? "");
@@ -824,6 +940,84 @@ useEffect(() => {
   setClientSearch("");
   setClientSuggestions([]);
 }
+
+const selectedClientForEdit = clientId
+  ? {
+      id: clientId,
+      first_name: clientFirstName,
+      surname: clientSurname,
+      company: clientCompany,
+      phone: clientPhone,
+      mobile: clientMobile,
+      email: clientEmail,
+    }
+  : null;
+
+async function handleClientSaved(savedClient) {
+  if (!savedClient) return;
+
+  pickClient(savedClient);
+
+  if (initial?.id) {
+    try {
+      const fresh = await fetchJobById(initial.id);
+      if (fresh) {
+        onSaved?.(fresh);
+      }
+    } catch (e) {
+      console.warn("Could not refresh job after client save:", e);
+    }
+  }
+}
+
+async function handleDeleteClient() {
+  if (!clientId) return;
+
+  const ok = window.confirm("Delete this client contact?");
+  if (!ok) return;
+
+  setDeletingClient(true);
+  setError("");
+
+  try {
+    const { error: delErr } = await supabase
+      .from("clients")
+      .delete()
+      .eq("id", clientId);
+
+    if (delErr) throw delErr;
+
+    clearClient();
+
+    if (initial?.id) {
+      const clearedPayload = {
+        client_id: null,
+        client_first_name: null,
+        client_surname: null,
+        client_company: null,
+        client_phone: null,
+        client_mobile: null,
+        client_email: null,
+        client_name: null,
+      };
+
+      const { error: upErr } = await supabase
+        .from("jobs")
+        .update(clearedPayload)
+        .eq("id", initial.id);
+
+      if (upErr) throw upErr;
+
+      const fresh = await fetchJobById(initial.id);
+      if (fresh) onSaved?.(fresh);
+    }
+  } catch (e) {
+    setError(e?.message || "Could not delete client.");
+  } finally {
+    setDeletingClient(false);
+  }
+}
+
   // -----------------------------
   // Sticker printing (admin only)
   // Uses hidden iframe (reliable in Chrome + mobile)
@@ -908,19 +1102,20 @@ function buildStickerHtml(jobForPrint, stickerPosition = "top-left") {
 
   const live = getLiveClient(j);
 
-const clientText = ((live?.company || j.client_company || "")).toString();
+  const clientText = ((live?.company || j.client_company || "")).toString();
 
-const contactText =
-  (norm(`${live?.first_name || j.client_first_name || ""} ${live?.surname || j.client_surname || ""}`).trim() ||
-    (j.client_name || "")).toString();
+  const contactText =
+    (
+      norm(
+        `${live?.first_name || j.client_first_name || ""} ${live?.surname || j.client_surname || ""}`
+      ).trim() || (j.client_name || "")
+    ).toString();
 
-const telephoneText = ((live?.phone || j.client_phone || "")).toString();
-const mobileText = ((live?.mobile || j.client_mobile || "")).toString();
+  const telephoneText = ((live?.phone || j.client_phone || "")).toString();
+  const mobileText = ((live?.mobile || j.client_mobile || "")).toString();
 
- // Sticker SITE ADDRESS: Lot + street only (no suburb/state/postcode)
-const siteAddressText = deriveStickerSiteAddress(j);
+  const siteAddressText = deriveStickerSiteAddress(j);
 
-  // ✅ Suburb (sticker): prefer stored suburb, else derive from Google full_address
   let suburbText = (j.suburb || "").toString().trim();
   if (!suburbText) {
     suburbText = parseSuburbFromFullAddress(j.full_address);
@@ -929,7 +1124,64 @@ const siteAddressText = deriveStickerSiteAddress(j);
   const planText = (j.plan_number || "").toString();
   const ctText = (j.ct || "").toString();
   const authorityText = (j.local_authority || "").toString();
-  const commentsText = (j.notes || "").toString();
+  const commentsText = formatStickerNotes((j.notes || "").toString());
+
+function formatStickerNotes(text) {
+  const maxChars = 36;
+  const maxLines = 4;
+
+  const words = (text || "")
+    .toString()
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const lines = [];
+  let currentLine = "";
+
+  for (const word of words) {
+    const testLine = currentLine ? currentLine + " " + word : word;
+
+    if (testLine.length <= maxChars) {
+      currentLine = testLine;
+    } else {
+      if (currentLine) {
+        lines.push(currentLine);
+      }
+
+      // if one single word is longer than maxChars, hard-cut it
+      if (word.length > maxChars) {
+        lines.push(word.slice(0, maxChars));
+        currentLine = word.slice(maxChars);
+      } else {
+        currentLine = word;
+      }
+    }
+
+    if (lines.length >= maxLines) break;
+  }
+
+  if (currentLine && lines.length < maxLines) {
+    lines.push(currentLine);
+  }
+
+  return lines.slice(0, maxLines).join("<br>");
+}
+  const stickerRows = `
+    <div class="row"><div class="label">JOB NUMBER:</div><div class="value">${escapeHtml(jobNumberText)}</div></div>
+    <div class="row"><div class="label">JOB TYPE:</div><div class="value">${escapeHtml(jobTypeText)}</div></div>
+    <div class="row"><div class="label">DATE:</div><div class="value">${escapeHtml(dateText)}</div></div>
+    <div class="row"><div class="label">CLIENT:</div><div class="value">${escapeHtml(clientText)}</div></div>
+    <div class="row"><div class="label">CONTACT:</div><div class="value">${escapeHtml(contactText)}</div></div>
+    <div class="row"><div class="label">TELEPHONE:</div><div class="value">${escapeHtml(telephoneText)}</div></div>
+    <div class="row"><div class="label">MOBILE:</div><div class="value">${escapeHtml(mobileText)}</div></div>
+    <div class="row"><div class="label">SITE ADDRESS:</div><div class="value address">${escapeHtml(siteAddressText)}</div></div>
+    <div class="row"><div class="label">SUBURB:</div><div class="value">${escapeHtml(suburbText)}</div></div>
+    <div class="row"><div class="label">PLAN:</div><div class="value">${escapeHtml(planText)}</div></div>
+    <div class="row"><div class="label">C/T:</div><div class="value">${escapeHtml(ctText)}</div></div>
+    <div class="row"><div class="label">AUTHORITY:</div><div class="value">${escapeHtml(authorityText)}</div></div>
+    <div class="row"><div class="label">JOB COMMENTS:</div><div class="value comments sticker-notes">${commentsText}</div></div>
+  `;
 
   return `
 <!DOCTYPE html>
@@ -943,15 +1195,16 @@ const siteAddressText = deriveStickerSiteAddress(j);
       html, body {
         width: 297mm;
         height: 210mm;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
       }
 
       body {
-        margin: 0;
         font-family: "Times New Roman", Times, serif;
         color: #000;
       }
 
-      /* Full A4 sheet split into 4 quarters */
       .page {
         width: 297mm;
         height: 210mm;
@@ -959,12 +1212,14 @@ const siteAddressText = deriveStickerSiteAddress(j);
         grid-template-columns: 148.5mm 148.5mm;
         grid-template-rows: 105mm 105mm;
         box-sizing: border-box;
+        overflow: hidden;
       }
 
       .cell {
         box-sizing: border-box;
-        padding-top: 10mm;   /* your measured top offset within each quarter */
-        padding-left: 9mm;   /* your measured left offset within each quarter */
+        padding-top: 10mm;
+        padding-left: 9mm;
+        overflow: hidden;
       }
 
       .cell.hidden {
@@ -990,31 +1245,41 @@ const siteAddressText = deriveStickerSiteAddress(j);
 
       .label {
         width: 50mm;
-        font-size: 12pt;
+        font-size: 11pt;
         font-weight: normal;
         white-space: nowrap;
+        flex-shrink: 0;
       }
 
       .value {
         flex: 1;
-        font-size: 14pt;
+        min-width: 0;
+        max-width: 100%;
+        font-size: 11pt;
         font-weight: bold;
-        line-height: 1.1;
+        line-height: 1.0;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
 
       .value.address {
-        font-size: 13pt;
-        line-height: 1.1;
+        font-size: 12pt;
+        line-height: 1.0;
       }
 
-      .value.comments {
-        font-size: 10pt;
-        line-height: 1.05;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-      }
+ .value.comments {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 9pt;
+  line-height: 1.0;
+  max-height: 10.5mm;   /* allows more lines but still stays within sticker */
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  display: block;
+}
     </style>
   </head>
 
@@ -1022,77 +1287,54 @@ const siteAddressText = deriveStickerSiteAddress(j);
     <div class="page">
       <div class="cell ${stickerPosition === "top-left" ? "" : "hidden"}">
         <div class="label-box">
-        <div class="row"><div class="label">JOB NUMBER:</div><div class="value">${escapeHtml(jobNumberText)}</div></div>
-        <div class="row"><div class="label">JOB TYPE:</div><div class="value">${escapeHtml(jobTypeText)}</div></div>
-        <div class="row"><div class="label">DATE:</div><div class="value">${escapeHtml(dateText)}</div></div>
-        <div class="row"><div class="label">CLIENT:</div><div class="value">${escapeHtml(clientText)}</div></div>
-        <div class="row"><div class="label">CONTACT:</div><div class="value">${escapeHtml(contactText)}</div></div>
-        <div class="row"><div class="label">TELEPHONE:</div><div class="value">${escapeHtml(telephoneText)}</div></div>
-        <div class="row"><div class="label">MOBILE:</div><div class="value">${escapeHtml(mobileText)}</div></div>
-        <div class="row"><div class="label">SITE ADDRESS:</div><div class="value address">${escapeHtml(siteAddressText)}</div></div>
-        <div class="row"><div class="label">SUBURB:</div><div class="value">${escapeHtml(suburbText)}</div></div>
-        <div class="row"><div class="label">PLAN:</div><div class="value">${escapeHtml(planText)}</div></div>
-        <div class="row"><div class="label">C/T:</div><div class="value">${escapeHtml(ctText)}</div></div>
-        <div class="row"><div class="label">AUTHORITY:</div><div class="value">${escapeHtml(authorityText)}</div></div>
-        <div class="row"><div class="label">JOB COMMENTS:</div><div class="value comments">${escapeHtml(commentsText)}</div></div>
-            </div>
+          ${stickerRows}
+        </div>
       </div>
 
       <div class="cell ${stickerPosition === "top-right" ? "" : "hidden"}">
         <div class="label-box">
-          <div class="row"><div class="label">JOB NUMBER:</div><div class="value">${escapeHtml(jobNumberText)}</div></div>
-          <div class="row"><div class="label">JOB TYPE:</div><div class="value">${escapeHtml(jobTypeText)}</div></div>
-          <div class="row"><div class="label">DATE:</div><div class="value">${escapeHtml(dateText)}</div></div>
-          <div class="row"><div class="label">CLIENT:</div><div class="value">${escapeHtml(clientText)}</div></div>
-          <div class="row"><div class="label">CONTACT:</div><div class="value">${escapeHtml(contactText)}</div></div>
-          <div class="row"><div class="label">TELEPHONE:</div><div class="value">${escapeHtml(telephoneText)}</div></div>
-          <div class="row"><div class="label">MOBILE:</div><div class="value">${escapeHtml(mobileText)}</div></div>
-          <div class="row"><div class="label">SITE ADDRESS:</div><div class="value address">${escapeHtml(siteAddressText)}</div></div>
-          <div class="row"><div class="label">SUBURB:</div><div class="value">${escapeHtml(suburbText)}</div></div>
-          <div class="row"><div class="label">PLAN:</div><div class="value">${escapeHtml(planText)}</div></div>
-          <div class="row"><div class="label">C/T:</div><div class="value">${escapeHtml(ctText)}</div></div>
-          <div class="row"><div class="label">AUTHORITY:</div><div class="value">${escapeHtml(authorityText)}</div></div>
-          <div class="row"><div class="label">JOB COMMENTS:</div><div class="value comments">${escapeHtml(commentsText)}</div></div>
+          ${stickerRows}
         </div>
       </div>
 
       <div class="cell ${stickerPosition === "bottom-left" ? "" : "hidden"}">
         <div class="label-box">
-          <div class="row"><div class="label">JOB NUMBER:</div><div class="value">${escapeHtml(jobNumberText)}</div></div>
-          <div class="row"><div class="label">JOB TYPE:</div><div class="value">${escapeHtml(jobTypeText)}</div></div>
-          <div class="row"><div class="label">DATE:</div><div class="value">${escapeHtml(dateText)}</div></div>
-          <div class="row"><div class="label">CLIENT:</div><div class="value">${escapeHtml(clientText)}</div></div>
-          <div class="row"><div class="label">CONTACT:</div><div class="value">${escapeHtml(contactText)}</div></div>
-          <div class="row"><div class="label">TELEPHONE:</div><div class="value">${escapeHtml(telephoneText)}</div></div>
-          <div class="row"><div class="label">MOBILE:</div><div class="value">${escapeHtml(mobileText)}</div></div>
-          <div class="row"><div class="label">SITE ADDRESS:</div><div class="value address">${escapeHtml(siteAddressText)}</div></div>
-          <div class="row"><div class="label">SUBURB:</div><div class="value">${escapeHtml(suburbText)}</div></div>
-          <div class="row"><div class="label">PLAN:</div><div class="value">${escapeHtml(planText)}</div></div>
-          <div class="row"><div class="label">C/T:</div><div class="value">${escapeHtml(ctText)}</div></div>
-          <div class="row"><div class="label">AUTHORITY:</div><div class="value">${escapeHtml(authorityText)}</div></div>
-          <div class="row"><div class="label">JOB COMMENTS:</div><div class="value comments">${escapeHtml(commentsText)}</div></div>
+          ${stickerRows}
         </div>
       </div>
 
       <div class="cell ${stickerPosition === "bottom-right" ? "" : "hidden"}">
         <div class="label-box">
-          <div class="row"><div class="label">JOB NUMBER:</div><div class="value">${escapeHtml(jobNumberText)}</div></div>
-          <div class="row"><div class="label">JOB TYPE:</div><div class="value">${escapeHtml(jobTypeText)}</div></div>
-          <div class="row"><div class="label">DATE:</div><div class="value">${escapeHtml(dateText)}</div></div>
-          <div class="row"><div class="label">CLIENT:</div><div class="value">${escapeHtml(clientText)}</div></div>
-          <div class="row"><div class="label">CONTACT:</div><div class="value">${escapeHtml(contactText)}</div></div>
-          <div class="row"><div class="label">TELEPHONE:</div><div class="value">${escapeHtml(telephoneText)}</div></div>
-          <div class="row"><div class="label">MOBILE:</div><div class="value">${escapeHtml(mobileText)}</div></div>
-          <div class="row"><div class="label">SITE ADDRESS:</div><div class="value address">${escapeHtml(siteAddressText)}</div></div>
-          <div class="row"><div class="label">SUBURB:</div><div class="value">${escapeHtml(suburbText)}</div></div>
-          <div class="row"><div class="label">PLAN:</div><div class="value">${escapeHtml(planText)}</div></div>
-          <div class="row"><div class="label">C/T:</div><div class="value">${escapeHtml(ctText)}</div></div>
-          <div class="row"><div class="label">AUTHORITY:</div><div class="value">${escapeHtml(authorityText)}</div></div>
-          <div class="row"><div class="label">JOB COMMENTS:</div><div class="value comments">${escapeHtml(commentsText)}</div></div>
+          ${stickerRows}
         </div>
       </div>
     </div>
-    
+
+<script>
+ function fitNotes() {
+  const notesBlocks = document.querySelectorAll(".sticker-notes");
+
+  notesBlocks.forEach((notes) => {
+    const textLength = (notes.innerText || "").length;
+
+    if (textLength > 95) {
+      notes.style.fontSize = "8.5pt";
+      notes.style.lineHeight = "1.0";
+      notes.style.maxHeight = "12mm";
+    } else if (textLength > 70) {
+      notes.style.fontSize = "9pt";
+      notes.style.lineHeight = "1.05";
+      notes.style.maxHeight = "12mm";
+    } else {
+      notes.style.fontSize = "9.5pt";
+      notes.style.lineHeight = "1.08";
+      notes.style.maxHeight = "12mm";
+    }
+  });
+}
+
+window.onload = fitNotes;
+</script>
   </body>
 </html>
 `;
@@ -1357,11 +1599,23 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
         padding: 16,
       }}
     >
-<AddClientModal
+<ClientFormModal
   open={addClientOpen}
+  mode="add"
+  initialClient={null}
   onClose={() => setAddClientOpen(false)}
-  onCreated={(newClient) => {
-    pickClient(newClient); // auto-select into the job (sets snapshot + clientId)
+  onSaved={(newClient) => {
+    handleClientSaved(newClient);
+  }}
+/>
+
+<ClientFormModal
+  open={editClientOpen}
+  mode="edit"
+  initialClient={selectedClientForEdit}
+  onClose={() => setEditClientOpen(false)}
+  onSaved={(updatedClient) => {
+    handleClientSaved(updatedClient);
   }}
 />
 
@@ -1411,13 +1665,33 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
         <div className="jobmodal-grid" style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {/* Client */}
           <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
   <div style={{ fontWeight: 900, fontSize: 13 }}>Client</div>
 
   {canEdit && (
-    <button className="btn-pill" type="button" onClick={() => setAddClientOpen(true)}>
-      + Add client
-    </button>
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <button className="btn-pill" type="button" onClick={() => setAddClientOpen(true)}>
+        + Add client
+      </button>
+
+      <button
+        className="btn-pill"
+        type="button"
+        onClick={() => setEditClientOpen(true)}
+        disabled={!clientId}
+      >
+        Edit client
+      </button>
+
+      <button
+        className="btn-pill"
+        type="button"
+        onClick={handleDeleteClient}
+        disabled={!clientId || deletingClient}
+      >
+        {deletingClient ? "Deleting…" : "Delete client"}
+      </button>
+    </div>
   )}
 </div>
 
@@ -1636,17 +1910,65 @@ onChange={(e) => setFullAddress(e.target.value)}
           </div>
 
           {/* Notes */}
-          <div style={{ gridColumn: "1 / -1", padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
-            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Notes</div>
-            <textarea
-              className="input"
-              style={{ minHeight: 110, resize: "vertical", width: "100%" }}
-              placeholder="Notes…"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              disabled={!canEdit}
-            />
-          </div>
+<div
+  style={{
+    gridColumn: "1 / -1",
+    padding: "10px 12px",
+    borderRadius: 14,
+    background: "rgba(255,255,255,0.04)",
+  }}
+>
+  <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Job Folder Sticker Notes</div>
+
+  <div style={{ width: "139mm", maxWidth: "100%" }}>
+<textarea
+  className="input"
+   style={{
+  width: "75mm",
+  height: "16mm",
+  resize: "none",
+  fontFamily: "monospace",
+  fontSize: "9pt",
+  lineHeight: "1.05",
+  padding: "2px 4px",
+  borderWidth: "1px",
+  boxSizing: "border-box",
+  maxWidth: "100%"
+}}
+  placeholder="Notes for job folder sticker…"
+  value={notes}
+  maxLength={MAX_STICKER_NOTES}
+onChange={(e) => {
+  const nextText = e.target.value;
+  const wrapped = wrapStickerInput(nextText);
+  const normalized = wrapped.join("\n");
+
+  const fitsExactly =
+    nextText === normalized ||
+    nextText.length <= normalized.length;
+
+  if (!fitsExactly && nextText.length > notes.length) {
+    return;
+  }
+
+  setNotes(normalized);
+}}
+  disabled={!canEdit}
+/>
+
+    <div
+      style={{
+        marginTop: 6,
+        fontSize: 12,
+        opacity: 0.75,
+        textAlign: "right",
+        color: notes.length > MAX_STICKER_NOTES * 0.9 ? "#ffb347" : "inherit",
+      }}
+    >
+      {notes.length}/{MAX_STICKER_NOTES} characters
+    </div>
+  </div>
+</div>
         </div>
 
         <style>{`
