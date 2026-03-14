@@ -141,7 +141,7 @@ function Profile() {
       subtitle="Manage your Pro West Portal account"
     >
       {/* Account info card */}
-      <div className="card">
+      <div className="card" data-profile-card>
         <h3 className="card-title">Account</h3>
         <p className="card-subtitle">
           These details are linked to your Pro West Surveying login.
@@ -171,7 +171,7 @@ function Profile() {
       </div>
 
         {/* Profile card */}
-      <div className="card">
+      <div className="card" data-profile-card>
         <h3 className="card-title">Profile</h3>
         <p className="card-subtitle">
           Your worker details are managed in the Pro West Portal.
@@ -195,7 +195,7 @@ function Profile() {
 
 
       {/* Change password card */}
-      <div className="card">
+      <div className="card" data-profile-card>
         <h3 className="card-title">Security</h3>
         <p className="card-subtitle">
           Change your password for the Pro West Portal.

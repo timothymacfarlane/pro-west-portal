@@ -108,7 +108,7 @@ function App() {
             </div>
             <div className="header-text">
               <h1>Pro West Portal</h1>
-              <p>Pro West Surveying - Licensed and Engineering Surveying Consultants</p>
+              <p>Licensed and Engineering Surveying</p>
             </div>
           </div>
 
