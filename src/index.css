@@ -25,6 +25,12 @@ body,
   padding: 0;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 /* Body just holds the React app, no centering */
 
 body {
@@ -90,4 +96,44 @@ body {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* ===============================
+   APP VIEWPORT LOCK (APP-LIKE FEEL)
+   =============================== */
+
+html,
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+#root {
+  height: 100dvh;
+}
+
+/* =========================================
+   MOBILE TOUCH POLISH
+   ========================================= */
+
+/* Better touch behaviour */
+html,
+body {
+  touch-action: manipulation;
+}
+
+/* Remove blue/grey tap flash on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Prevent accidental text selection on buttons/controls */
+button,
+.btn-pill,
+.nav-link,
+.logout-nav-button,
+.sidebar-toggle,
+.mobile-hamburger {
+  user-select: none;
+  -webkit-user-select: none;
 }
