@@ -2211,6 +2211,8 @@ function Jobs() {
 
   const [staffOptions, setStaffOptions] = useState([]);
   const [totalJobs, setTotalJobs] = useState(0);
+  const [jobCategoryFilter, setJobCategoryFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("All");
 
     // -----------------------------
   // Job register table (paged)
@@ -2348,7 +2350,7 @@ async function fetchJobByNumber(jobNumber) {
   if (jobErr) throw jobErr;
   return jobData || null;
 }
-  async function fetchJobsPage({ page, sortBy, ascending, jobNo, globalQ }) {
+  async function fetchJobsPage({ page, sortBy, ascending, jobNo, globalQ, jobCategory, status }) {
     setListError("");
 
     const from = page * PAGE_SIZE;
@@ -2390,10 +2392,19 @@ let q = supabase
   );
     const jobNoTrim = (jobNo || "").trim();
     const globalTrim = (globalQ || "").trim().replace(/^#/, "");
+    const jobCategoryTrim = (jobCategory || "All").trim();
+    const statusTrim = (status || "All").trim();
 
     if (jobNoTrim && /^\d+$/.test(jobNoTrim)) {
       q = q.like("job_number_text", `${jobNoTrim}%`);
     }
+    if (jobCategoryTrim !== "All") {
+  q = q.eq("job_category", jobCategoryTrim);
+}
+
+if (statusTrim !== "All") {
+  q = q.eq("status", statusTrim);
+}
 
     if (globalTrim.length >= 3) {
       const isNumeric = /^\d+$/.test(globalTrim);
@@ -2445,13 +2456,15 @@ q = q.range(from, to);
   const refreshRegister = async () => {
     setListLoading(true);
     try {
-      await fetchJobsPage({
-        page: pageIndex,
-        sortBy: sortKey,
-        ascending: sortAsc,
-        jobNo: jobNoQuery,
-        globalQ: globalQuery,
-      });
+    await fetchJobsPage({
+  page: pageIndex,
+  sortBy: sortKey,
+  ascending: sortAsc,
+  jobNo: jobNoQuery,
+  globalQ: globalQuery,
+  jobCategory: jobCategoryFilter,
+  status: statusFilter,
+});
     } catch (e) {
       setListError(e?.message || "Failed to refresh job register.");
     } finally {
@@ -2753,13 +2766,15 @@ if (!isAppVisible) return;
     listDebounceRef.current = setTimeout(async () => {
       setListLoading(true);
       try {
-        await fetchJobsPage({
-          page: pageIndex,
-          sortBy: sortKey,
-          ascending: sortAsc,
-          jobNo: jobNoQuery,
-          globalQ: globalQuery,
-        });
+     await fetchJobsPage({
+  page: pageIndex,
+  sortBy: sortKey,
+  ascending: sortAsc,
+  jobNo: jobNoQuery,
+  globalQ: globalQuery,
+  jobCategory: jobCategoryFilter,
+  status: statusFilter,
+});
       } catch (e) {
         setListError(e?.message || "Failed to load job register page.");
         setListRows([]);
@@ -2771,11 +2786,11 @@ if (!isAppVisible) return;
 
     return () => listDebounceRef.current && clearTimeout(listDebounceRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageIndex, sortKey, sortAsc, jobNoQuery, globalQuery, isAppVisible]);
-  useEffect(() => {
-    setPageIndex(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobNoQuery, globalQuery, sortKey, sortAsc]);
+ }, [pageIndex, sortKey, sortAsc, jobNoQuery, globalQuery, jobCategoryFilter, statusFilter, isAppVisible]);
+useEffect(() => {
+  setPageIndex(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [jobNoQuery, globalQuery, jobCategoryFilter, statusFilter, sortKey, sortAsc]);
 
   // ✅ Deep-link support: /jobs?job=12345 (+ optional from=maps&edit=1)
   useEffect(() => {
@@ -2937,30 +2952,84 @@ useEffect(() => {
     </p>
 
     {/* ✅ Total count + Refresh on the same row (nice on mobile) */}
-    <div className="jobs-header-meta">
-      <div style={{ fontSize: 12, opacity: 0.75 }}>{headerStatusText}</div>
+   <div className="jobs-header-meta">
+  <div style={{ fontSize: 12, opacity: 0.75 }}>{headerStatusText}</div>
 
-      <button
-        className="btn-pill"
-        type="button"
-        onClick={async () => {
-          setErr("");
-          setSelected(null);
-          setJobNoQuery("");
-          setGlobalQuery("");
-          setJobNoSuggestions([]);
-          setGlobalSuggestions([]);
-          try {
-            await fetchTotalJobs();
-          } catch (e) {
-            setErr(e?.message || "Failed to refresh total job count.");
-          }
-        }}
-        title="Clear search + refresh total job count"
-      >
-        Refresh
-      </button>
+  <button
+    className="btn-pill"
+    type="button"
+    onClick={async () => {
+      setErr("");
+      setSelected(null);
+      setJobNoQuery("");
+      setGlobalQuery("");
+      setJobCategoryFilter("All");
+      setStatusFilter("All");
+      setJobNoSuggestions([]);
+      setGlobalSuggestions([]);
+      try {
+        await fetchTotalJobs();
+      } catch (e) {
+        setErr(e?.message || "Failed to refresh total job count.");
+      }
+    }}
+    title="Clear search + refresh total job count"
+  >
+    Refresh
+  </button>
+</div>
+
+<div className="jobs-filters-wrap">
+  <div className="jobs-filters-row">
+    <div className="jobs-filters-group">
+      <div className="jobs-filters-label">Category</div>
+      <div className="jobs-filter-pills">
+        <button
+          type="button"
+          className={`jobs-filter-pill ${jobCategoryFilter === "All" ? "is-active" : ""}`}
+          onClick={() => setJobCategoryFilter("All")}
+        >
+          All
+        </button>
+
+        {JOB_CATEGORY_OPTIONS.filter((o) => o !== "").map((o) => (
+          <button
+            key={o}
+            type="button"
+            className={`jobs-filter-pill ${jobCategoryFilter === o ? "is-active" : ""}`}
+            onClick={() => setJobCategoryFilter(o)}
+          >
+            {o}
+          </button>
+        ))}
+      </div>
     </div>
+
+    <div className="jobs-filters-group">
+      <div className="jobs-filters-label">Status</div>
+      <div className="jobs-filter-pills">
+        <button
+          type="button"
+          className={`jobs-filter-pill ${statusFilter === "All" ? "is-active" : ""}`}
+          onClick={() => setStatusFilter("All")}
+        >
+          All
+        </button>
+
+        {STATUS_OPTIONS.map((s) => (
+          <button
+            key={s}
+            type="button"
+            className={`jobs-filter-pill ${statusFilter === s ? "is-active" : ""}`}
+            onClick={() => setStatusFilter(s)}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    </div>
+  </div>
+</div>
   </div>
 </div>
 
@@ -3327,14 +3396,14 @@ onClick={() => {
                   <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap", fontWeight: 900 }}>
                     {r.job_number ?? "—"}
                   </td>
-                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
-  <td
+                 <td
   style={{
-    padding: "0px",
+    padding: "10px 10px",
     borderBottom: "1px solid rgba(255,255,255,0.06)",
+    whiteSpace: "nowrap",
     textAlign: "center",
   }}
-></td>
+>
   {r.priority ? (
     <span style={getPriorityBadgeStyle(r.priority)}>
       {r.priority}
@@ -3342,7 +3411,7 @@ onClick={() => {
   ) : (
     "—"
   )}
-</td>               
+</td>
                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
   {jobClientDisplayLiveFirst(r)}
 </td>
@@ -3370,15 +3439,6 @@ onClick={() => {
                <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
   {r.assigned_to || "—"}
 </td>
-<td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
-  {r.priority ? (
-    <span style={getPriorityBadgeStyle(r.priority)}>
-      {r.priority}
-    </span>
-  ) : (
-    "—"
-  )}
-</td>
 <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", maxWidth: 420 }}>
   <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
     {r.notes || "—"}
@@ -3391,35 +3451,98 @@ onClick={() => {
         </div>
 
         <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-          Tip: the table respects your current search inputs. Clear them to browse the full register.
-        </div>
+  Tip: the table respects your current search inputs and filters. Use Refresh to reset back to the full register.
+</div>
       </div>
 
-        <style>{`
-          .contacts-suggestion.is-active {
-  outline: 2px solid rgba(255,255,255,0.18);
-  background: rgba(255,255,255,0.08);
-}
-
-          @media (max-width: 860px) {
-            .jobs-two-col { grid-template-columns: 1fr !important; }
-            .jobs-selected-grid { grid-template-columns: 1fr !important; }
-          }
-
-          .jobs-header-meta{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  margin-top:6px;
-}
-
-@media (max-width: 860px){
-  .jobs-header-meta{
-    width:100%;
+ 
+<style>{`
+  .contacts-suggestion.is-active {
+    outline: 2px solid rgba(255,255,255,0.18);
+    background: rgba(255,255,255,0.08);
   }
-}
-        `}</style>
+
+  .jobs-header-meta{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-top:6px;
+  }
+
+  .jobs-filters-wrap{
+    margin-top:8px;
+    padding:8px 10px;
+    border-radius:12px;
+    background:rgba(255,255,255,0.03);
+  }
+
+  .jobs-filters-row{
+    display:grid;
+    gap:8px;
+  }
+
+  .jobs-filters-group{
+    display:grid;
+    gap:5px;
+  }
+
+  .jobs-filters-label{
+    font-size:11px;
+    font-weight:800;
+    opacity:0.78;
+    line-height:1;
+  }
+
+  .jobs-filter-pills{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+  }
+
+  .jobs-filter-pill{
+    appearance:none;
+    border:1px solid rgba(255,255,255,0.10);
+    background:rgba(255,255,255,0.04);
+    color:inherit;
+    border-radius:999px;
+    padding:6px 10px;
+    font-size:11px;
+    font-weight:700;
+    line-height:1;
+    cursor:pointer;
+    transition:all 0.15s ease;
+  }
+
+  .jobs-filter-pill:hover{
+    background:rgba(255,255,255,0.08);
+    border-color:rgba(255,255,255,0.18);
+  }
+
+  .jobs-filter-pill.is-active{
+    background:rgba(211,47,47,0.18);
+    border-color:rgba(211,47,47,0.42);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,0.04);
+  }
+
+  @media (max-width: 860px) {
+    .jobs-two-col { grid-template-columns: 1fr !important; }
+    .jobs-selected-grid { grid-template-columns: 1fr !important; }
+
+    .jobs-header-meta{
+      width:100%;
+    }
+
+    .jobs-filters-wrap{
+      padding:7px 8px;
+    }
+
+    .jobs-filter-pill{
+      padding:6px 9px;
+      font-size:10px;
+    }
+  }
+`}</style>      
 
         {err ? (
           <div style={{ marginTop: 12, padding: "0.7rem 0.8rem", borderRadius: 12, background: "rgba(255,0,0,0.08)", fontSize: "0.9rem" }}>
