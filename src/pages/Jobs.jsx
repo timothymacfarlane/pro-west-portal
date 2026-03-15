@@ -9,6 +9,52 @@ import proj4 from "proj4";
 
 const STATUS_OPTIONS = ["Planned", "In progress", "On hold", "Complete", "Archived"];
 
+const PRIORITY_OPTIONS = ["", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+
+const JOB_CATEGORY_OPTIONS = [
+  "",
+  "Amalgamation",
+  "Boundary Identification",
+  "Boundary Repeg",
+  "Building Setout",
+  "Feature and Contour Survey",
+  "Subdivision - Built Strata",
+  "Subdivision - Green Title",
+  "Subdivision - Survey Strata",
+  "Subdivision - Survey Strata Conversion",
+  "Vacant Site Survey",
+  "Other",
+];
+
+function getPriorityColor(priority) {
+  const n = Number(priority);
+  if (!Number.isFinite(n)) return "inherit";
+  if (n === 1) return "#4da3ff";      // blue
+  if (n >= 2 && n <= 3) return "#4caf50"; // green
+  if (n >= 4 && n <= 6) return "#ff9800"; // orange
+  if (n >= 7 && n <= 9) return "#f44336"; // red
+  return "inherit";
+}
+
+function getPriorityBadgeStyle(priority) {
+  const color = getPriorityColor(priority);
+
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 28,
+    padding: "4px 8px",
+    borderRadius: 999,
+    fontWeight: 900,
+    fontSize: 12,
+    lineHeight: 1,
+    color: "#fff",
+    background: color === "inherit" ? "rgba(255,255,255,0.12)" : color,
+    border: "1px solid rgba(255,255,255,0.10)",
+  };
+}
+
 // Full WA LGAs (unchanged)
 const LOCAL_AUTHORITIES = [
   "City of Albany","City of Armadale","Shire of Ashburton","Shire of Augusta-Margaret River",
@@ -565,6 +611,7 @@ useEffect(() => {
 
   // If opening "new", reset to defaults
   if (mode === "new") {
+    setJobCategory("");
     setJobTypeLegacy("");
     setJobDateLegacy("");
     setLotNumber("");
@@ -585,8 +632,9 @@ useEffect(() => {
     setClientName("");
 
     setStatus("Planned");
-    setAssignedTo("");
-    setNotes("");
+setAssignedTo("");
+setPriority("");
+setNotes("");
 
     setFullAddress("");
     setPlaceId("");
@@ -601,6 +649,7 @@ useEffect(() => {
   }
 
   // Otherwise populate from the job we just fetched
+  setJobCategory(i.job_category ?? "");
   setJobTypeLegacy(i.job_type_legacy ?? "");
   setJobDateLegacy(i.job_date_legacy ?? "");
   setLotNumber(i.lot_number ?? "");
@@ -624,8 +673,9 @@ useEffect(() => {
   setClientSearch("");
 
   setStatus(i.status ?? "Planned");
-  setAssignedTo(i.assigned_to ?? "");
-  setNotes(i.notes ?? "");
+setAssignedTo(i.assigned_to ?? "");
+setPriority(i.priority != null ? String(i.priority) : "");
+setNotes(i.notes ?? "");
 
   setFullAddress(i.full_address ?? "");
   setPlaceId(i.place_id ?? "");
@@ -636,7 +686,7 @@ useEffect(() => {
 
   setError("");
 }, [open, mode, initial]);
-
+const [jobCategory, setJobCategory] = useState(initial?.job_category ?? "");
   const [jobTypeLegacy, setJobTypeLegacy] = useState(initial?.job_type_legacy ?? "");
   const [jobDateLegacy, setJobDateLegacy] = useState(initial?.job_date_legacy ?? "");
   const [lotNumber, setLotNumber] = useState(initial?.lot_number ?? "");
@@ -667,8 +717,9 @@ const [deletingClient, setDeletingClient] = useState(false);
   const [clientName, setClientName] = useState(initial?.client_name ?? "");
 
   const [status, setStatus] = useState(initial?.status ?? "Planned");
-  const [assignedTo, setAssignedTo] = useState(initial?.assigned_to ?? "");
-  const [notes, setNotes] = useState(initial?.notes ?? "");
+const [assignedTo, setAssignedTo] = useState(initial?.assigned_to ?? "");
+const [priority, setPriority] = useState(initial?.priority != null ? String(initial.priority) : "");
+const [notes, setNotes] = useState(initial?.notes ?? "");
 
   const [fullAddress, setFullAddress] = useState(initial?.full_address ?? "");
   const [placeId, setPlaceId] = useState(initial?.place_id ?? "");
@@ -1450,6 +1501,7 @@ async function notifyJobAssignment({ jobId, jobNumber, prevAssigned, nextAssigne
 //}
     try {
       const payload = {
+        job_category: jobCategory?.trim() || null,
         job_type_legacy: jobTypeLegacy?.trim() || null,
         job_date_legacy: jobDateLegacy || null,
         lot_number: lotNumber?.trim() || null,
@@ -1471,8 +1523,9 @@ async function notifyJobAssignment({ jobId, jobNumber, prevAssigned, nextAssigne
         client_name: clientName?.trim() || null, // legacy
 
         status,
-        assigned_to: assignedTo?.trim() || null,
-        notes: notes?.trim() || null,
+assigned_to: assignedTo?.trim() || null,
+priority: priority ? Number(priority) : null,
+notes: notes?.trim() || null,
 
         full_address: stripAustralia(fullAddress)?.trim() || null,
         place_id: placeId?.trim() || null,
@@ -1521,9 +1574,10 @@ const jobNumber = created?.job_number || null;
 let createdMerged = created;
 
 if (jobId) {
-  const { error: upErr } = await supabase
+    const { error: upErr } = await supabase
     .from("jobs")
     .update({
+      job_category: payload.job_category,
       client_id: payload.client_id,
       client_first_name: payload.client_first_name,
       client_surname: payload.client_surname,
@@ -1532,6 +1586,7 @@ if (jobId) {
       client_mobile: payload.client_mobile,
       client_email: payload.client_email,
       client_name: payload.client_name,
+      priority: payload.priority,
     })
     .eq("id", jobId);
 
@@ -1817,29 +1872,52 @@ onFocus={() => {
             </div>
           </div>
 
-          {/* Status / Assigned */}
-          <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
-            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Status / Assigned</div>
+   {/* Status / Assigned / Priority */}
+<div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
+  <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Status / Assigned / Priority</div>
 
-            <div style={{ display: "grid", gap: 8 }}>
-              <select className="input" value={status} onChange={(e) => setStatus(e.target.value)} disabled={!canEdit}>
-                {STATUS_OPTIONS.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+  <div style={{ display: "grid", gap: 8 }}>
+    <select className="input" value={status} onChange={(e) => setStatus(e.target.value)} disabled={!canEdit}>
+      {STATUS_OPTIONS.map((s) => (
+        <option key={s} value={s}>
+          {s}
+        </option>
+      ))}
+    </select>
 
-              <select className="input" value={assignedTo || ""} onChange={(e) => setAssignedTo(e.target.value)} disabled={!canEdit}>
-                <option value="">Unassigned</option>
-                {staffDisplay.map((s) => (
-                  <option key={s.id} value={s.display_name}>
-                    {s.display_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+    <select
+      className="input"
+      value={assignedTo || ""}
+      onChange={(e) => setAssignedTo(e.target.value)}
+      disabled={!canEdit}
+    >
+      <option value="">Unassigned</option>
+      {staffDisplay.map((s) => (
+        <option key={s.id} value={s.display_name}>
+          {s.display_name}
+        </option>
+      ))}
+    </select>
+
+    <select
+      className="input"
+      value={priority}
+      onChange={(e) => setPriority(e.target.value)}
+      disabled={!canEdit}
+      style={{
+        color: getPriorityColor(priority),
+        fontWeight: priority ? 900 : 500,
+      }}
+    >
+      <option value="">No priority</option>
+      {PRIORITY_OPTIONS.filter((p) => p !== "").map((p) => (
+        <option key={p} value={p}>
+          Priority {p}
+        </option>
+      ))}
+    </select>
+  </div>
+</div>
 
           {/* Address */}
           <div style={{ gridColumn: "1 / -1", padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
@@ -1877,12 +1955,39 @@ onChange={(e) => setFullAddress(e.target.value)}
           </div>
 
           <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
-            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Job type / date</div>
-            <div style={{ display: "grid", gap: 8 }}>
-              <input className="input" placeholder="Job type" value={jobTypeLegacy} onChange={(e) => setJobTypeLegacy(e.target.value)} disabled={!canEdit} />
-              <input className="input" type="date" value={jobDateLegacy ? String(jobDateLegacy).slice(0, 10) : ""} onChange={(e) => setJobDateLegacy(e.target.value)} disabled={!canEdit} />
-            </div>
-          </div>
+  <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Job category / type / date</div>
+  <div style={{ display: "grid", gap: 8 }}>
+    <select
+      className="input"
+      value={jobCategory}
+      onChange={(e) => setJobCategory(e.target.value)}
+      disabled={!canEdit}
+    >
+      <option value="">—</option>
+      {JOB_CATEGORY_OPTIONS.filter((o) => o !== "").map((o) => (
+        <option key={o} value={o}>
+          {o}
+        </option>
+      ))}
+    </select>
+
+    <input
+      className="input"
+      placeholder="Job type"
+      value={jobTypeLegacy}
+      onChange={(e) => setJobTypeLegacy(e.target.value)}
+      disabled={!canEdit}
+    />
+
+    <input
+      className="input"
+      type="date"
+      value={jobDateLegacy ? String(jobDateLegacy).slice(0, 10) : ""}
+      onChange={(e) => setJobDateLegacy(e.target.value)}
+      disabled={!canEdit}
+    />
+  </div>
+</div>
 
           {/* Lot/Plan/CT + Map ref */}
           <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
@@ -2043,12 +2148,14 @@ onChange={(e) => {
       client_email,
       status,
       assigned_to,
+      priority,
       notes,
       full_address,
       place_id,
       mga_zone,
       mga_easting,
       mga_northing,
+      job_category,
       job_type_legacy,
       job_date_legacy,
       lot_number,
@@ -2112,10 +2219,12 @@ function Jobs() {
 
 const JOB_COLUMNS = [
   { key: "job_number", label: "Job #" },
+  { key: "priority", label: "Priority" },
   { key: "client_company", label: "Client" },
   { key: "full_address", label: "Address" },
   { key: "lot_number", label: "Lot / Plan" },
   { key: "local_authority", label: "LGA" },
+  { key: "job_category", label: "Job Category" },
   { key: "job_type_legacy", label: "Job type" },
   { key: "job_date_legacy", label: "Job date" },
   { key: "status", label: "Status" },
@@ -2203,11 +2312,13 @@ async function fetchJobByNumber(jobNumber) {
       status,
       assigned_to,
       notes,
+      priority,
       full_address,
       place_id,
       mga_zone,
       mga_easting,
       mga_northing,
+      job_category,
       job_type_legacy,
       job_date_legacy,
       lot_number,
@@ -2258,10 +2369,12 @@ let q = supabase
     lot_number,
     plan_number,
     local_authority,
+    job_category,
     job_type_legacy,
     job_date_legacy,
     status,
     assigned_to,
+    priority,
     notes,
     client:clients (
       id,
@@ -2309,10 +2422,18 @@ let q = supabase
       }
     }
 
-    // ✅ order BEFORE range
-    q = q.order(sortBy, { ascending });
+ // ✅ order BEFORE range
+if (sortBy === "priority") {
+  q = q
+    .order("priority", { ascending, nullsFirst: false })
+    .order("job_number", { ascending: false });
+} else {
+  q = q
+    .order(sortBy, { ascending, nullsFirst: false })
+    .order("job_number", { ascending: false });
+}
 
-    q = q.range(from, to);
+q = q.range(from, to);
 
     const { data, error, count } = await q;
     if (error) throw error;
@@ -3206,6 +3327,22 @@ onClick={() => {
                   <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap", fontWeight: 900 }}>
                     {r.job_number ?? "—"}
                   </td>
+                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
+  <td
+  style={{
+    padding: "0px",
+    borderBottom: "1px solid rgba(255,255,255,0.06)",
+    textAlign: "center",
+  }}
+></td>
+  {r.priority ? (
+    <span style={getPriorityBadgeStyle(r.priority)}>
+      {r.priority}
+    </span>
+  ) : (
+    "—"
+  )}
+</td>               
                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
   {jobClientDisplayLiveFirst(r)}
 </td>
@@ -3218,6 +3355,9 @@ onClick={() => {
 <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
   {r.local_authority || "—"}
 </td>
+<td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
+  {r.job_category || "—"}
+</td>
                   <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
                     {r.job_type_legacy || "—"}
                   </td>
@@ -3227,14 +3367,23 @@ onClick={() => {
                   <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
                     {r.status || "—"}
                   </td>
-                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
-                    {r.assigned_to || "—"}
-                  </td>
-                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", maxWidth: 420 }}>
-                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {r.notes || "—"}
-                    </div>
-                  </td>
+               <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
+  {r.assigned_to || "—"}
+</td>
+<td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
+  {r.priority ? (
+    <span style={getPriorityBadgeStyle(r.priority)}>
+      {r.priority}
+    </span>
+  ) : (
+    "—"
+  )}
+</td>
+<td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", maxWidth: 420 }}>
+  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+    {r.notes || "—"}
+  </div>
+</td>
                 </tr>
               ))}
             </tbody>
@@ -3368,10 +3517,21 @@ onClick={() => {
 
  <div>
   <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Job details</div>
+  <div style={{ marginTop: 4 }}><b>Job Category:</b> {selected.job_category || "—"}</div>
   <div style={{ marginTop: 4 }}><b>Job type:</b> {selected.job_type_legacy || "—"}</div>
   <div style={{ marginTop: 4 }}><b>Date:</b> {formatDateAU(selected.job_date_legacy)}</div>
   <div style={{ marginTop: 8 }}><b>Status:</b> {selected.status || "—"}</div>
-  <div style={{ marginTop: 4 }}><b>Assigned:</b> {selected.assigned_to || "—"}</div>
+<div style={{ marginTop: 4 }}><b>Assigned:</b> {selected.assigned_to || "—"}</div>
+<div style={{ marginTop: 4 }}>
+  <b>Priority:</b>{" "}
+  {selected.priority ? (
+    <span style={getPriorityBadgeStyle(selected.priority)}>
+      {selected.priority}
+    </span>
+  ) : (
+    "—"
+  )}
+</div>
 </div>
 
 <div style={{ gridColumn: "1 / -1" }}>
