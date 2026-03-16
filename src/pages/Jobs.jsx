@@ -527,6 +527,7 @@ function ClientFormModal({ open, mode = "add", initialClient = null, onClose, on
 
 function JobModal({ open, mode, isAdmin, onClose, onSaved, initial, staffOptions }) {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const navigate = useNavigate();
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -742,6 +743,23 @@ const [notes, setNotes] = useState(initial?.notes ?? "");
   const clientSearchWrapRef = useRef(null);
 
   const canEdit = isAdmin && (mode === "new" || mode === "edit");
+
+  const modalMapsHref = useMemo(() => {
+  const source = initial || {};
+
+  if (!source?.job_number && !source?.place_id && !source?.full_address) return "";
+
+  const params = new URLSearchParams();
+
+  if (source.job_number != null) params.set("job", String(source.job_number));
+  if (source.place_id) params.set("place_id", String(source.place_id));
+  if (source.full_address) params.set("address", String(source.full_address));
+  if (source.mga_zone != null) params.set("zone", String(source.mga_zone));
+  if (source.mga_easting != null) params.set("e", String(source.mga_easting));
+  if (source.mga_northing != null) params.set("n", String(source.mga_northing));
+
+  return `/maps?${params.toString()}`;
+}, [initial]);
 
   // Prevent background scroll when the modal is open (better UX on phones)
   useEffect(() => {
@@ -1698,9 +1716,20 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
 
           </div>
 
-          <button className="btn-pill" onClick={onClose} type="button">
-            Close
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+  <button
+    className="btn-pill"
+    type="button"
+    onClick={() => modalMapsHref && navigate(modalMapsHref)}
+    disabled={!modalMapsHref}
+  >
+    View in Maps
+  </button>
+
+  <button className="btn-pill" onClick={onClose} type="button">
+    Close
+  </button>
+</div>
         </div>
 
         {error && (
@@ -2211,8 +2240,8 @@ function Jobs() {
 
   const [staffOptions, setStaffOptions] = useState([]);
   const [totalJobs, setTotalJobs] = useState(0);
-  const [jobCategoryFilter, setJobCategoryFilter] = useState("All");
-  const [statusFilter, setStatusFilter] = useState("All");
+  const [jobCategoryFilter, setJobCategoryFilter] = useState([]);
+  const [statusFilter, setStatusFilter] = useState([]);
 
     // -----------------------------
   // Job register table (paged)
@@ -2291,6 +2320,19 @@ const topScrollInnerRef = useRef(null);
    // sorting
   const [sortKey, setSortKey] = useState("job_number");
   const [sortAsc, setSortAsc] = useState(false);
+
+  function toggleFilterValue(currentValues, value, setter) {
+  if (value === "All") {
+    setter([]);
+    return;
+  }
+
+  if (currentValues.includes(value)) {
+    setter(currentValues.filter((v) => v !== value));
+  } else {
+    setter([...currentValues, value]);
+  }
+}
 
 
 async function fetchJobByNumber(jobNumber) {
@@ -2392,18 +2434,18 @@ let q = supabase
   );
     const jobNoTrim = (jobNo || "").trim();
     const globalTrim = (globalQ || "").trim().replace(/^#/, "");
-    const jobCategoryTrim = (jobCategory || "All").trim();
-    const statusTrim = (status || "All").trim();
+    const jobCategoryValues = Array.isArray(jobCategory) ? jobCategory : [];
+    const statusValues = Array.isArray(status) ? status : [];
 
     if (jobNoTrim && /^\d+$/.test(jobNoTrim)) {
       q = q.like("job_number_text", `${jobNoTrim}%`);
     }
-    if (jobCategoryTrim !== "All") {
-  q = q.eq("job_category", jobCategoryTrim);
+if (jobCategoryValues.length > 0) {
+  q = q.in("job_category", jobCategoryValues);
 }
 
-if (statusTrim !== "All") {
-  q = q.eq("status", statusTrim);
+if (statusValues.length > 0) {
+  q = q.in("status", statusValues);
 }
 
     if (globalTrim.length >= 3) {
@@ -2963,8 +3005,8 @@ useEffect(() => {
       setSelected(null);
       setJobNoQuery("");
       setGlobalQuery("");
-      setJobCategoryFilter("All");
-      setStatusFilter("All");
+      setJobCategoryFilter([]);
+      setStatusFilter([]);
       setJobNoSuggestions([]);
       setGlobalSuggestions([]);
       try {
@@ -2978,64 +3020,12 @@ useEffect(() => {
     Refresh
   </button>
 </div>
-
-<div className="jobs-filters-wrap">
-  <div className="jobs-filters-row">
-    <div className="jobs-filters-group">
-      <div className="jobs-filters-label">Category</div>
-      <div className="jobs-filter-pills">
-        <button
-          type="button"
-          className={`jobs-filter-pill ${jobCategoryFilter === "All" ? "is-active" : ""}`}
-          onClick={() => setJobCategoryFilter("All")}
-        >
-          All
-        </button>
-
-        {JOB_CATEGORY_OPTIONS.filter((o) => o !== "").map((o) => (
-          <button
-            key={o}
-            type="button"
-            className={`jobs-filter-pill ${jobCategoryFilter === o ? "is-active" : ""}`}
-            onClick={() => setJobCategoryFilter(o)}
-          >
-            {o}
-          </button>
-        ))}
-      </div>
-    </div>
-
-    <div className="jobs-filters-group">
-      <div className="jobs-filters-label">Status</div>
-      <div className="jobs-filter-pills">
-        <button
-          type="button"
-          className={`jobs-filter-pill ${statusFilter === "All" ? "is-active" : ""}`}
-          onClick={() => setStatusFilter("All")}
-        >
-          All
-        </button>
-
-        {STATUS_OPTIONS.map((s) => (
-          <button
-            key={s}
-            type="button"
-            className={`jobs-filter-pill ${statusFilter === s ? "is-active" : ""}`}
-            onClick={() => setStatusFilter(s)}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
-    </div>
-  </div>
-</div>
   </div>
 </div>
 
         <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
           {/* Quick find */}
-          <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
+          <div className="jobs-mobile-card">
             <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>
               Quick find (job number){jobNoLoading ? "…" : ""}
             </div>
@@ -3151,7 +3141,7 @@ useEffect(() => {
           </div>
 
           {/* Global search */}
-          <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
+          <div className="jobs-mobile-card">
             <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>
               Global search{globalLoading ? "…" : ""}
             </div>
@@ -3274,12 +3264,68 @@ onClick={() => {
     ))}
   </div>
 )}
+                </div>
+
+          <div className="jobs-filters-wrap">
+            <div className="jobs-filters-row">
+              <div className="jobs-filters-group">
+                <div className="jobs-filters-label">
+  Category{jobCategoryFilter.length > 0 ? ` (${jobCategoryFilter.length})` : ""}
+</div>
+                <div className="jobs-filter-pills">
+                  <button
+                    type="button"
+                    className={`jobs-filter-pill ${jobCategoryFilter.length === 0 ? "is-active" : ""}`}
+                    onClick={() => setJobCategoryFilter([])}
+                  >
+                    All
+                  </button>
+
+                  {JOB_CATEGORY_OPTIONS.filter((o) => o !== "").map((o) => (
+                    <button
+                      key={o}
+                      type="button"
+                      className={`jobs-filter-pill ${jobCategoryFilter.includes(o) ? "is-active" : ""}`}
+                      onClick={() => toggleFilterValue(jobCategoryFilter, o, setJobCategoryFilter)}
+                    >
+                      {o}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="jobs-filters-group">
+                <div className="jobs-filters-label">
+  Status{statusFilter.length > 0 ? ` (${statusFilter.length})` : ""}
+</div>
+                <div className="jobs-filter-pills">
+                  <button
+                    type="button"
+                    className={`jobs-filter-pill ${statusFilter.length === 0 ? "is-active" : ""}`}
+                    onClick={() => setStatusFilter([])}
+                  >
+                    All
+                  </button>
+
+                  {STATUS_OPTIONS.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`jobs-filter-pill ${statusFilter.includes(s) ? "is-active" : ""}`}
+                      onClick={() => toggleFilterValue(statusFilter, s, setStatusFilter)}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         
       {/* Job register list (paged + sortable) */}
       <div className="card" style={{ marginTop: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="jobs-register-head" style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <div>
             <h3 className="card-title" style={{ marginBottom: 6 }}>Job register</h3>
             <div style={{ fontSize: 12, opacity: 0.75 }}>
@@ -3451,7 +3497,7 @@ onClick={() => {
         </div>
 
         <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-  Tip: the table respects your current search inputs and filters. Use Refresh to reset back to the full register.
+    Tip: the table respects your current search inputs and selected filters. Use Refresh to reset back to the full register.
 </div>
       </div>
 
@@ -3471,33 +3517,34 @@ onClick={() => {
   }
 
   .jobs-filters-wrap{
-    margin-top:8px;
-    padding:8px 10px;
-    border-radius:12px;
-    background:rgba(255,255,255,0.03);
+    margin-top:4px;
+    padding:6px 8px;
+    border-radius:10px;
+    background:rgba(255,255,255,0.025);
   }
 
   .jobs-filters-row{
     display:grid;
-    gap:8px;
+    gap:6px;
   }
 
   .jobs-filters-group{
     display:grid;
-    gap:5px;
+    gap:4px;
+    min-width:0;
   }
 
   .jobs-filters-label{
-    font-size:11px;
+    font-size:10px;
     font-weight:800;
-    opacity:0.78;
+    opacity:0.72;
     line-height:1;
   }
 
   .jobs-filter-pills{
     display:flex;
     flex-wrap:wrap;
-    gap:6px;
+    gap:5px;
   }
 
   .jobs-filter-pill{
@@ -3506,12 +3553,14 @@ onClick={() => {
     background:rgba(255,255,255,0.04);
     color:inherit;
     border-radius:999px;
-    padding:6px 10px;
-    font-size:11px;
+    padding:5px 9px;
+    font-size:10px;
     font-weight:700;
     line-height:1;
     cursor:pointer;
     transition:all 0.15s ease;
+    white-space:nowrap;
+    flex:0 0 auto;
   }
 
   .jobs-filter-pill:hover{
@@ -3525,36 +3574,89 @@ onClick={() => {
     box-shadow:inset 0 0 0 1px rgba(255,255,255,0.04);
   }
 
+  .jobs-mobile-card{
+    padding:10px 12px;
+    border-radius:14px;
+    background:rgba(255,255,255,0.04);
+  }
+
+  .jobs-register-head{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+
   @media (max-width: 860px) {
     .jobs-two-col { grid-template-columns: 1fr !important; }
     .jobs-selected-grid { grid-template-columns: 1fr !important; }
 
     .jobs-header-meta{
       width:100%;
+      align-items:flex-start;
+      flex-direction:column;
+      gap:6px;
+    }
+
+    .jobs-register-head{
+      align-items:flex-start;
+      flex-direction:column;
+      gap:8px;
+    }
+
+        .btn-pill{
+      padding:7px 10px;
+      font-size:12px;
     }
 
     .jobs-filters-wrap{
-      padding:7px 8px;
+      padding:5px 6px;
+      border-radius:9px;
+    }
+
+    .jobs-filters-row{
+      gap:5px;
+    }
+
+    .jobs-filters-group{
+      gap:3px;
+    }
+
+    .jobs-filters-label{
+      font-size:9px;
+    }
+
+    .jobs-filter-pills{
+      flex-wrap:nowrap;
+      overflow-x:auto;
+      overflow-y:hidden;
+      -webkit-overflow-scrolling:touch;
+      scrollbar-width:none;
+      padding-bottom:2px;
+    }
+
+    .jobs-filter-pills::-webkit-scrollbar{
+      display:none;
     }
 
     .jobs-filter-pill{
-      padding:6px 9px;
+      padding:5px 8px;
       font-size:10px;
     }
+
+    .jobs-mobile-card{
+      padding:8px 10px;
+      border-radius:12px;
+    }
   }
-`}</style>      
+`}</style>  
 
         {err ? (
           <div style={{ marginTop: 12, padding: "0.7rem 0.8rem", borderRadius: 12, background: "rgba(255,0,0,0.08)", fontSize: "0.9rem" }}>
             {err}
           </div>
         ) : null}
-
-        {!selected && (
-          <div style={{ marginTop: 12, padding: "0.8rem", opacity: 0.8 }}>
-            Select a job from <b>Quick find</b> or <b>Global search</b> to view details.
-          </div>
-        )}
       </div>
 
       {/* Selected job summary */}
