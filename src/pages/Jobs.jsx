@@ -1660,18 +1660,19 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
   }));
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.35)",
-        zIndex: 50,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 16,
-      }}
-    >
+  <div
+    className="jobmodal-overlay"
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.35)",
+      zIndex: 50,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 16,
+    }}
+  >
 <ClientFormModal
   open={addClientOpen}
   mode="add"
@@ -1692,18 +1693,28 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
   }}
 />
 
-      <div
-        className="card"
-        style={{
-          width: "min(980px, calc(100vw - 32px))",
-          maxHeight: "calc(100vh - 32px)",
-          overflowY: "auto",
-          padding: "1rem",
-          borderRadius: 16,
-          boxShadow: "0 12px 40px rgba(0,0,0,0.2)",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+<div
+  className="card jobmodal-card"
+  style={{
+    width: "min(980px, calc(100vw - 32px))",
+    maxHeight: "calc(100vh - 32px)",
+    overflowY: "auto",
+    WebkitOverflowScrolling: "touch",
+    padding: "1rem",
+    borderRadius: 16,
+    boxShadow: "0 12px 40px rgba(0,0,0,0.2)",
+    position: "relative",
+  }}
+>
+ <div
+  className="jobmodal-header"
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    alignItems: "center",
+  }}
+>
           <div>
           <h3 className="card-title" style={{ marginBottom: 4 }}>
   {mode === "new" ? "New Job" : mode === "view" ? "Job Details" : "Edit Job"}
@@ -1716,7 +1727,7 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
 
           </div>
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div className="jobmodal-header-actions" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
   <button
     className="btn-pill"
     type="button"
@@ -1746,37 +1757,65 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
           </div>
         )}
 
-        <div className="jobmodal-grid" style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div
+  className="jobmodal-grid"
+  style={{
+    marginTop: 16,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+    gap: 12,
+    paddingBottom: 8,
+  }}
+>
           {/* Client */}
           <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+         <div
+  className="jobmodal-client-header"
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+    gap: 8,
+    flexWrap: "wrap",
+  }}
+>
   <div style={{ fontWeight: 900, fontSize: 13 }}>Client</div>
 
   {canEdit && (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-      <button className="btn-pill" type="button" onClick={() => setAddClientOpen(true)}>
-        + Add client
-      </button>
+  <div
+  className="jobmodal-client-actions"
+  style={{
+    display: "flex",
+    gap: 8,
+    flexWrap: "wrap",
+    width: "100%",
+  }}
+>
+    <button className="btn-pill" type="button" onClick={() => setAddClientOpen(true)}>
+      + Add client
+    </button>
 
-      <button
-        className="btn-pill"
-        type="button"
-        onClick={() => setEditClientOpen(true)}
-        disabled={!clientId}
-      >
-        Edit client
-      </button>
+    <button
+      className="btn-pill"
+      type="button"
+      onClick={() => setEditClientOpen(true)}
+      disabled={!clientId}
+    >
+      Edit client
+    </button>
 
-      <button
-        className="btn-pill"
-        type="button"
-        onClick={handleDeleteClient}
-        disabled={!clientId || deletingClient}
-      >
-        {deletingClient ? "Deleting…" : "Delete client"}
-      </button>
-    </div>
-  )}
+    <button
+      className="btn-pill"
+      type="button"
+      onClick={handleDeleteClient}
+      disabled={!clientId || deletingClient}
+    >
+      {deletingClient ? "Deleting…" : "Delete client"}
+    </button>
+  </div>
+)}
+  
 </div>
 
             <div style={{ display: "grid", gap: 8 }}>
@@ -1885,17 +1924,31 @@ onFocus={() => {
   )}
 </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <input className="input" placeholder="First name" value={clientFirstName} onChange={(e) => setClientFirstName(e.target.value)} disabled={true} />
-                <input className="input" placeholder="Surname" value={clientSurname} onChange={(e) => setClientSurname(e.target.value)} disabled={true} />
-              </div>
+             <div
+  className="jobmodal-two-col"
+  style={{
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+    gap: 8,
+  }}
+>
+  <input className="input" placeholder="First name" value={clientFirstName} onChange={(e) => setClientFirstName(e.target.value)} disabled={true} />
+  <input className="input" placeholder="Surname" value={clientSurname} onChange={(e) => setClientSurname(e.target.value)} disabled={true} />
+</div>
 
               <input className="input" placeholder="Company" value={clientCompany} onChange={(e) => setClientCompany(e.target.value)} disabled={true} />
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <input className="input" placeholder="Phone" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} disabled={true} />
-                <input className="input" placeholder="Mobile" value={clientMobile} onChange={(e) => setClientMobile(e.target.value)} disabled={true} />
-              </div>
+ <div
+  className="jobmodal-two-col"
+  style={{
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+    gap: 8,
+  }}
+>
+  <input className="input" placeholder="Phone" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} disabled={true} />
+  <input className="input" placeholder="Mobile" value={clientMobile} onChange={(e) => setClientMobile(e.target.value)} disabled={true} />
+</div>
 
               <input className="input" placeholder="Email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} disabled={true} />
             </div>
@@ -1962,11 +2015,18 @@ onChange={(e) => setFullAddress(e.target.value)}
                 disabled={!canEdit}
               />
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                <input className="input" placeholder="Street no" value={streetNumber} onChange={(e) => setStreetNumber(e.target.value)} disabled={!canEdit} />
-                <input className="input" placeholder="Street name" value={streetName} onChange={(e) => setStreetName(e.target.value)} disabled={!canEdit} />
-                <input className="input" placeholder="Suburb" value={suburb} onChange={(e) => setSuburb(e.target.value)} disabled={!canEdit} />
-              </div>
+             <div
+  className="jobmodal-three-col"
+  style={{
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)",
+    gap: 8,
+  }}
+>
+  <input className="input" placeholder="Street no" value={streetNumber} onChange={(e) => setStreetNumber(e.target.value)} disabled={!canEdit} />
+  <input className="input" placeholder="Street name" value={streetName} onChange={(e) => setStreetName(e.target.value)} disabled={!canEdit} />
+  <input className="input" placeholder="Suburb" value={suburb} onChange={(e) => setSuburb(e.target.value)} disabled={!canEdit} />
+</div>
             </div>
           </div>
 
@@ -2036,11 +2096,18 @@ onChange={(e) => setFullAddress(e.target.value)}
           {/* MGA */}
           <div style={{ gridColumn: "1 / -1", padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
             <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>MGA2020 (auto from Google address if available)</div>
-            <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 1fr", gap: 8 }}>
-              <input className="input" placeholder="Zone" value={mgaZone} onChange={(e) => setMgaZone(e.target.value)} disabled={!canEdit} />
-              <input className="input" placeholder="Easting" value={mgaE} onChange={(e) => setMgaE(e.target.value)} disabled={!canEdit} />
-              <input className="input" placeholder="Northing" value={mgaN} onChange={(e) => setMgaN(e.target.value)} disabled={!canEdit} />
-            </div>
+           <div
+  className="jobmodal-mga-grid"
+  style={{
+    display: "grid",
+    gridTemplateColumns: "120px minmax(0, 1fr) minmax(0, 1fr)",
+    gap: 8,
+  }}
+>
+  <input className="input" placeholder="Zone" value={mgaZone} onChange={(e) => setMgaZone(e.target.value)} disabled={!canEdit} />
+  <input className="input" placeholder="Easting" value={mgaE} onChange={(e) => setMgaE(e.target.value)} disabled={!canEdit} />
+  <input className="input" placeholder="Northing" value={mgaN} onChange={(e) => setMgaN(e.target.value)} disabled={!canEdit} />
+</div>
           </div>
 
           {/* Notes */}
@@ -2057,17 +2124,17 @@ onChange={(e) => setFullAddress(e.target.value)}
   <div style={{ width: "139mm", maxWidth: "100%" }}>
 <textarea
   className="input"
-   style={{
-  width: "75mm",
-  height: "16mm",
+  style={{
+  width: "100%",
+  maxWidth: "75mm",
+  minHeight: "70px",
   resize: "none",
   fontFamily: "monospace",
   fontSize: "9pt",
   lineHeight: "1.05",
-  padding: "2px 4px",
+  padding: "6px 8px",
   borderWidth: "1px",
   boxSizing: "border-box",
-  maxWidth: "100%"
 }}
   placeholder="Notes for job folder sticker…"
   value={notes}
@@ -2105,29 +2172,245 @@ onChange={(e) => {
 </div>
         </div>
 
-        <style>{`
-          /* Jobs modal responsive */
-          @media (max-width: 860px) {
-            .jobmodal-grid { grid-template-columns: 1fr !important; }
-          }
-        `}</style>
+ <style>{`
+ .jobmodal-header-actions,
+.jobmodal-client-actions,
+.jobmodal-footer-actions {
+  min-width: 0;
+}
 
-<div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
-  {canEdit && (
-    <>
-      <select
-        className="input"
-        value={stickerPosition}
-        onChange={(e) => setStickerPosition(e.target.value)}
-        disabled={saving}
-        style={{ width: 170 }}
-      >
-        <option value="top-left">Sticker: Top left</option>
-        <option value="top-right">Sticker: Top right</option>
-        <option value="bottom-left">Sticker: Bottom left</option>
-        <option value="bottom-right">Sticker: Bottom right</option>
-      </select>
+.jobmodal-header-actions > button,
+.jobmodal-client-actions > button,
+.jobmodal-footer-actions > button {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: normal;
+}
 
+  .jobmodal-card {
+    overscroll-behavior: contain;
+    background: var(--pw-card, #fff);
+  }
+
+  .jobmodal-header {
+  position: static;
+  z-index: auto;
+  background: transparent;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+}
+
+  .jobmodal-client-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .jobmodal-client-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .jobmodal-footer {
+    margin-top: 14px;
+    background: transparent;
+    padding-top: 10px;
+    border-top: 1px solid rgba(0,0,0,0.08);
+  }
+
+  .jobmodal-footer-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  @media (max-width: 860px) {
+    .jobmodal-overlay {
+      align-items: stretch !important;
+      justify-content: stretch !important;
+      padding: 0 !important;
+    }
+
+    .jobmodal-card {
+      width: 100vw !important;
+      max-width: 100vw !important;
+      height: 100dvh !important;
+      max-height: 100dvh !important;
+      margin: 0 !important;
+      border-radius: 0 !important;
+      padding: 10px 10px 14px !important;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      -webkit-overflow-scrolling: touch;
+    }
+
+  .jobmodal-header {
+  position: static !important;
+  top: auto !important;
+  z-index: auto !important;
+  margin: 0 0 10px 0;
+  padding: 0 0 10px 0;
+  align-items: flex-start !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  background: transparent !important;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+}
+
+    .jobmodal-header-actions {
+  width: 100%;
+  display: grid !important;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px !important;
+  min-width: 0;
+}
+
+.jobmodal-header-actions > button {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+    .jobmodal-grid {
+      grid-template-columns: 1fr !important;
+      gap: 10px !important;
+    }
+
+   .jobmodal-two-col,
+.jobmodal-three-col,
+.jobmodal-mga-grid,
+.jobmodal-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+    .jobmodal-client-header {
+      flex-direction: column !important;
+      align-items: stretch !important;
+    }
+
+    jobmodal-client-actions {
+  width: 100%;
+  display: grid !important;
+  grid-template-columns: 1fr;
+  gap: 8px !important;
+  min-width: 0;
+}
+
+.jobmodal-client-actions > button {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  justify-content: center;
+  min-height: 40px;
+  font-size: 0.9rem;
+  padding: 0.55rem 0.8rem;
+  box-sizing: border-box;
+}
+
+    .jobmodal-client-actions > button:last-child {
+      grid-column: 1 / -1;
+    }
+
+    .jobmodal-footer {
+      position: static !important;
+      margin-top: 16px !important;
+      padding: 10px 0 calc(10px + env(safe-area-inset-bottom)) !important;
+      background: transparent !important;
+      border-top: 1px solid rgba(0,0,0,0.08);
+      justify-content: stretch !important;
+      flex-direction: column !important;
+      align-items: stretch !important;
+    }
+
+    .jobmodal-footer > * {
+      width: 100%;
+    }
+
+    .jobmodal-footer-select {
+      width: 100% !important;
+    }
+
+    .jobmodal-footer-actions {
+  display: grid !important;
+  grid-template-columns: 1fr;
+  gap: 8px !important;
+  width: 100%;
+  min-width: 0;
+}
+
+.jobmodal-footer-actions > button {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  justify-content: center;
+  min-height: 42px;
+  box-sizing: border-box;
+}
+
+.jobmodal-card {
+  overflow-x: hidden !important;
+}
+
+.jobmodal-card > * {
+  min-width: 0;
+}
+
+.jobmodal-grid > *,
+.jobmodal-two-col > *,
+.jobmodal-three-col > *,
+.jobmodal-mga-grid > * {
+  min-width: 0;
+}
+
+.jobmodal-card input,
+.jobmodal-card select,
+.jobmodal-card textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.jobmodal-card .input,
+.jobmodal-card .maps-search-input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+  .jobmodal-grid > div {
+  min-width: 0;
+}
+    .jobmodal-footer-actions > button:last-child {
+      grid-column: 1 / -1;
+    }
+  }
+`}</style>
+
+<div className="jobmodal-footer" style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
+ {canEdit && (
+  <>
+    <select
+      className="input jobmodal-footer-select"
+      value={stickerPosition}
+      onChange={(e) => setStickerPosition(e.target.value)}
+      disabled={saving}
+      style={{ width: 170 }}
+    >
+      <option value="top-left">Sticker: Top left</option>
+      <option value="top-right">Sticker: Top right</option>
+      <option value="bottom-left">Sticker: Bottom left</option>
+      <option value="bottom-right">Sticker: Bottom right</option>
+    </select>
+
+    <div className="jobmodal-footer-actions">
       <button className="btn-pill" onClick={handlePrintSticker} type="button" disabled={saving}>
         Print Sticker
       </button>
@@ -2144,8 +2427,9 @@ onChange={(e) => {
       >
         {saving ? "Saving…" : "Save"}
       </button>
-    </>
-  )}
+    </div>
+  </>
+)}
 
   {!canEdit && (
     <button className="btn-pill primary" onClick={onClose} type="button">
