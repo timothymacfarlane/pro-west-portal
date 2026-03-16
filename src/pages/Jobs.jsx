@@ -3325,7 +3325,7 @@ onClick={() => {
         
       {/* Job register list (paged + sortable) */}
       <div className="card" style={{ marginTop: 14 }}>
-        <div className="jobs-register-head" style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <div>
             <h3 className="card-title" style={{ marginBottom: 6 }}>Job register</h3>
             <div style={{ fontSize: 12, opacity: 0.75 }}>
@@ -3580,14 +3580,6 @@ onClick={() => {
     background:rgba(255,255,255,0.04);
   }
 
-  .jobs-register-head{
-    display:flex;
-    justify-content:space-between;
-    gap:12px;
-    align-items:center;
-    flex-wrap:wrap;
-  }
-
   @media (max-width: 860px) {
     .jobs-two-col { grid-template-columns: 1fr !important; }
     .jobs-selected-grid { grid-template-columns: 1fr !important; }
@@ -3597,17 +3589,6 @@ onClick={() => {
       align-items:flex-start;
       flex-direction:column;
       gap:6px;
-    }
-
-    .jobs-register-head{
-      align-items:flex-start;
-      flex-direction:column;
-      gap:8px;
-    }
-
-        .btn-pill{
-      padding:7px 10px;
-      font-size:12px;
     }
 
     .jobs-filters-wrap{
