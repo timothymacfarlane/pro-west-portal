@@ -2763,3 +2763,308 @@ body,
   overscroll-behavior-y: contain;
 }
 
+/* =========================
+   JOB PLANNING (NEW CLEAN UI)
+   ========================= */
+
+.job-planning-grid {
+  width: 100%;
+  min-width: 1120px;
+  border-collapse: separate;
+  border-spacing: 10px;
+  table-layout: fixed;
+}
+
+.job-planning-col-day {
+  background: transparent;
+  border: none;
+  padding: 0 0 0.35rem 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: left;
+  color: #444;
+}
+
+.job-planning-day-cell {
+  vertical-align: top;
+  background: #ffffff;
+  border: 1px solid #e6e6e6;
+  border-radius: 16px;
+  padding: 0;
+  height: 220px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+  overflow: hidden;
+}
+
+.job-planning-day-cell:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+  border-color: #d7d7d7;
+}
+
+.job-planning-day-cell-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  height: 100%;
+  padding: 0.7rem;
+}
+
+.job-planning-day-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid #f1f1f1;
+}
+
+.job-planning-day-number {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #1f1f1f;
+}
+
+.job-planning-day-count {
+  font-size: 0.68rem;
+  padding: 0.22rem 0.5rem;
+  border-radius: 999px;
+  background: #f6f6f6;
+  color: #555;
+  font-weight: 600;
+}
+
+.job-planning-day-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.job-planning-day-job {
+  border: 1px solid #ececec;
+  background: #fafafa;
+  border-radius: 10px;
+  padding: 0.45rem;
+}
+
+.job-planning-day-job-number {
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+
+.job-planning-day-job-suburb {
+  font-size: 0.7rem;
+  color: #666;
+  opacity: 0.9;
+}
+
+.job-planning-day-job-notes {
+  font-size: 0.68rem;
+  color: #777;
+}
+
+.job-planning-empty-note {
+  font-size: 0.7rem;
+  color: #aaa;
+  font-style: italic;
+}
+
+.job-planning-selected-cell {
+  border-color: #90caf9;
+}
+
+.job-planning-today-cell {
+  border-color: #d32f2f;
+}
+
+/* New job highlight animation */
+.job-planning-new-highlight {
+  animation: jobHighlightFlash 1.5s ease;
+  border-color: #90caf9;
+  background: #e3f2fd;
+}
+
+@keyframes jobHighlightFlash {
+  0% {
+    background: #bbdefb;
+    transform: scale(1.02);
+  }
+  50% {
+    background: #e3f2fd;
+  }
+  100% {
+    background: #ffffff;
+    transform: scale(1);
+  }
+}
+
+.job-planning-drag-hint {
+  font-size: 0.68rem;
+  color: #888;
+  margin-top: 0.15rem;
+}
+
+.job-planning-edit-item {
+  border: 1px solid #ececec;
+  border-radius: 14px;
+  padding: 0.85rem;
+  background: #fff;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
+}
+
+.job-planning-edit-item:hover {
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.05);
+}
+
+.job-planning-edit-item.job-planning-dragging {
+  opacity: 0.45;
+  border-color: #90caf9;
+}
+
+.job-planning-edit-item.job-planning-drag-over {
+  border-color: #42a5f5;
+  box-shadow: 0 0 0 2px rgba(66, 165, 245, 0.18);
+}
+
+.job-planning-day-mini-month {
+  font-size: 0.66rem;
+  opacity: 0.6;
+  margin-top: 0.12rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.job-planning-editor-summary {
+  margin-top: 0.7rem;
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.job-planning-empty-editor {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: #7a7a7a;
+}
+
+.job-planning-edit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.job-planning-edit-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.job-planning-edit-item-title {
+  font-weight: 700;
+  color: #222;
+}
+
+.job-planning-edit-item-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+}
+
+.job-planning-job-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+/* Calendar job colours */
+.job-planning-day-job--red {
+  background: #ffebee;
+  border-color: #ef9a9a;
+}
+
+.job-planning-day-job--blue {
+  background: #e3f2fd;
+  border-color: #90caf9;
+}
+
+.job-planning-day-job--green {
+  background: #e8f5e9;
+  border-color: #a5d6a7;
+}
+
+.job-planning-day-job--yellow {
+  background: #fff8e1;
+  border-color: #ffe082;
+}
+
+.job-planning-day-job--purple {
+  background: #f3e5f5;
+  border-color: #ce93d8;
+}
+
+/* Edit card colours */
+.job-planning-edit-item--red {
+  background: #ffebee;
+  border-color: #ef9a9a;
+}
+
+.job-planning-edit-item--blue {
+  background: #e3f2fd;
+  border-color: #90caf9;
+}
+
+.job-planning-edit-item--green {
+  background: #e8f5e9;
+  border-color: #a5d6a7;
+}
+
+.job-planning-edit-item--yellow {
+  background: #fff8e1;
+  border-color: #ffe082;
+}
+
+.job-planning-edit-item--purple {
+  background: #f3e5f5;
+  border-color: #ce93d8;
+}
+
+.job-planning-day-job-top {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;   /* 👈 this creates the space */
+  flex-wrap: wrap;
+}
+
+.schedule-grid-scroll-top {
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 14px;
+  margin-bottom: 6px;
+}
+
+.schedule-grid-scroll-inner {
+  height: 1px;
+}
+
+.schedule-grid-scroll-top::-webkit-scrollbar,
+.schedule-grid-wrapper::-webkit-scrollbar {
+  height: 10px;
+}
+
+.schedule-grid-scroll-top::-webkit-scrollbar-thumb,
+.schedule-grid-wrapper::-webkit-scrollbar-thumb {
+  background: #c7c7c7;
+  border-radius: 999px;
+}
+
+.schedule-grid-scroll-top::-webkit-scrollbar-thumb:hover,
+.schedule-grid-wrapper::-webkit-scrollbar-thumb:hover {
+  background: #a9a9a9;
+}

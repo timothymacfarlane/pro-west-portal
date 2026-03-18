@@ -18,6 +18,7 @@ const JOB_CATEGORY_OPTIONS = [
   "Boundary Repeg",
   "Building Setout",
   "Feature and Contour Survey",
+  "Repeg and Setout",
   "Subdivision - Built Strata",
   "Subdivision - Green Title",
   "Subdivision - Survey Strata",
@@ -686,7 +687,7 @@ setNotes(i.notes ?? "");
 
 
   setError("");
-}, [open, mode, initial]);
+}, [open, mode, initial?.id]);
 const [jobCategory, setJobCategory] = useState(initial?.job_category ?? "");
   const [jobTypeLegacy, setJobTypeLegacy] = useState(initial?.job_type_legacy ?? "");
   const [jobDateLegacy, setJobDateLegacy] = useState(initial?.job_date_legacy ?? "");
@@ -2425,7 +2426,7 @@ onChange={(e) => {
         type="button"
         disabled={saving}
       >
-        {saving ? "Saving…" : "Save"}
+        {saving ? "Saving…" : "Save & Close"}
       </button>
     </div>
   </>
@@ -3278,7 +3279,7 @@ useEffect(() => {
     </p>
 
     {/* ✅ Total count + Refresh on the same row (nice on mobile) */}
-   <div className="jobs-header-meta">
+  <div className="jobs-header-meta">
   <div style={{ fontSize: 12, opacity: 0.75 }}>{headerStatusText}</div>
 
   <button
@@ -3307,11 +3308,11 @@ useEffect(() => {
   </div>
 </div>
 
-        <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+        <div className="jobs-search-row" style={{ marginTop: 10 }}>
           {/* Quick find */}
           <div className="jobs-mobile-card">
             <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>
-              Quick find (job number){jobNoLoading ? "…" : ""}
+              Job Number Search{jobNoLoading ? "…" : ""}
             </div>
 
             <input
@@ -3427,7 +3428,7 @@ useEffect(() => {
           {/* Global search */}
           <div className="jobs-mobile-card">
             <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>
-              Global search{globalLoading ? "…" : ""}
+              Global Search{globalLoading ? "…" : ""}
             </div>
 
             <input
@@ -3550,7 +3551,7 @@ onClick={() => {
 )}
                 </div>
 
-          <div className="jobs-filters-wrap">
+          <div className="jobs-filters-wrap jobs-filters-full">
             <div className="jobs-filters-row">
               <div className="jobs-filters-group">
                 <div className="jobs-filters-label">
@@ -3800,13 +3801,14 @@ onClick={() => {
     margin-top:6px;
   }
 
-  .jobs-filters-wrap{
-    margin-top:4px;
-    padding:6px 8px;
-    border-radius:10px;
-    background:rgba(255,255,255,0.025);
-  }
-
+.jobs-filters-wrap{
+  margin-top:4px;
+  padding:6px 8px;
+  border-radius:10px;
+  background:rgba(255,255,255,0.025);
+  width:100%;
+  box-sizing:border-box;
+}
   .jobs-filters-row{
     display:grid;
     gap:6px;
@@ -3864,9 +3866,29 @@ onClick={() => {
     background:rgba(255,255,255,0.04);
   }
 
+.jobs-search-row{
+  display:grid;
+  grid-template-columns: 0.35fr 0.65fr;
+  gap:12px;
+  align-items:start;
+}
+
+.jobs-search-row > .jobs-mobile-card{
+  height:100%;
+}
+
+.jobs-filters-full{
+  grid-column: 1 / -1;
+}
+
   @media (max-width: 860px) {
     .jobs-two-col { grid-template-columns: 1fr !important; }
     .jobs-selected-grid { grid-template-columns: 1fr !important; }
+
+        .jobs-search-row{
+      grid-template-columns: 1fr;
+      gap:12px;
+    }
 
     .jobs-header-meta{
       width:100%;

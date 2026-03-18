@@ -13,6 +13,7 @@ const Admin = lazy(() => import("./pages/Admin.jsx"));
 const Contacts = lazy(() => import("./pages/Contacts.jsx"));
 const Documents = lazy(() => import("./pages/Documents.jsx"));
 const Jobs = lazy(() => import("./pages/Jobs.jsx"));
+const JobPlanning = lazy(() => import("./pages/JobPlanning.jsx"));
 const MyJobs = lazy(() => import("./pages/MyJobs.jsx"));
 const Maps = lazy(() => import("./pages/Maps.jsx"));
 const Profile = lazy(() => import("./pages/Profile.jsx"));
@@ -244,7 +245,18 @@ function App() {
                     <span className="nav-label">Jobs</span>
                   </NavLink>
                 </li>
-
+{!authLoading && isAdmin && (
+  <li>
+    <NavLink
+      to="/job-planning"
+      className="nav-link"
+      onClick={closeMobileSidebar}
+    >
+      <span className="nav-icon">🗓️</span>
+      <span className="nav-label">Job Planning</span>
+    </NavLink>
+  </li>
+)}
                 <li>
                   <NavLink
                     to="/maps"
@@ -412,7 +424,14 @@ function App() {
           </ProtectedRoute>
         }
       />
-
+<Route
+  path="/job-planning"
+  element={
+    <ProtectedRoute adminOnly>
+      <JobPlanning />
+    </ProtectedRoute>
+  }
+/>
       <Route
         path="/maps"
         element={
