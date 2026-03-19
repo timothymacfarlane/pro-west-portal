@@ -141,8 +141,12 @@ const LGATE_199_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Property_and_Planning/MapServer/62/query"; // RM
 const LGATE_001_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Property_and_Planning/MapServer/2/query"; // Cadastre (LGATE-001)
+const LGATE_233_QUERY =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Boundaries/MapServer/14/query"; // LGA Boundaries (LGATE-233)
+const DPLH_070_QUERY =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Property_and_Planning/MapServer/111/query"; // R-Codes Zoning (DPLH-070)
 
-// ---- Speed knobs ----
+  // ---- Speed knobs ----
 const MIN_GEODETIC_ZOOM = 12;
 const MIN_CADASTRE_ZOOM = 13;
 const SHOW_LABELS_ZOOM = 15;
@@ -650,7 +654,7 @@ function Maps() {
   const viewRef = useRef({ bounds: null, zoom: null });
 
   // Fetch throttles + caches
-  const lastFetchRef = useRef({ ssm076: 0, rm199: 0, cad001: 0 });
+  const lastFetchRef = useRef({ ssm076: 0, rm199: 0, cad001: 0, lga233: 0, zoning070: 0 });
   const liveParentsRef = useRef([]);
 
   // Geodetic markers
@@ -662,8 +666,10 @@ function Maps() {
   });
   const clustererRef = useRef(null);
 
-  // Cadastre
+  // Cadastre + local authority
   const cadastreDataRef = useRef(null);
+  const lga233DataRef = useRef(null);
+  const zoning070DataRef = useRef(null);
 
   // Portal jobs markers/cluster
   const portalClustererRef = useRef(null);
@@ -2874,6 +2880,8 @@ const handleMyLocation = () => {
       const hasBM = prev.some((l) => l.id === "bm076");
       const hasRM = prev.some((l) => l.id === "rm199");
       const hasCad = prev.some((l) => l.id === "cad001");
+      const hasLGA = prev.some((l) => l.id === "lga233");
+      const hasZoning = prev.some((l) => l.id === "zoning070");
       const next = [...prev];
 
       if (!hasSSM)
@@ -2911,7 +2919,30 @@ const handleMyLocation = () => {
           visible: false,
           data: { url: LGATE_001_QUERY },
         });
-
+   if (!hasLGA)
+  next.push({
+    id: "lga233",
+    name: "LGA Boundaries (LGATE-233)",
+    type: "polygon",
+    visible: false,
+    data: {
+      url: LGATE_233_QUERY,
+      where: "1=1",
+      minZoom: 0,
+    },
+  });
+  if (!hasZoning)
+  next.push({
+    id: "zoning070",
+    name: "R-Codes Zoning (DPLH-070)",
+    type: "polygon",
+    visible: false,
+    data: {
+      url: DPLH_070_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+    },
+  });
       return next;
     });
   }, []);
@@ -3266,7 +3297,8 @@ const handleMyLocation = () => {
 
     const cadLayer = layers.find((l) => l.id === "cad001");
     const dataLayer = cadastreDataRef.current;
-    const { bounds, zoom } = viewRef.current || {};
+    const bounds = viewRef.current?.bounds || map.getBounds();
+    const zoom = viewRef.current?.zoom ?? map.getZoom();
 
     if (!cadLayer?.visible || !bounds || (zoom ?? 0) < MIN_CADASTRE_ZOOM) {
       dataLayer.forEach((f) => dataLayer.remove(f));
@@ -3301,6 +3333,338 @@ const handleMyLocation = () => {
     };
   }, [layers, viewTick, isAppVisible]);
 
+   // ✅ Local Authority boundaries (Landgate-style)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.google) return;
+    if (!isAppVisible) return;
+
+    if (!lga233DataRef.current) {
+  lga233DataRef.current = {
+    polygons: new window.google.maps.Data(),
+    labels: [],
+  };
+
+  lga233DataRef.current.polygons.setMap(map);
+  lga233DataRef.current.polygons.setStyle({
+    clickable: false,
+    strokeColor: "#2e7d32",
+    strokeWeight: 1.5,
+    fillColor: "#a5d6a7",
+    fillOpacity: 0.25,
+  });
+}
+
+    const lgaLayer = layers.find((l) => l.id === "lga233");
+    const store = lga233DataRef.current;
+    const dataLayer = store.polygons;
+    const bounds = viewRef.current?.bounds || map.getBounds();
+    const zoom = viewRef.current?.zoom ?? map.getZoom();
+
+    const clearLabels = () => {
+      store.labels.forEach((m) => {
+        try {
+          m.setMap(null);
+        } catch {
+          // ignore
+        }
+      });
+      store.labels = [];
+    };
+
+    const clearLayer = () => {
+      dataLayer.forEach((f) => dataLayer.remove(f));
+      clearLabels();
+    };
+
+    if (
+      !lgaLayer?.visible ||
+      !bounds ||
+      (zoom ?? 0) < (lgaLayer.data?.minZoom ?? MIN_CADASTRE_ZOOM)
+    ) {
+      clearLayer();
+      return;
+    }
+
+    const now = Date.now();
+    if (now - (lastFetchRef.current.lga233 || 0) < CADASTRE_FETCH_THROTTLE_MS)
+      return;
+    lastFetchRef.current.lga233 = now;
+
+    let cancelled = false;
+
+    const getCentroidFromGeometry = (geometry) => {
+      const b = new window.google.maps.LatLngBounds();
+
+      const walk = (g) => {
+        if (!g) return;
+        const type = g.getType();
+
+        if (type === "Point") {
+          b.extend(g.get());
+        } else if (type === "MultiPoint" || type === "LineString") {
+          g.getArray().forEach((latLng) => b.extend(latLng));
+        } else if (type === "MultiLineString" || type === "Polygon") {
+          g.getArray().forEach((part) => walk(part));
+        } else if (type === "MultiPolygon") {
+          g.getArray().forEach((poly) => walk(poly));
+        } else if (type === "LinearRing") {
+          g.getArray().forEach((latLng) => b.extend(latLng));
+        }
+      };
+
+      walk(geometry);
+
+      if (b.isEmpty()) return null;
+      return b.getCenter();
+    };
+
+    (async () => {
+      try {
+        const geojson = await fetchArcgisGeojsonInView(
+          lgaLayer.data.url,
+          bounds,
+          lgaLayer.data.where || "1=1"
+        );
+        if (cancelled) return;
+
+        clearLayer();
+        dataLayer.addGeoJson(geojson);
+
+        const nextLabels = [];
+
+if ((zoom ?? 0) >= 8) {
+  dataLayer.forEach((feature) => {
+    const name = feature.getProperty("name") || "";
+    const center = getCentroidFromGeometry(feature.getGeometry());
+    if (!center || !name) return;
+
+    const marker = new window.google.maps.Marker({
+      position: center,
+      map,
+      clickable: false,
+      zIndex: 1,
+      icon: {
+        path: "M 0 0",
+        strokeOpacity: 0,
+        fillOpacity: 0,
+        scale: 0,
+      },
+      label: {
+        text: String(name),
+        color: "#1b5e20",
+        fontWeight: "600",
+        fontSize: zoom >= 12 ? "12px" : "10px",
+      },
+    });
+
+    nextLabels.push(marker);
+  });
+}
+
+        store.labels = nextLabels;
+      } catch (err) {
+        console.warn("LGA fetch failed:", err);
+        clearLayer();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [layers, viewTick, isAppVisible]);
+
+// ✅ R-Codes Zoning (Landgate-style)
+useEffect(() => {
+  const map = mapRef.current;
+  if (!map || !window.google) return;
+  if (!isAppVisible) return;
+
+ if (!zoning070DataRef.current) {
+  zoning070DataRef.current = {
+    polygons: new window.google.maps.Data(),
+    labels: [],
+  };
+
+  zoning070DataRef.current.polygons.setMap(map);
+  zoning070DataRef.current.polygons.setStyle({
+    clickable: false,
+    strokeColor: "#c62828",
+    strokeWeight: 1.2,
+    fillColor: "#ef9a9a",
+    fillOpacity: 0.22,
+  });
+}
+
+const zoningLayer = layers.find((l) => l.id === "zoning070");
+const store = zoning070DataRef.current;
+const dataLayer = store.polygons;
+
+  const bounds = viewRef.current?.bounds || map.getBounds();
+  const zoom = viewRef.current?.zoom ?? map.getZoom();
+
+  const getCentroidFromGeometry = (geometry) => {
+  const b = new window.google.maps.LatLngBounds();
+
+  const walk = (g) => {
+    if (!g) return;
+    const type = g.getType();
+
+    if (type === "Point") {
+      b.extend(g.get());
+    } else if (type === "MultiPoint" || type === "LineString") {
+      g.getArray().forEach((latLng) => b.extend(latLng));
+    } else if (type === "MultiLineString" || type === "Polygon") {
+      g.getArray().forEach((part) => walk(part));
+    } else if (type === "MultiPolygon") {
+      g.getArray().forEach((poly) => walk(poly));
+    } else if (type === "LinearRing") {
+      g.getArray().forEach((latLng) => b.extend(latLng));
+    }
+  };
+
+  walk(geometry);
+
+  if (b.isEmpty()) return null;
+  return b.getCenter();
+};
+
+ const clearLabels = () => {
+  store.labels.forEach((m) => {
+    try {
+      m.setMap(null);
+    } catch {
+      // ignore
+    }
+  });
+  store.labels = [];
+};
+
+const clearLayer = () => {
+  dataLayer.forEach((f) => dataLayer.remove(f));
+  clearLabels();
+};
+
+  if (
+    !zoningLayer?.visible ||
+    !bounds ||
+    (zoom ?? 0) < (zoningLayer.data?.minZoom ?? MIN_CADASTRE_ZOOM)
+  ) {
+    clearLayer();
+    return;
+  }
+
+  const now = Date.now();
+  if (now - (lastFetchRef.current.zoning070 || 0) < CADASTRE_FETCH_THROTTLE_MS)
+    return;
+  lastFetchRef.current.zoning070 = now;
+
+  let cancelled = false;
+
+  (async () => {
+    try {
+      const geojson = await fetchArcgisGeojsonInView(
+        zoningLayer.data.url,
+        bounds,
+        zoningLayer.data.where || "1=1"
+      );
+      if (cancelled) return;
+
+      clearLayer();
+      dataLayer.addGeoJson(geojson);
+      const nextLabels = [];
+
+const labelFieldCandidates = [
+  "zone_code",
+  "zone",
+  "r_code",
+  "rcode",
+  "coding",
+  "code",
+  "name",
+  "label",
+];
+
+const getZoneLabel = (feature) => {
+  for (const key of labelFieldCandidates) {
+    const v = feature.getProperty(key);
+    if (v !== undefined && v !== null && String(v).trim() !== "") {
+      return String(v).trim();
+    }
+  }
+  return "";
+};
+
+const makeLabelMarker = (text, position) =>
+  new window.google.maps.Marker({
+    position,
+    map,
+    clickable: false,
+    zIndex: 1,
+    icon: {
+      path: "M 0 0",
+      strokeOpacity: 0,
+      fillOpacity: 0,
+      scale: 0,
+    },
+    label: {
+      text,
+      color: "#8b0000",
+      fontWeight: "700",
+      fontSize: zoom >= 15 ? "12px" : "10px",
+    },
+  });
+
+dataLayer.forEach((feature) => {
+  const text = getZoneLabel(feature);
+  const center = getCentroidFromGeometry(feature.getGeometry());
+  if (!center || !text) return;
+
+  nextLabels.push(makeLabelMarker(text, center));
+
+  if ((zoom ?? 0) >= 15) {
+    const latStep = 0.0035;
+    const lngStep = 0.0035;
+
+    nextLabels.push(
+      makeLabelMarker(
+        text,
+        new window.google.maps.LatLng(center.lat() + latStep, center.lng())
+      )
+    );
+    nextLabels.push(
+      makeLabelMarker(
+        text,
+        new window.google.maps.LatLng(center.lat() - latStep, center.lng())
+      )
+    );
+    nextLabels.push(
+      makeLabelMarker(
+        text,
+        new window.google.maps.LatLng(center.lat(), center.lng() + lngStep)
+      )
+    );
+    nextLabels.push(
+      makeLabelMarker(
+        text,
+        new window.google.maps.LatLng(center.lat(), center.lng() - lngStep)
+      )
+    );
+  }
+});
+
+store.labels = nextLabels;
+    } catch (err) {
+      console.warn("Zoning fetch failed:", err);
+      clearLayer();
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [layers, viewTick, isAppVisible]);
+  
   const toggleLayer = (id) => {
     setLayers((prev) =>
       prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l))
@@ -3751,7 +4115,7 @@ onBlur={() => {
                   </div>
                 </div>
 
-                <div className="maps-layer-section">
+                               <div className="maps-layer-section">
                   <div className="maps-layer-section-title row-between">
                     <span>Geodetic Survey Marks</span>
                     <button
@@ -3780,13 +4144,47 @@ onBlur={() => {
                           </label>
                         </div>
                       ))}
-                  </div>
+                  </div>                
+                </div>
 
-                  <div className="maps-layer-hint">
-                    Tip: zoom to <b>{MIN_GEODETIC_ZOOM}+</b> for marks, and{" "}
-                    <b>{MIN_CADASTRE_ZOOM}+</b> for cadastre.
+                <div className="maps-layer-section">
+                  <div className="maps-layer-section-title">Local Authority</div>
+                  <div className="layers-list">
+                    {layers
+                      .filter((l) => l.id === "lga233")
+                      .map((l) => (
+                        <div key={l.id} className="layer-row layer-row-compact">
+                          <label className="layer-left">
+                            <input
+                              type="checkbox"
+                              checked={l.visible}
+                              onChange={() => toggleLayer(l.id)}
+                            />
+                            <span className="layer-name">{l.name}</span>
+                          </label>
+                        </div>
+                      ))}
                   </div>
                 </div>
+                <div className="maps-layer-section">
+  <div className="maps-layer-section-title">Planning</div>
+  <div className="layers-list">
+    {layers
+      .filter((l) => l.id === "zoning070")
+      .map((l) => (
+        <div key={l.id} className="layer-row layer-row-compact">
+          <label className="layer-left">
+            <input
+              type="checkbox"
+              checked={l.visible}
+              onChange={() => toggleLayer(l.id)}
+            />
+            <span className="layer-name">{l.name}</span>
+          </label>
+        </div>
+      ))}
+  </div>
+</div>
               </div>
             )}
 
@@ -4069,7 +4467,26 @@ onBlur={() => {
                       <div className="maps-legend-sub">LGATE-001 (thin white boundary)</div>
                     </div>
                   </div>
-
+                  <div className="maps-legend-row">
+                    <span
+                      className="maps-legend-line"
+                      style={{ background: "#0b5d1e", height: 2 }}
+                    />
+                    <div>
+                      <div className="maps-legend-title">Local Authority</div>
+                     <div className="maps-legend-sub">LGATE-233 (green boundary, light green fill + label)</div>
+                    </div>
+                  </div>
+                  <div className="maps-legend-row">
+  <span
+    className="maps-legend-line"
+    style={{ background: "#c62828", height: 2 }}
+  />
+  <div>
+    <div className="maps-legend-title">R-Codes Zoning</div>
+    <div className="maps-legend-sub">DPLH-070 (red boundary, light red fill + zoning labels)</div>
+  </div>
+</div>
 
                   <div className="maps-legend-row">
                     <span
