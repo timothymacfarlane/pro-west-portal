@@ -119,13 +119,17 @@ function Timesheets() {
   const [jumpDate, setJumpDate] = useState(periodStartIso);
   useEffect(() => setJumpDate(periodStartIso), [periodStartIso]);
 
-  const [entries, setEntries] = useState({});
-  const [loadingPeriod, setLoadingPeriod] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [statusMessage, setStatusMessage] = useState("");
-  const [statusError, setStatusError] = useState("");
-  const [savedFields, setSavedFields] = useState({});
-  const [dirtyFields, setDirtyFields] = useState({});
+const [entries, setEntries] = useState({});
+const [loadingPeriod, setLoadingPeriod] = useState(false);
+const [busy, setBusy] = useState(false);
+const [statusMessage, setStatusMessage] = useState("");
+const [statusError, setStatusError] = useState("");
+const [savedFields, setSavedFields] = useState({});
+const [dirtyFields, setDirtyFields] = useState({});
+const [isLocked, setIsLocked] = useState(false);
+const [lockMeta, setLockMeta] = useState(null);
+
+
   const isAppVisible = useAppVisibilityContext();
 
   // Load staff list (admin) for dropdown + colleague suggestions
@@ -202,22 +206,37 @@ function Timesheets() {
         return;
       }
 
-      const map = {};
-      (data || []).forEach((row) => {
-        const key = row.entry_date;
-        map[key] = {
-          colleague: row.colleague || "",
-          start: row.start_time || "",
-          finish: row.finish_time || "",
-          lunch: row.lunch || "",
-          notes: row.notes || "",
-        };
-      });
+const map = {};
+(data || []).forEach((row) => {
+  const key = row.entry_date;
+  map[key] = {
+    colleague: row.colleague || "",
+    start: row.start_time || "",
+    finish: row.finish_time || "",
+    lunch: row.lunch || "",
+    notes: row.notes || "",
+  };
+});
 
-      setEntries(map);
-      setSavedFields({});
-      setDirtyFields({});
-      setLoadingPeriod(false);
+const { data: lockRow, error: lockError } = await supabase
+  .from("timesheet_locks")
+  .select("*")
+  .eq("user_id", selectedUserId)
+  .eq("period_start", periodStartIso)
+  .maybeSingle();
+
+  if (cancelled) return;
+
+if (lockError) {
+  console.warn("Error loading timesheet lock:", lockError.message);
+}
+
+setEntries(map);
+setIsLocked(!!lockRow?.is_locked);
+setLockMeta(lockRow || null);
+setSavedFields({});
+setDirtyFields({});
+setLoadingPeriod(false);
     };
 
     loadEntries();
@@ -241,19 +260,16 @@ function Timesheets() {
   );
 const fieldKey = (dateKey, field) => `${dateKey}__${field}`;
 
- const handleFieldChange = (dateKey, field, value) => {
+const handleFieldChange = (dateKey, field, value) => {
+  if (!isEditable) return;
+
   setEntries((prev) => ({
     ...prev,
     [dateKey]: { ...(prev[dateKey] || {}), [field]: value },
   }));
 
-
-  // mark this specific input as edited since last save
   const k = fieldKey(dateKey, field);
   setDirtyFields((prev) => ({ ...prev, [k]: true }));
-};
-const clearField = (dateKey, field) => {
-  handleFieldChange(dateKey, field, "");
 };
 
   const inputClass = (dateKey, field) => {
@@ -312,6 +328,7 @@ const isWeek2Complete = useMemo(() => {
 }, [week2Rows]);
 
 const canNavigateFortnight = isWeek2Complete;
+const isEditable = !isLocked;
 
   const week1TotalMinutes = week1Rows.reduce((sum, r) => sum + (r.workedMinutes || 0), 0);
   const week2TotalMinutes = week2Rows.reduce((sum, r) => sum + (r.workedMinutes || 0), 0);
@@ -319,13 +336,14 @@ const canNavigateFortnight = isWeek2Complete;
 
   const blockIfLocked = () => {
   if (canNavigateFortnight) return false;
-  setStatusError("Fortnight is locked until Week 2 is complete.");
+  setStatusError("Complete or save Week 2 before moving to another fortnight.");
   setStatusMessage("");
   return true;
 };
 
 const goPreviousFortnight = () => {
   if (busy) return;
+  if (blockIfLocked()) return;
   setPeriodStart((prev) => startOfPayFortnightMonday(addDays(prev, -14)));
   setStatusMessage("");
   setStatusError("");
@@ -333,6 +351,7 @@ const goPreviousFortnight = () => {
 
 const goCurrentFortnight = () => {
   if (busy) return;
+  if (blockIfLocked()) return;
   setPeriodStart(startOfPayFortnightMonday());
   setStatusMessage("");
   setStatusError("");
@@ -340,6 +359,7 @@ const goCurrentFortnight = () => {
 
 const goNextFortnight = () => {
   if (busy) return;
+  if (blockIfLocked()) return;
   setPeriodStart((prev) => startOfPayFortnightMonday(addDays(prev, 14)));
   setStatusMessage("");
   setStatusError("");
@@ -350,11 +370,11 @@ const handleJumpDateChange = (e) => {
   setJumpDate(val);
 
   if (!val || busy) return;
+  if (blockIfLocked()) return;
 
   const chosen = new Date(val + "T00:00:00");
   if (Number.isNaN(chosen.getTime())) return;
 
-  // ✅ snap to the correct pay-cycle fortnight Monday
   setPeriodStart(startOfPayFortnightMonday(chosen));
   setStatusMessage("");
   setStatusError("");
@@ -379,7 +399,7 @@ const handleJumpDateChange = (e) => {
       }));
   };
 
-  const saveFortnightToSupabase = async (payload) => {
+const saveFortnightToSupabase = async (payload) => {
   const endIso = localIsoDate(addDays(periodStart, 13));
 
   const { error: delError } = await supabase
@@ -390,6 +410,8 @@ const handleJumpDateChange = (e) => {
     .lte("entry_date", endIso);
 
   if (delError) throw delError;
+
+  if (!payload.length) return;
 
   const { error: insError } = await supabase
     .from("timesheet_entries")
@@ -469,11 +491,6 @@ lines.push(
     if (!user || !selectedUserId) return;
 
     const payload = buildFortnightEntries();
-    if (payload.length === 0) {
-      setStatusError("No timesheet entries to save for this fortnight. Add some rows first.");
-      setStatusMessage("");
-      return;
-    }
 
     setBusy(true);
     setStatusError("");
@@ -481,28 +498,9 @@ lines.push(
 
     try {
       await saveFortnightToSupabase(payload);
-if (isWeek2Complete) {
-  setStatusMessage("Fortnight complete — exported.");
-  setStatusError("");
-  // stay on the current fortnight (no auto-advance)
-}
 
-      // mark all currently-entered fields as saved
-setSavedFields(() => {
-  const next = {};
-  Object.entries(entries).forEach(([dateKey, row]) => {
-    ["colleague", "start", "finish", "lunch", "notes"].forEach((f) => {
-      const v = row?.[f];
-      if (v && String(v).trim() !== "") {
-        next[fieldKey(dateKey, f)] = true;
-      }
-    });
-  });
-  return next;
-});
+markCurrentFieldsSaved();
 
-// everything is now saved, so clear dirty flags
-setDirtyFields({});
       setStatusMessage("Fortnight saved.");
     } catch (err) {
       console.error("Error saving fortnight:", err);
@@ -512,6 +510,123 @@ setDirtyFields({});
       setBusy(false);
     }
   };
+
+const markCurrentFieldsSaved = () => {
+  setSavedFields(() => {
+    const next = {};
+    Object.entries(entries).forEach(([dateKey, row]) => {
+      ["colleague", "start", "finish", "lunch", "notes"].forEach((f) => {
+        const v = row?.[f];
+        if (v && String(v).trim() !== "") {
+          next[fieldKey(dateKey, f)] = true;
+        }
+      });
+    });
+    return next;
+  });
+
+  setDirtyFields({});
+};
+
+const handleLockFortnight = async () => {
+  if (!user || !selectedUserId) return;
+  if (isLocked) return;
+
+  const confirmed = window.confirm(
+    "Are you sure you want to lock and submit this timesheet? Once locked, you will not be able to edit it unless an admin unlocks it."
+  );
+
+  if (!confirmed) return;
+
+  const payload = buildFortnightEntries();
+  if (payload.length === 0) {
+    setStatusError("No timesheet entries to lock for this fortnight.");
+    setStatusMessage("");
+    return;
+  }
+
+  setBusy(true);
+  setStatusError("");
+  setStatusMessage("");
+
+  try {
+    await saveFortnightToSupabase(payload);
+
+    const { data, error } = await supabase
+      .from("timesheet_locks")
+      .upsert(
+        {
+          user_id: selectedUserId,
+          period_start: periodStartIso,
+          is_locked: true,
+          locked_at: new Date().toISOString(),
+          locked_by: user.id,
+          unlocked_at: null,
+          unlocked_by: null,
+        },
+        { onConflict: "user_id,period_start" }
+      )
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    markCurrentFieldsSaved();
+    setIsLocked(true);
+    setLockMeta(data || null);
+    setStatusMessage("Timesheet locked and submitted.");
+  } catch (err) {
+    console.error("Error locking fortnight:", err);
+    const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+    setStatusError(`There was a problem locking this fortnight. (${msg})`);
+  } finally {
+    setBusy(false);
+  }
+};
+
+const handleUnlockFortnight = async () => {
+  if (!user || !selectedUserId || !isAdmin) return;
+  if (!isLocked) return;
+
+  const confirmed = window.confirm(
+    "Unlock this timesheet? The employee will be able to edit it again."
+  );
+
+  if (!confirmed) return;
+
+  setBusy(true);
+  setStatusError("");
+  setStatusMessage("");
+
+  try {
+    const { data, error } = await supabase
+      .from("timesheet_locks")
+      .upsert(
+        {
+          user_id: selectedUserId,
+          period_start: periodStartIso,
+          is_locked: false,
+          unlocked_at: new Date().toISOString(),
+          unlocked_by: user.id,
+        },
+        { onConflict: "user_id,period_start" }
+      )
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    setIsLocked(false);
+    setLockMeta(data || null);
+    setStatusMessage("Timesheet unlocked.");
+  } catch (err) {
+    console.error("Error unlocking fortnight:", err);
+    const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+    setStatusError(`There was a problem unlocking this fortnight. (${msg})`);
+  } finally {
+    setBusy(false);
+  }
+};
 
   const handleSubmitFortnight = async () => {
     if (!user || !selectedUserId) return;
@@ -529,28 +644,9 @@ setDirtyFields({});
 
     try {
       await saveFortnightToSupabase(payload);
-     if (isWeek2Complete) {
-  setStatusMessage("Fortnight complete — saved.");
-  setStatusError("");
-  // stay on the current fortnight (no auto-advance)
-}
 
-      // mark all currently-entered fields as saved
-setSavedFields(() => {
-  const next = {};
-  Object.entries(entries).forEach(([dateKey, row]) => {
-    ["colleague", "start", "finish", "lunch", "notes"].forEach((f) => {
-      const v = row?.[f];
-      if (v && String(v).trim() !== "") {
-        next[fieldKey(dateKey, f)] = true;
-      }
-    });
-  });
-  return next;
-});
 
-// everything is now saved, so clear dirty flags
-setDirtyFields({});
+markCurrentFieldsSaved();
 
 
       const csv = buildCsv();
@@ -615,12 +711,41 @@ setDirtyFields({});
           <button type="button" className="btn-pill" onClick={goNextFortnight} disabled={loadingPeriod || busy}>
             Next ▶
           </button>
-          <button type="button" className="btn-pill" onClick={handleSaveFortnight} disabled={loadingPeriod || busy}>
-            {busy ? "Saving…" : "Save Fortnight"}
-          </button>
-          <button type="button" className="btn-pill primary" onClick={handleSubmitFortnight} disabled={loadingPeriod || busy}>
-            {busy ? "Working…" : "Export Fortnight"}
-          </button>
+        <button
+  type="button"
+  className={`btn-pill ${isLocked ? "ts-lock-btn is-locked" : ""}`}
+  onClick={isLocked ? handleUnlockFortnight : handleLockFortnight}
+  disabled={loadingPeriod || busy || (!isAdmin && isLocked)}
+  title={
+    isLocked
+      ? (isAdmin ? "Unlock this fortnight" : "This fortnight has been locked")
+      : "Lock and submit this fortnight"
+  }
+>
+  {busy
+    ? "Working…"
+    : isLocked
+      ? (isAdmin ? "Unlock Timesheet" : "Timesheet Locked")
+      : "Lock Timesheet"}
+</button>
+
+<button
+  type="button"
+  className="btn-pill"
+  onClick={handleSaveFortnight}
+  disabled={loadingPeriod || busy || !isEditable}
+>
+  {busy ? "Saving…" : "Save Fortnight"}
+</button>
+
+<button
+  type="button"
+  className="btn-pill primary"
+  onClick={handleSubmitFortnight}
+  disabled={loadingPeriod || busy}
+>
+  {busy ? "Working…" : "Export Fortnight"}
+</button>
         </>
       }
     >
@@ -684,6 +809,19 @@ setDirtyFields({});
             Loading existing entries…
           </p>
         )}
+
+        {isLocked && (
+  <p
+    style={{
+      marginTop: "0.5rem",
+      fontSize: "0.85rem",
+      color: "#1565c0",
+      fontWeight: 600,
+    }}
+  >
+    This fortnight has been locked and submitted. Only Admin can unlock it to make changes.
+  </p>
+)}
       </div>
 
       {/* Week 1 */}
@@ -720,49 +858,86 @@ setDirtyFields({});
                         value={row.colleague}
                         onChange={(e) => handleFieldChange(row.isoKey, "colleague", e.target.value)}
                         placeholder="Worked with"
+                        disabled={!isEditable}
                       />
                     </td>
-                    <td className="ts-cell ts-cell-time ts-col-start">
-                      <input
-  type="time"
-  className={inputClass(row.isoKey, "start")}
-  value={row.start || ""}
-  step="300"
-  onChange={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
-  onInput={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
-  onBlur={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
-/>
-
-                    </td>
-                    <td className="ts-cell ts-cell-time ts-col-finish">
-                      <input
-  type="time"
-  className={inputClass(row.isoKey, "finish")}
-  value={row.finish || ""}
-  onChange={(e) => handleFieldChange(row.isoKey, "finish", e.target.value || "")}
-  onInput={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
-  step="300"
-/>
-                    </td>
-                    <td className="ts-cell ts-cell-time ts-col-lunch">
-                      <input
-  type="text"
-  className={inputClass(row.isoKey, "lunch")}
-  value={row.lunch}
-  inputMode="numeric"
-  pattern="[0-9]*"
-  placeholder="30"
-  onChange={(e) => {
-    const digits = e.target.value.replace(/[^\d]/g, "");
-    if (digits === "") {
-      handleFieldChange(row.isoKey, "lunch", "");
-      return;
-    }
-    const mins = parseInt(digits, 10);
-    handleFieldChange(row.isoKey, "lunch", minutesToHHMM(mins));
-  }}
-/>
-                    </td>
+              <td className="ts-cell ts-cell-time ts-col-start">
+  <div className="ts-time-wrap">
+    <input
+      type="time"
+      className={inputClass(row.isoKey, "start")}
+      value={row.start || ""}
+      step="300"
+      onChange={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
+      onInput={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
+      onBlur={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
+      disabled={!isEditable}
+    />
+    {isEditable && row.start && (
+      <button
+        type="button"
+        className="ts-clear-btn"
+        onClick={() => handleFieldChange(row.isoKey, "start", "")}
+      >
+        ×
+      </button>
+    )}
+  </div>
+</td>
+ <td className="ts-cell ts-cell-time ts-col-finish">
+  <div className="ts-time-wrap">
+    <input
+      type="time"
+      className={inputClass(row.isoKey, "finish")}
+      value={row.finish || ""}
+      step="300"
+      onChange={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
+      onInput={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
+      onBlur={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
+      disabled={!isEditable}
+    />
+    {isEditable && row.finish && (
+      <button
+        type="button"
+        className="ts-clear-btn"
+        onClick={() => handleFieldChange(row.isoKey, "finish", "")}
+      >
+        ×
+      </button>
+    )}
+  </div>
+</td>
+<td className="ts-cell ts-cell-time ts-col-lunch">
+  <div className="ts-time-wrap">
+    <input
+      type="text"
+      className={inputClass(row.isoKey, "lunch")}
+      value={row.lunch}
+      inputMode="numeric"
+      pattern="[0-9]*"
+      placeholder="30"
+      onChange={(e) => {
+        const digits = e.target.value.replace(/[^\d]/g, "");
+        if (digits === "") {
+          handleFieldChange(row.isoKey, "lunch", "");
+          return;
+        }
+        const mins = parseInt(digits, 10);
+        handleFieldChange(row.isoKey, "lunch", minutesToHHMM(mins));
+      }}
+      disabled={!isEditable}
+    />
+    {isEditable && row.lunch && (
+      <button
+        type="button"
+        className="ts-clear-btn"
+        onClick={() => handleFieldChange(row.isoKey, "lunch", "")}
+      >
+        ×
+      </button>
+    )}
+  </div>
+</td>
                     <td className="ts-cell ts-cell-hours ts-col-hours">{row.workedHoursDecimal}</td>
                     <td className="ts-cell ts-col-notes">
                       <input
@@ -771,6 +946,7 @@ setDirtyFields({});
                         value={row.notes}
                         onChange={(e) => handleFieldChange(row.isoKey, "notes", e.target.value)}
                         placeholder="Job / comments"
+                         disabled={!isEditable}
                       />
                     </td>
                   </tr>
@@ -824,49 +1000,87 @@ setDirtyFields({});
                         value={row.colleague}
                         onChange={(e) => handleFieldChange(row.isoKey, "colleague", e.target.value)}
                         placeholder="Worked with"
+                        disabled={!isEditable} 
                       />
                     </td>
-                    <td className="ts-cell ts-cell-time ts-col-start">
-                      <input
-  type="time"
-  className={inputClass(row.isoKey, "start")}
-  value={row.start || ""}
-  step="300"
-  onChange={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
-  onInput={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
-  onBlur={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
-/>
-                    </td>
-                    <td className="ts-cell ts-cell-time ts-col-finish">
-                      <input
-  type="time"
-  className={inputClass(row.isoKey, "finish")}
-  value={row.finish || ""}
-  step="300"
-  onChange={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
-  onInput={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
-  onBlur={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
-/>
-                    </td>
-                    <td className="ts-cell ts-cell-time ts-col-lunch">
-                      <input
-  type="text"
-  className={inputClass(row.isoKey, "lunch")}
-  value={row.lunch}
-  inputMode="numeric"
-  pattern="[0-9]*"
-  placeholder="30"
-  onChange={(e) => {
-    const digits = e.target.value.replace(/[^\d]/g, "");
-    if (digits === "") {
-      handleFieldChange(row.isoKey, "lunch", "");
-      return;
-    }
-    const mins = parseInt(digits, 10);
-    handleFieldChange(row.isoKey, "lunch", minutesToHHMM(mins));
-  }}
-/>
-                    </td>
+<td className="ts-cell ts-cell-time ts-col-start">
+  <div className="ts-time-wrap">
+    <input
+      type="time"
+      className={inputClass(row.isoKey, "start")}
+      value={row.start || ""}
+      step="300"
+      onChange={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
+      onInput={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
+      onBlur={(e) => handleFieldChange(row.isoKey, "start", e.currentTarget.value || "")}
+      disabled={!isEditable}
+    />
+    {isEditable && row.start && (
+      <button
+        type="button"
+        className="ts-clear-btn"
+        onClick={() => handleFieldChange(row.isoKey, "start", "")}
+      >
+        ×
+      </button>
+    )}
+  </div>
+</td>
+
+<td className="ts-cell ts-cell-time ts-col-finish">
+  <div className="ts-time-wrap">
+    <input
+      type="time"
+      className={inputClass(row.isoKey, "finish")}
+      value={row.finish || ""}
+      step="300"
+      onChange={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
+      onInput={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
+      onBlur={(e) => handleFieldChange(row.isoKey, "finish", e.currentTarget.value || "")}
+      disabled={!isEditable}
+    />
+    {isEditable && row.finish && (
+      <button
+        type="button"
+        className="ts-clear-btn"
+        onClick={() => handleFieldChange(row.isoKey, "finish", "")}
+      >
+        ×
+      </button>
+    )}
+  </div>
+</td>
+                   <td className="ts-cell ts-cell-time ts-col-lunch">
+  <div className="ts-time-wrap">
+    <input
+      type="text"
+      className={inputClass(row.isoKey, "lunch")}
+      value={row.lunch}
+      inputMode="numeric"
+      pattern="[0-9]*"
+      placeholder="30"
+      onChange={(e) => {
+        const digits = e.target.value.replace(/[^\d]/g, "");
+        if (digits === "") {
+          handleFieldChange(row.isoKey, "lunch", "");
+          return;
+        }
+        const mins = parseInt(digits, 10);
+        handleFieldChange(row.isoKey, "lunch", minutesToHHMM(mins));
+      }}
+      disabled={!isEditable}
+    />
+    {isEditable && row.lunch && (
+      <button
+        type="button"
+        className="ts-clear-btn"
+        onClick={() => handleFieldChange(row.isoKey, "lunch", "")}
+      >
+        ×
+      </button>
+    )}
+  </div>
+</td>
                     <td className="ts-cell ts-cell-hours ts-col-hours">{row.workedHoursDecimal}</td>
                     <td className="ts-cell ts-col-notes">
                       <input
@@ -875,6 +1089,7 @@ setDirtyFields({});
                         value={row.notes}
                         onChange={(e) => handleFieldChange(row.isoKey, "notes", e.target.value)}
                         placeholder="Job / comments"
+                         disabled={!isEditable}
                       />
                     </td>
                   </tr>
@@ -917,11 +1132,14 @@ setDirtyFields({});
       <strong>Notes:</strong> Add brief notes if desired.
     </li>
     <li>
-      <strong>Save:</strong> YOU MUST SAVE your changes before navigating to another fortnight or page. Time entries will go green. Failing to do this will result in entries being unsaved.
-    </li>
-    <li>
-      <strong>Export:</strong> Export and download your timesheet once the fortnight is complete, then submit to payroll - <strong>admin@prowestsurveying.com.au</strong>  
-    </li>
+  <strong>Save:</strong> YOU MUST SAVE your changes before navigating to another fortnight or page. Time entries will go green. Failing to do this will result in entries being unsaved.
+</li>
+<li>
+  <strong>Lock:</strong> Once your fortnight is complete, press Lock Timesheet to submit it. Locked timesheets turn blue and can no longer be edited unless an admin unlocks them.
+</li>
+<li>
+  <strong>Export:</strong> Export remains available if a CSV copy is still required.
+</li>
     <li>
       <strong>Weekdays Not Worked:</strong> For weekdays not worked, leave time entries blank and place a Note saying, "Not Worked". Weekends don't require a note.
     </li>
@@ -1002,26 +1220,25 @@ th.ts-sticky-date {
    =============================== */
 
 :root {
-  --ts-colleague-w: 140px;
-  --ts-start-w: 120px;
-  --ts-finish-w: 120px;
-  --ts-lunch-w: 60px;
-  --ts-hours-w: 30px;
-  --ts-notes-w: 125px;
+  --ts-colleague-w: 160px;
+  --ts-start-w: 125px;
+  --ts-finish-w: 125px;
+  --ts-lunch-w: 90px;
+  --ts-hours-w: 50px;
+  --ts-notes-w: 170px;
 }
 
 /* Mobile tightening */
 @media (max-width: 520px) {
   :root {
-    --ts-colleague-w: 140px;
-    --ts-start-w: 70px;
-    --ts-finish-w: 70px;
-    --ts-lunch-w: 60px;
-    --ts-hours-w: 30px;
-    --ts-notes-w: 130px;
+    --ts-colleague-w: 155px;
+    --ts-start-w: 100px;
+    --ts-finish-w: 100px;
+    --ts-lunch-w: 92px;
+    --ts-hours-w: 50px;
+    --ts-notes-w: 150px;
   }
 }
-
  /* ✅ critical: table must respect widths */
   .ts-table{
     table-layout: fixed;
@@ -1099,7 +1316,7 @@ th.ts-sticky-date {
 
 /* Optional: ensure the time icon doesn’t squash the text */
 .ts-table input[type="time"].maps-search-input{
-  padding-right: 6px;
+  padding-right: 28px;
 }
  @media (max-width: 520px){
   .ts-table th.ts-head,
@@ -1167,6 +1384,87 @@ th.ts-sticky-date {
 .ts-today td:nth-child(2) {
   color: #c62828;
   font-weight: 600;
+}
+  .ts-lock-btn.is-locked{
+  background: #1976d2 !important;
+  border-color: #1976d2 !important;
+  color: #fff !important;
+}
+
+.ts-lock-btn.is-locked:hover{
+  background: #1565c0 !important;
+  border-color: #1565c0 !important;
+}
+
+.ts-table .maps-search-input:disabled{
+  background: #f3f6f9;
+  color: #5f6b76;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+/* Time input clear button wrapper */
+.ts-time-wrap{
+  position: relative;
+  width: 100%;
+}
+
+/* Clear (×) button */
+.ts-clear-btn{
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  max-width: 16px;
+  max-height: 16px;
+
+  font-size: 10px;
+  line-height: 1;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: none;
+  background: rgba(0,0,0,0.08);
+  color: #555;
+  border-radius: 50%;
+
+  padding: 0;
+  margin: 0;
+
+  cursor: pointer;
+
+  flex: none;              /* 🔥 stops flex stretching */
+  box-sizing: border-box;  /* 🔥 prevents weird scaling */
+}
+
+.ts-clear-btn:hover{
+  background: rgba(0,0,0,0.12);
+}
+
+@media (max-width: 520px){
+  .ts-clear-btn{
+    width: 14px;
+    height: 14px;
+    min-width: 14px;
+    min-height: 14px;
+    max-width: 14px;
+    max-height: 14px;
+
+    font-size: 9px;
+    right: 4px;
+  }
+}
+
+/* Make room so button doesn’t overlap text */
+.ts-time-wrap input{
+  padding-right: 32px !important;
 }
 `}</style>
     </PageLayout>
