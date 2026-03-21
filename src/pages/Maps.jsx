@@ -619,6 +619,92 @@ function safeWriteState(partial) {
   }
 }
 
+function getCentroidFromGoogleGeometry(geometry, googleMaps) {
+  const b = new googleMaps.LatLngBounds();
+
+  const walk = (g) => {
+    if (!g) return;
+    const type = g.getType();
+
+    if (type === "Point") {
+      b.extend(g.get());
+    } else if (type === "MultiPoint" || type === "LineString") {
+      g.getArray().forEach((latLng) => b.extend(latLng));
+    } else if (type === "MultiLineString" || type === "Polygon") {
+      g.getArray().forEach((part) => walk(part));
+    } else if (type === "MultiPolygon") {
+      g.getArray().forEach((poly) => walk(poly));
+    } else if (type === "LinearRing") {
+      g.getArray().forEach((latLng) => b.extend(latLng));
+    }
+  };
+
+  walk(geometry);
+
+  if (b.isEmpty()) return null;
+  return b.getCenter();
+}
+
+function buildInvisibleLabelMarker({ googleMaps, map, position, text, color, fontSize = "10px", fontWeight = "700" }) {
+  return new googleMaps.Marker({
+    position,
+    map,
+    clickable: false,
+    zIndex: 1,
+    icon: {
+      path: "M 0 0",
+      strokeOpacity: 0,
+      fillOpacity: 0,
+      scale: 0,
+    },
+    label: {
+      text: String(text || ""),
+      color,
+      fontWeight,
+      fontSize,
+    },
+  });
+}
+
+function getPolygonLabelText(feature, fields = []) {
+  for (const key of fields) {
+    const v = feature.getProperty(key);
+    if (v !== undefined && v !== null && String(v).trim() !== "") {
+      return String(v).trim();
+    }
+  }
+  return "";
+}
+
+function getFirstDefinedValue(obj = {}, keys = []) {
+  for (const key of keys) {
+    const v = obj?.[key];
+    if (v !== undefined && v !== null && String(v).trim() !== "") {
+      return v;
+    }
+  }
+  return "";
+}
+
+function getFeaturePointName(props = {}, fields = []) {
+  const v = getFirstDefinedValue(props, fields);
+  return v ? String(v).trim() : "";
+}
+
+function getFeaturePointId(props = {}, fallback) {
+  return (
+    props.objectid ||
+    props.OBJECTID ||
+    props.fid ||
+    props.id ||
+    props.geodetic_point_pid ||
+    props.reference_mark_pid ||
+    props.point_number ||
+    props.rm_point_number ||
+    fallback
+  );
+}
+
 function Maps() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -654,22 +740,25 @@ function Maps() {
   const viewRef = useRef({ bounds: null, zoom: null });
 
   // Fetch throttles + caches
-  const lastFetchRef = useRef({ ssm076: 0, rm199: 0, cad001: 0, lga233: 0, zoning070: 0 });
-  const liveParentsRef = useRef([]);
+const lastFetchRef = useRef({
+  ssm076: 0,
+  bm076: 0,
+  rm199: 0,
+  cad001: 0,
+  lga233: 0,
+  zoning070: 0,
+});
 
-  // Geodetic markers
-  const geodeticMarkersRef = useRef({ ssm076: [], bm076: [], rm199: [] });
-  const geodeticMarkerIndexRef = useRef({
-    ssm076: new Map(),
-    bm076: new Map(),
-    rm199: new Map(),
-  });
   const clustererRef = useRef(null);
 
-  // Cadastre + local authority
-  const cadastreDataRef = useRef(null);
-  const lga233DataRef = useRef(null);
-  const zoning070DataRef = useRef(null);
+   // Polygon layers (cadastre, LGA, zoning, future planning layers)
+  const polygonLayersRef = useRef(new Map());
+
+  // Point layers (SSM, BM, RM, future point layers)
+const pointLayersRef = useRef(new Map());
+
+// Line layers (future road centreline / contours / etc.)
+const lineLayersRef = useRef(new Map());
 
   // Portal jobs markers/cluster
   const portalClustererRef = useRef(null);
@@ -2884,65 +2973,222 @@ const handleMyLocation = () => {
       const hasZoning = prev.some((l) => l.id === "zoning070");
       const next = [...prev];
 
-      if (!hasSSM)
-        next.push({
-          id: "ssm076",
-          name: "SSMs (LGATE-076)",
-          type: "geodetic-ssm",
-          visible: false,
-          data: { url: LGATE_076_QUERY },
-        });
+    if (!hasSSM)
+  next.push({
+    id: "ssm076",
+    name: "SSMs (LGATE-076)",
+    type: "point",
+    visible: false,
+    data: {
+      url: LGATE_076_QUERY,
+      where: "1=1",
+      minZoom: MIN_GEODETIC_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      symbol: ssmTriangleSymbol,
+      layerTag: "SSM",
+      idFields: [
+        "geodetic_point_pid",
+        "point_number",
+        "objectid",
+        "OBJECTID",
+        "fid",
+      ],
+      nameFields: ["geodetic_point_name", "point_number"],
+      label: {
+        minZoom: SHOW_LABELS_ZOOM,
+        color: "#ffffff",
+        fontSize: "10px",
+        fontWeight: "700",
+      },
+      filterFn: (feature) => {
+        const p = feature?.properties || {};
+        const rv = String(p.render_value || "").toUpperCase();
+        const pt = String(p.point_type || "").toUpperCase();
+        const cls = String(p.class || "").toUpperCase();
+        return (
+          !isDestroyed(p) &&
+          (
+            rv.startsWith("S") ||
+            pt.includes("SSM") ||
+            cls.includes("SSM") ||
+            cls.includes("STANDARD SURVEY")
+          )
+        );
+      },
+      popupBuilder: ({ name, props, lat, lng }) =>
+        buildPopupHtmlExample({
+          layerTag: "SSM",
+          name,
+          props: { ...props, lat, lng },
+        }),
+    },
+  });
 
-      if (!hasBM)
-        next.push({
-          id: "bm076",
-          name: "BMs (LGATE-076)",
-          type: "geodetic-bm",
-          visible: false,
-          data: { url: LGATE_076_QUERY },
-        });
+if (!hasBM)
+  next.push({
+    id: "bm076",
+    name: "BMs (LGATE-076)",
+    type: "point",
+    visible: false,
+    data: {
+      url: LGATE_076_QUERY,
+      where: "1=1",
+      minZoom: MIN_GEODETIC_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      symbol: bmSquareSymbol,
+      layerTag: "BM",
+      idFields: [
+        "geodetic_point_pid",
+        "point_number",
+        "objectid",
+        "OBJECTID",
+        "fid",
+      ],
+      nameFields: ["geodetic_point_name", "point_number"],
+      label: {
+        minZoom: SHOW_LABELS_ZOOM,
+        color: "#ffffff",
+        fontSize: "10px",
+        fontWeight: "700",
+      },
+      filterFn: (feature) => {
+        const p = feature?.properties || {};
+        const rv = String(p.render_value || "").toUpperCase();
+        const pt = String(p.point_type || "").toUpperCase();
+        const cls = String(p.class || "").toUpperCase();
+        return (
+          !isDestroyed(p) &&
+          (
+            rv.startsWith("B") ||
+            pt.includes("BM") ||
+            pt.includes("BENCH") ||
+            cls.includes("BM") ||
+            cls.includes("BENCH")
+          )
+        );
+      },
+      popupBuilder: ({ name, props, lat, lng }) =>
+        buildPopupHtmlExample({
+          layerTag: "BM",
+          name,
+          props: { ...props, lat, lng },
+        }),
+    },
+  });
 
-      if (!hasRM)
-        next.push({
-          id: "rm199",
-          name: "RMs (LGATE-199)",
-          type: "geodetic-rm",
-          visible: false,
-          data: { url: LGATE_199_QUERY },
-        });
-
-      if (!hasCad)
+if (!hasRM)
+  next.push({
+    id: "rm199",
+    name: "RMs (LGATE-199)",
+    type: "point",
+    visible: false,
+    data: {
+      url: LGATE_199_QUERY,
+      where: "latest_status NOT LIKE '%DESTROY%' AND latest_status NOT LIKE '%REMOVE%'",
+      minZoom: MIN_GEODETIC_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      symbol: rmCrossSymbol,
+      layerTag: "RM",
+      idFields: [
+        "reference_mark_pid",
+        "rm_point_number",
+        "objectid",
+        "OBJECTID",
+        "fid",
+      ],
+      nameFields: ["reference_mark_name", "geodetic_point_name", "rm_point_number"],
+      label: {
+        minZoom: SHOW_LABELS_ZOOM,
+        color: "#ffffff",
+        fontSize: "10px",
+        fontWeight: "700",
+      },
+      filterFn: (feature) => !isDestroyed(feature?.properties || {}),
+      popupBuilder: ({ name, props, lat, lng }) =>
+        buildPopupHtmlExample({
+          layerTag: "RM",
+          name,
+          props: { ...props, lat, lng },
+        }),
+    },
+  });
+           if (!hasCad)
         next.push({
           id: "cad001",
           name: "Cadastre (LGATE-001)",
-          type: "cadastre",
+          type: "polygon",
           visible: false,
-          data: { url: LGATE_001_QUERY },
+          data: {
+            url: LGATE_001_QUERY,
+            where: "1=1",
+            minZoom: MIN_CADASTRE_ZOOM,
+            maxFeatures: MAX_CADASTRE_FEATURES_PER_VIEW,
+            style: {
+              clickable: false,
+              strokeColor: "#ffffff",
+              strokeWeight: 0.9,
+              fillOpacity: 0.0,
+            },
+            labels: null,
+          },
         });
-   if (!hasLGA)
-  next.push({
-    id: "lga233",
-    name: "LGA Boundaries (LGATE-233)",
-    type: "polygon",
-    visible: false,
-    data: {
-      url: LGATE_233_QUERY,
-      where: "1=1",
-      minZoom: 0,
-    },
-  });
-  if (!hasZoning)
-  next.push({
-    id: "zoning070",
-    name: "R-Codes Zoning (DPLH-070)",
-    type: "polygon",
-    visible: false,
-    data: {
-      url: DPLH_070_QUERY,
-      where: "1=1",
-      minZoom: MIN_CADASTRE_ZOOM,
-    },
-  });
+      if (!hasLGA)
+        next.push({
+          id: "lga233",
+          name: "LGA Boundaries (LGATE-233)",
+          type: "polygon",
+          visible: false,
+          data: {
+            url: LGATE_233_QUERY,
+            where: "1=1",
+            minZoom: 0,
+            maxFeatures: MAX_FEATURES_PER_VIEW,
+            style: {
+              clickable: false,
+              strokeColor: "#2e7d32",
+              strokeWeight: 1.5,
+              fillColor: "#a5d6a7",
+              fillOpacity: 0.25,
+            },
+            labels: {
+              minZoom: 8,
+              fields: ["name"],
+              color: "#1b5e20",
+              fontWeight: "600",
+              fontSize: (zoom) => (zoom >= 12 ? "12px" : "10px"),
+              repeatAtZoom: null,
+            },
+          },
+        });
+      if (!hasZoning)
+        next.push({
+          id: "zoning070",
+          name: "R-Codes Zoning (DPLH-070)",
+          type: "polygon",
+          visible: false,
+          data: {
+            url: DPLH_070_QUERY,
+            where: "1=1",
+            minZoom: MIN_CADASTRE_ZOOM,
+            maxFeatures: MAX_FEATURES_PER_VIEW,
+            style: {
+              clickable: false,
+              strokeColor: "#c62828",
+              strokeWeight: 1.2,
+              fillColor: "#ef9a9a",
+              fillOpacity: 0.22,
+            },
+            labels: {
+              minZoom: 12,
+              fields: ["zone_code", "zone", "r_code", "rcode", "coding", "code", "name", "label"],
+              color: "#8b0000",
+              fontWeight: "700",
+              fontSize: (zoom) => (zoom >= 15 ? "12px" : "10px"),
+              repeatAtZoom: 15,
+              repeatOffset: { lat: 0.0035, lng: 0.0035 },
+            },
+          },
+        });
       return next;
     });
   }, []);
@@ -2979,390 +3225,244 @@ const handleMyLocation = () => {
     safeWriteState({ layerVisibility });
   }, [layers]);
 
-  // ---------- FAST geodetic render + clustering ----------
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !window.google) return;
+ // ---------- Shared point layer loader ----------
+useEffect(() => {
+  const map = mapRef.current;
+  const googleMaps = window.google?.maps;
+  if (!map || !googleMaps) return;
+  if (!isAppVisible) return;
 
-    if (!isAppVisible) return;
+  const pointLayers = layers.filter((l) => l.type === "point");
+  if (!pointLayers.length) return;
 
-    const ssmLayer = layers.find((l) => l.id === "ssm076");
-    const bmLayer = layers.find((l) => l.id === "bm076");
-    const rmLayer = layers.find((l) => l.id === "rm199");
+  const bounds = viewRef.current?.bounds || map.getBounds();
+  const zoom = viewRef.current?.zoom ?? map.getZoom();
 
-    const { bounds, zoom } = viewRef.current;
-    const showLabels = zoom >= SHOW_LABELS_ZOOM;
+  const ensureStore = (layer) => {
+    let store = pointLayersRef.current.get(layer.id);
 
-    const anyGeodeticVisible =
-      ssmLayer?.visible || bmLayer?.visible || rmLayer?.visible;
-
-    const clearLayer = (key) => {
-      const idx = geodeticMarkerIndexRef.current[key];
-      for (const m of idx.values()) m.setMap(null);
-      idx.clear();
-      geodeticMarkersRef.current[key] = [];
-    };
-
-    const clearAllGeodetic = () => {
-      clearLayer("ssm076");
-      clearLayer("bm076");
-      clearLayer("rm199");
-    };
-
-    const syncClusterer = () => {
-      if (!clustererRef.current) {
-        clustererRef.current = new MarkerClusterer({ map, markers: [] });
-      }
-      const visibleMarkers = [
-        ...(ssmLayer?.visible ? geodeticMarkersRef.current.ssm076 : []),
-        ...(bmLayer?.visible ? geodeticMarkersRef.current.bm076 : []),
-        ...(rmLayer?.visible ? geodeticMarkersRef.current.rm199 : []),
-      ];
-      clustererRef.current.clearMarkers();
-      if (visibleMarkers.length) clustererRef.current.addMarkers(visibleMarkers);
-    };
-
-    if (!anyGeodeticVisible) {
-      setGeodeticNotice("");
-      clearAllGeodetic();
-      syncClusterer();
-      return;
+    if (!store) {
+      store = {
+        markers: [],
+        index: new Map(),
+      };
+      pointLayersRef.current.set(layer.id, store);
     }
 
-    if (!bounds || zoom === null) return;
-
-    if (zoom < MIN_GEODETIC_ZOOM) {
-      setGeodeticNotice(`Zoom to ${MIN_GEODETIC_ZOOM}+ to see geodetic marks.`);
-      clearAllGeodetic();
-      syncClusterer();
-      return;
-    }
-
-    let cancelled = false;
-
-    const makeLabel = (text) => ({
-      text: text || "",
-      color: "#ffffff",
-      fontSize: "10px",
-      fontWeight: "700",
-    });
-
-    const syncLayerMarkers = (key, features, icon, layerTag, nameFromProps) => {
-      const idx = geodeticMarkerIndexRef.current[key];
-      const nextIds = new Set();
-
-      for (const f of features) {
-        const props = f.properties || {};
-        const [lng, lat] = f.geometry.coordinates;
-
-        const id =
-          props.geodetic_point_pid ||
-          props.reference_mark_pid ||
-          props.point_number ||
-          props.rm_point_number ||
-          props.objectid ||
-          props.OBJECTID ||
-          props.fid ||
-          `${lat.toFixed(6)},${lng.toFixed(6)}`;
-
-        nextIds.add(id);
-
-        const name = nameFromProps(props);
-
-        let marker = idx.get(id);
-        if (!marker) {
-          marker = new window.google.maps.Marker({
-            position: { lat, lng },
-            map,
-            icon,
-            title: name,
-            label: showLabels ? makeLabel(name) : null,
-            optimized: true,
-          });
-
-          marker.addListener("click", () => {
-            infoWindowRef.current.setContent(
-              buildPopupHtmlExample({
-                layerTag,
-                name,
-                props: { ...props, lat, lng },
-              })
-            );
-            infoWindowRef.current.open(map, marker);
-          });
-
-          idx.set(id, marker);
-        } else {
-          marker.setPosition({ lat, lng });
-          marker.setIcon(icon);
-          marker.setTitle(name);
-          marker.setLabel(showLabels ? makeLabel(name) : null);
-          if (!marker.getMap()) marker.setMap(map);
-        }
-      }
-
-      for (const [id, marker] of idx.entries()) {
-        if (!nextIds.has(id)) {
-          marker.setMap(null);
-          idx.delete(id);
-        }
-      }
-
-      geodeticMarkersRef.current[key] = Array.from(idx.values());
-    };
-
-    async function load076IfNeeded() {
-      if (!(ssmLayer?.visible || bmLayer?.visible)) {
-        liveParentsRef.current = [];
-        clearLayer("ssm076");
-        clearLayer("bm076");
-        return;
-      }
-
-      const now = Date.now();
-      if (now - lastFetchRef.current.ssm076 < FETCH_THROTTLE_MS) return;
-      lastFetchRef.current.ssm076 = now;
-
-      try {
-        const geojson = await fetchArcgisGeojsonInView(
-          LGATE_076_QUERY,
-          bounds,
-          "1=1"
-        );
-        if (cancelled) return;
-
-        const liveFeats = geojson.features.filter((f) => !isDestroyed(f.properties));
-
-        liveParentsRef.current = (liveFeats || []).map((f) => {
-          const [lng, lat] = f.geometry.coordinates;
-          return { lat, lng };
-        });
-
-        if (liveFeats.length > MAX_FEATURES_PER_VIEW) {
-          setGeodeticNotice(
-            `Too many marks here (${liveFeats.length}). Zoom in further.`
-          );
-          clearLayer("ssm076");
-          clearLayer("bm076");
-          return;
-        }
-
-        setGeodeticNotice("");
-        const { ssm, bm } = split076Features(liveFeats);
-
-        if (ssmLayer?.visible) {
-          syncLayerMarkers(
-            "ssm076",
-            ssm,
-            ssmTriangleSymbol,
-            "SSM",
-            (p) => p.geodetic_point_name || p.point_number || "SSM"
-          );
-        } else clearLayer("ssm076");
-
-        if (bmLayer?.visible) {
-          syncLayerMarkers(
-            "bm076",
-            bm,
-            bmSquareSymbol,
-            "BM",
-            (p) => p.geodetic_point_name || p.point_number || "BM"
-          );
-        } else clearLayer("bm076");
-      } catch (e) {
-        console.warn("076 load failed:", e);
-        setGeodeticNotice("SSM/BM layer failed to load. Try zooming/panning.");
-        clearLayer("ssm076");
-        clearLayer("bm076");
-      }
-    }
-
-    async function load199IfNeeded() {
-      if (!rmLayer?.visible) {
-        clearLayer("rm199");
-        return;
-      }
-
-      const now = Date.now();
-      if (now - lastFetchRef.current.rm199 < FETCH_THROTTLE_MS) return;
-      lastFetchRef.current.rm199 = now;
-
-      try {
-        const where =
-          "latest_status NOT LIKE '%DESTROY%' AND latest_status NOT LIKE '%REMOVE%'";
-        const geojson = await fetchArcgisGeojsonInView(
-          LGATE_199_QUERY,
-          bounds,
-          where
-        );
-        if (cancelled) return;
-
-        const liveFeats = (geojson.features || []).filter(
-          (f) => !isDestroyed(f.properties)
-        );
-
-        const parents = liveParentsRef.current || [];
-        if (!parents.length) {
-          clearLayer("rm199");
-          return;
-        }
-
-        const distMeters = (a, b) => {
-          if (window.google?.maps?.geometry?.spherical && window.google.maps.LatLng) {
-            const A = new window.google.maps.LatLng(a.lat, a.lng);
-            const B = new window.google.maps.LatLng(b.lat, b.lng);
-            return window.google.maps.geometry.spherical.computeDistanceBetween(A, B);
-          }
-          return haversineMeters(a, b);
-        };
-
-        const RM_PARENT_RADIUS_M = 20;
-
-        const rmFiltered = liveFeats.filter((rm) => {
-          const [lng, lat] = rm.geometry.coordinates;
-          const rmPt = { lat, lng };
-          for (let i = 0; i < parents.length; i++) {
-            if (distMeters(rmPt, parents[i]) <= RM_PARENT_RADIUS_M) return true;
-          }
-          return false;
-        });
-
-        if (rmFiltered.length > MAX_FEATURES_PER_VIEW) {
-          setGeodeticNotice(
-            `Too many RMs here (${rmFiltered.length}). Zoom in further.`
-          );
-          clearLayer("rm199");
-          return;
-        }
-
-        setGeodeticNotice("");
-
-        syncLayerMarkers(
-          "rm199",
-          rmFiltered,
-          rmCrossSymbol,
-          "RM",
-          (p) =>
-            p.reference_mark_name ||
-            p.geodetic_point_name ||
-            p.rm_point_number ||
-            "RM"
-        );
-      } catch (e) {
-        console.warn("199 load failed:", e);
-        setGeodeticNotice("RM layer failed to load. Try zooming/panning.");
-        clearLayer("rm199");
-      }
-    }
-
-    (async () => {
-      await Promise.all([load076IfNeeded(), load199IfNeeded()]);
-      if (!clustererRef.current) clustererRef.current = new MarkerClusterer({ map, markers: [] });
-
-      const visibleMarkers = [
-        ...(ssmLayer?.visible ? geodeticMarkersRef.current.ssm076 : []),
-        ...(bmLayer?.visible ? geodeticMarkersRef.current.bm076 : []),
-        ...(rmLayer?.visible ? geodeticMarkersRef.current.rm199 : []),
-      ];
-
-      clustererRef.current.clearMarkers();
-      if (visibleMarkers.length) clustererRef.current.addMarkers(visibleMarkers);
-    })();
-
-    const staleTimer = setInterval(() => {
-      const anyVisible = ssmLayer?.visible || bmLayer?.visible || rmLayer?.visible;
-      if (anyVisible) setViewTick((t) => t + 1);
-    }, STALE_REFRESH_MS);
-
-    return () => clearInterval(staleTimer);
-  }, [layers, viewTick, isAppVisible]);
-
-  // ✅ Cadastre (plain white, thin)
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !window.google) return;
-   
-    if (!isAppVisible) return;
-
-    if (!cadastreDataRef.current) {
-      cadastreDataRef.current = new window.google.maps.Data();
-      cadastreDataRef.current.setMap(map);
-      cadastreDataRef.current.setStyle({
-        clickable: false,
-        strokeColor: "#ffffff",
-        strokeWeight: 0.9,
-        fillOpacity: 0.0,
-      });
-    }
-
-    const cadLayer = layers.find((l) => l.id === "cad001");
-    const dataLayer = cadastreDataRef.current;
-    const bounds = viewRef.current?.bounds || map.getBounds();
-    const zoom = viewRef.current?.zoom ?? map.getZoom();
-
-    if (!cadLayer?.visible || !bounds || (zoom ?? 0) < MIN_CADASTRE_ZOOM) {
-      dataLayer.forEach((f) => dataLayer.remove(f));
-      return;
-    }
-
-    const now = Date.now();
-    if (now - lastFetchRef.current.cad001 < CADASTRE_FETCH_THROTTLE_MS) return;
-    lastFetchRef.current.cad001 = now;
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const geojson = await fetchArcgisGeojsonInView(cadLayer.data.url, bounds, "1=1");
-        if (cancelled) return;
-
-        if ((geojson.features?.length || 0) > MAX_CADASTRE_FEATURES_PER_VIEW) {
-          console.warn("Cadastre: too many features in view, zoom in further.");
-          return;
-        }
-
-        dataLayer.forEach((f) => dataLayer.remove(f));
-        dataLayer.addGeoJson(geojson);
-      } catch (err) {
-        console.warn("Cadastre fetch failed:", err);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [layers, viewTick, isAppVisible]);
-
-   // ✅ Local Authority boundaries (Landgate-style)
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !window.google) return;
-    if (!isAppVisible) return;
-
-    if (!lga233DataRef.current) {
-  lga233DataRef.current = {
-    polygons: new window.google.maps.Data(),
-    labels: [],
+    return store;
   };
 
-  lga233DataRef.current.polygons.setMap(map);
-  lga233DataRef.current.polygons.setStyle({
-    clickable: false,
-    strokeColor: "#2e7d32",
-    strokeWeight: 1.5,
-    fillColor: "#a5d6a7",
-    fillOpacity: 0.25,
-  });
-}
+  const clearLayer = (store) => {
+    for (const marker of store.index.values()) {
+      try {
+        marker.setMap(null);
+      } catch {
+        // ignore
+      }
+    }
+    store.index.clear();
+    store.markers = [];
+  };
 
-    const lgaLayer = layers.find((l) => l.id === "lga233");
-    const store = lga233DataRef.current;
-    const dataLayer = store.polygons;
+  const syncClusterer = () => {
+    if (!clustererRef.current) {
+      clustererRef.current = new MarkerClusterer({ map, markers: [] });
+    }
+
+    const visibleMarkers = [];
+    pointLayers.forEach((layer) => {
+      if (!layer.visible) return;
+      const store = pointLayersRef.current.get(layer.id);
+      if (!store) return;
+      visibleMarkers.push(...store.markers);
+    });
+
+    clustererRef.current.clearMarkers();
+    if (visibleMarkers.length) clustererRef.current.addMarkers(visibleMarkers);
+  };
+
+  pointLayers.forEach((layer) => {
+    const store = ensureStore(layer);
+
+    if (!bounds || !layer.visible || (zoom ?? 0) < (layer.data?.minZoom ?? 0)) {
+      clearLayer(store);
+    }
+  });
+
+  const run = async () => {
+    let totalVisible = 0;
+
+    for (const layer of pointLayers) {
+      const store = ensureStore(layer);
+
+      if (!layer.visible) continue;
+      if (!bounds) continue;
+
+      if ((zoom ?? 0) < (layer.data?.minZoom ?? 0)) {
+        continue;
+      }
+
+      const now = Date.now();
+      if (now - (lastFetchRef.current[layer.id] || 0) < FETCH_THROTTLE_MS) {
+        continue;
+      }
+      lastFetchRef.current[layer.id] = now;
+
+      try {
+        const geojson = await fetchArcgisGeojsonInView(
+          layer.data.url,
+          bounds,
+          layer.data.where || "1=1"
+        );
+
+        let features = geojson.features || [];
+
+        if (typeof layer.data?.filterFn === "function") {
+          features = features.filter(layer.data.filterFn);
+        }
+
+        const maxFeatures = layer.data?.maxFeatures ?? MAX_FEATURES_PER_VIEW;
+        if (features.length > maxFeatures) {
+          console.warn(`${layer.name}: too many features in view, zoom in further.`);
+          clearLayer(store);
+          continue;
+        }
+
+        const nextIds = new Set();
+
+        for (const feature of features) {
+          const props = feature?.properties || {};
+          const coords = feature?.geometry?.coordinates || [];
+          const [lng, lat] = coords;
+
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+          const fallbackId = `${lat.toFixed(6)},${lng.toFixed(6)}`;
+          const id = getFeaturePointId(props, fallbackId);
+          nextIds.add(id);
+
+          const name = getFeaturePointName(props, layer.data?.nameFields || []);
+          const showLabel = (zoom ?? 0) >= (layer.data?.label?.minZoom ?? 999);
+
+          let marker = store.index.get(id);
+
+          if (!marker) {
+            marker = new googleMaps.Marker({
+              position: { lat, lng },
+              map,
+              icon: layer.data?.symbol,
+              title: name || layer.name,
+              label: showLabel
+                ? {
+                    text: name || "",
+                    color: layer.data?.label?.color || "#ffffff",
+                    fontSize: layer.data?.label?.fontSize || "10px",
+                    fontWeight: layer.data?.label?.fontWeight || "700",
+                  }
+                : null,
+              optimized: true,
+            });
+
+            marker.addListener("click", () => {
+              const html =
+                typeof layer.data?.popupBuilder === "function"
+                  ? layer.data.popupBuilder({ name, props, lat, lng })
+                  : `<div style="font-weight:800;">${name || layer.name}</div>`;
+
+              infoWindowRef.current.setContent(html);
+              infoWindowRef.current.open(map, marker);
+            });
+
+            store.index.set(id, marker);
+          } else {
+            marker.setPosition({ lat, lng });
+            marker.setIcon(layer.data?.symbol);
+            marker.setTitle(name || layer.name);
+            marker.setLabel(
+              showLabel
+                ? {
+                    text: name || "",
+                    color: layer.data?.label?.color || "#ffffff",
+                    fontSize: layer.data?.label?.fontSize || "10px",
+                    fontWeight: layer.data?.label?.fontWeight || "700",
+                  }
+                : null
+            );
+            if (!marker.getMap()) marker.setMap(map);
+          }
+        }
+
+        for (const [id, marker] of store.index.entries()) {
+          if (!nextIds.has(id)) {
+            marker.setMap(null);
+            store.index.delete(id);
+          }
+        }
+
+        store.markers = Array.from(store.index.values());
+        totalVisible += store.markers.length;
+      } catch (err) {
+        console.warn(`${layer.name} fetch failed:`, err);
+        clearLayer(store);
+      }
+    }
+
+    if (totalVisible === 0 && pointLayers.some((l) => l.visible && (zoom ?? 0) < (l.data?.minZoom ?? 0))) {
+      setGeodeticNotice(`Zoom to ${MIN_GEODETIC_ZOOM}+ to see geodetic marks.`);
+    } else {
+      setGeodeticNotice("");
+    }
+
+    syncClusterer();
+  };
+
+  run();
+
+  const staleTimer = setInterval(() => {
+    const anyVisible = pointLayers.some((l) => l.visible);
+    if (anyVisible) setViewTick((t) => t + 1);
+  }, STALE_REFRESH_MS);
+
+  return () => clearInterval(staleTimer);
+}, [layers, viewTick, isAppVisible]);
+
+    // ✅ Shared polygon layer loader (cadastre, LGA, zoning, future polygon layers)
+  useEffect(() => {
+    const map = mapRef.current;
+    const googleMaps = window.google?.maps;
+    if (!map || !googleMaps) return;
+    if (!isAppVisible) return;
+
+    const polygonLayers = layers.filter((l) => l.type === "polygon");
+    if (!polygonLayers.length) return;
+
     const bounds = viewRef.current?.bounds || map.getBounds();
     const zoom = viewRef.current?.zoom ?? map.getZoom();
 
-    const clearLabels = () => {
-      store.labels.forEach((m) => {
+    const ensureStore = (layer) => {
+      let store = polygonLayersRef.current.get(layer.id);
+
+      if (!store) {
+        const polygons = new googleMaps.Data();
+        polygons.setMap(map);
+        polygons.setStyle(layer.data?.style || { clickable: false });
+
+        store = {
+          polygons,
+          labels: [],
+        };
+
+        polygonLayersRef.current.set(layer.id, store);
+      } else {
+        store.polygons.setMap(map);
+        store.polygons.setStyle(layer.data?.style || { clickable: false });
+      }
+
+      return store;
+    };
+
+    const clearLabels = (store) => {
+      (store.labels || []).forEach((m) => {
         try {
           m.setMap(null);
         } catch {
@@ -3372,299 +3472,200 @@ const handleMyLocation = () => {
       store.labels = [];
     };
 
-    const clearLayer = () => {
-      dataLayer.forEach((f) => dataLayer.remove(f));
-      clearLabels();
+    const clearLayer = (store) => {
+      store.polygons.forEach((f) => store.polygons.remove(f));
+      clearLabels(store);
     };
 
-    if (
-      !lgaLayer?.visible ||
-      !bounds ||
-      (zoom ?? 0) < (lgaLayer.data?.minZoom ?? MIN_CADASTRE_ZOOM)
-    ) {
-      clearLayer();
-      return;
-    }
+    polygonLayers.forEach((layer) => {
+      const store = ensureStore(layer);
 
-    const now = Date.now();
-    if (now - (lastFetchRef.current.lga233 || 0) < CADASTRE_FETCH_THROTTLE_MS)
-      return;
-    lastFetchRef.current.lga233 = now;
-
-    let cancelled = false;
-
-    const getCentroidFromGeometry = (geometry) => {
-      const b = new window.google.maps.LatLngBounds();
-
-      const walk = (g) => {
-        if (!g) return;
-        const type = g.getType();
-
-        if (type === "Point") {
-          b.extend(g.get());
-        } else if (type === "MultiPoint" || type === "LineString") {
-          g.getArray().forEach((latLng) => b.extend(latLng));
-        } else if (type === "MultiLineString" || type === "Polygon") {
-          g.getArray().forEach((part) => walk(part));
-        } else if (type === "MultiPolygon") {
-          g.getArray().forEach((poly) => walk(poly));
-        } else if (type === "LinearRing") {
-          g.getArray().forEach((latLng) => b.extend(latLng));
-        }
-      };
-
-      walk(geometry);
-
-      if (b.isEmpty()) return null;
-      return b.getCenter();
-    };
-
-    (async () => {
-      try {
-        const geojson = await fetchArcgisGeojsonInView(
-          lgaLayer.data.url,
-          bounds,
-          lgaLayer.data.where || "1=1"
-        );
-        if (cancelled) return;
-
-        clearLayer();
-        dataLayer.addGeoJson(geojson);
-
-        const nextLabels = [];
-
-if ((zoom ?? 0) >= 8) {
-  dataLayer.forEach((feature) => {
-    const name = feature.getProperty("name") || "";
-    const center = getCentroidFromGeometry(feature.getGeometry());
-    if (!center || !name) return;
-
-    const marker = new window.google.maps.Marker({
-      position: center,
-      map,
-      clickable: false,
-      zIndex: 1,
-      icon: {
-        path: "M 0 0",
-        strokeOpacity: 0,
-        fillOpacity: 0,
-        scale: 0,
-      },
-      label: {
-        text: String(name),
-        color: "#1b5e20",
-        fontWeight: "600",
-        fontSize: zoom >= 12 ? "12px" : "10px",
-      },
+      if (!bounds || (zoom ?? 0) < (layer.data?.minZoom ?? 0) || !layer.visible) {
+        clearLayer(store);
+      }
     });
 
-    nextLabels.push(marker);
-  });
-}
+    const run = async () => {
+      for (const layer of polygonLayers) {
+        const store = ensureStore(layer);
 
-        store.labels = nextLabels;
-      } catch (err) {
-        console.warn("LGA fetch failed:", err);
-        clearLayer();
+        if (!layer.visible) continue;
+        if (!bounds) continue;
+        if ((zoom ?? 0) < (layer.data?.minZoom ?? 0)) continue;
+
+        const throttleMs = CADASTRE_FETCH_THROTTLE_MS;
+
+        const now = Date.now();
+        if (now - (lastFetchRef.current[layer.id] || 0) < throttleMs) continue;
+        lastFetchRef.current[layer.id] = now;
+
+        try {
+          const geojson = await fetchArcgisGeojsonInView(
+            layer.data.url,
+            bounds,
+            layer.data.where || "1=1"
+          );
+
+          const maxFeatures = layer.data?.maxFeatures ?? MAX_FEATURES_PER_VIEW;
+          if ((geojson.features?.length || 0) > maxFeatures) {
+            console.warn(`${layer.name}: too many features in view, zoom in further.`);
+            clearLayer(store);
+            continue;
+          }
+
+          clearLayer(store);
+          store.polygons.addGeoJson(geojson);
+
+          const labelCfg = layer.data?.labels;
+          if (!labelCfg) continue;
+          if ((zoom ?? 0) < (labelCfg.minZoom ?? 999)) continue;
+
+          const nextLabels = [];
+
+          store.polygons.forEach((feature) => {
+            const text = getPolygonLabelText(feature, labelCfg.fields || []);
+            const center = getCentroidFromGoogleGeometry(feature.getGeometry(), googleMaps);
+            if (!center || !text) return;
+
+            nextLabels.push(
+              buildInvisibleLabelMarker({
+                googleMaps,
+                map,
+                position: center,
+                text,
+                color: labelCfg.color || "#111",
+                fontWeight: labelCfg.fontWeight || "700",
+                fontSize:
+                  typeof labelCfg.fontSize === "function"
+                    ? labelCfg.fontSize(zoom)
+                    : labelCfg.fontSize || "10px",
+              })
+            );
+
+            if (labelCfg.repeatAtZoom && (zoom ?? 0) >= labelCfg.repeatAtZoom) {
+              const latOffset = labelCfg.repeatOffset?.lat ?? 0;
+              const lngOffset = labelCfg.repeatOffset?.lng ?? 0;
+
+              const repeats = [
+                new googleMaps.LatLng(center.lat() + latOffset, center.lng()),
+                new googleMaps.LatLng(center.lat() - latOffset, center.lng()),
+                new googleMaps.LatLng(center.lat(), center.lng() + lngOffset),
+                new googleMaps.LatLng(center.lat(), center.lng() - lngOffset),
+              ];
+
+              repeats.forEach((pos) => {
+                nextLabels.push(
+                  buildInvisibleLabelMarker({
+                    googleMaps,
+                    map,
+                    position: pos,
+                    text,
+                    color: labelCfg.color || "#111",
+                    fontWeight: labelCfg.fontWeight || "700",
+                    fontSize:
+                      typeof labelCfg.fontSize === "function"
+                        ? labelCfg.fontSize(zoom)
+                        : labelCfg.fontSize || "10px",
+                  })
+                );
+              });
+            }
+          });
+
+          store.labels = nextLabels;
+        } catch (err) {
+          console.warn(`${layer.name} fetch failed:`, err);
+          clearLayer(store);
+        }
       }
-    })();
-
-    return () => {
-      cancelled = true;
     };
-  }, [layers, viewTick, isAppVisible]);
 
-// ✅ R-Codes Zoning (Landgate-style)
+    run();
+  }, [layers, viewTick, isAppVisible]);
+  
+// ---------- Shared line layer loader ----------
 useEffect(() => {
   const map = mapRef.current;
-  if (!map || !window.google) return;
+  const googleMaps = window.google?.maps;
+  if (!map || !googleMaps) return;
   if (!isAppVisible) return;
 
- if (!zoning070DataRef.current) {
-  zoning070DataRef.current = {
-    polygons: new window.google.maps.Data(),
-    labels: [],
-  };
-
-  zoning070DataRef.current.polygons.setMap(map);
-  zoning070DataRef.current.polygons.setStyle({
-    clickable: false,
-    strokeColor: "#c62828",
-    strokeWeight: 1.2,
-    fillColor: "#ef9a9a",
-    fillOpacity: 0.22,
-  });
-}
-
-const zoningLayer = layers.find((l) => l.id === "zoning070");
-const store = zoning070DataRef.current;
-const dataLayer = store.polygons;
+  const lineLayers = layers.filter((l) => l.type === "line");
+  if (!lineLayers.length) return;
 
   const bounds = viewRef.current?.bounds || map.getBounds();
   const zoom = viewRef.current?.zoom ?? map.getZoom();
 
-  const getCentroidFromGeometry = (geometry) => {
-  const b = new window.google.maps.LatLngBounds();
+  const ensureStore = (layer) => {
+    let store = lineLayersRef.current.get(layer.id);
 
-  const walk = (g) => {
-    if (!g) return;
-    const type = g.getType();
+    if (!store) {
+      const lines = new googleMaps.Data();
+      lines.setMap(map);
+      lines.setStyle(layer.data?.style || { clickable: false });
 
-    if (type === "Point") {
-      b.extend(g.get());
-    } else if (type === "MultiPoint" || type === "LineString") {
-      g.getArray().forEach((latLng) => b.extend(latLng));
-    } else if (type === "MultiLineString" || type === "Polygon") {
-      g.getArray().forEach((part) => walk(part));
-    } else if (type === "MultiPolygon") {
-      g.getArray().forEach((poly) => walk(poly));
-    } else if (type === "LinearRing") {
-      g.getArray().forEach((latLng) => b.extend(latLng));
+      store = { lines };
+      lineLayersRef.current.set(layer.id, store);
+    } else {
+      store.lines.setMap(map);
+      store.lines.setStyle(layer.data?.style || { clickable: false });
+    }
+
+    return store;
+  };
+
+  const clearLayer = (store) => {
+    store.lines.forEach((f) => store.lines.remove(f));
+  };
+
+  lineLayers.forEach((layer) => {
+    const store = ensureStore(layer);
+
+    if (!bounds || !layer.visible || (zoom ?? 0) < (layer.data?.minZoom ?? 0)) {
+      clearLayer(store);
+    }
+  });
+
+  const run = async () => {
+    for (const layer of lineLayers) {
+      const store = ensureStore(layer);
+
+      if (!layer.visible) continue;
+      if (!bounds) continue;
+      if ((zoom ?? 0) < (layer.data?.minZoom ?? 0)) continue;
+
+      const now = Date.now();
+      if (now - (lastFetchRef.current[layer.id] || 0) < CADASTRE_FETCH_THROTTLE_MS) {
+        continue;
+      }
+      lastFetchRef.current[layer.id] = now;
+
+      try {
+        const geojson = await fetchArcgisGeojsonInView(
+          layer.data.url,
+          bounds,
+          layer.data.where || "1=1"
+        );
+
+        const maxFeatures = layer.data?.maxFeatures ?? MAX_FEATURES_PER_VIEW;
+        if ((geojson.features?.length || 0) > maxFeatures) {
+          console.warn(`${layer.name}: too many features in view, zoom in further.`);
+          clearLayer(store);
+          continue;
+        }
+
+        clearLayer(store);
+        store.lines.addGeoJson(geojson);
+      } catch (err) {
+        console.warn(`${layer.name} fetch failed:`, err);
+        clearLayer(store);
+      }
     }
   };
 
-  walk(geometry);
-
-  if (b.isEmpty()) return null;
-  return b.getCenter();
-};
-
- const clearLabels = () => {
-  store.labels.forEach((m) => {
-    try {
-      m.setMap(null);
-    } catch {
-      // ignore
-    }
-  });
-  store.labels = [];
-};
-
-const clearLayer = () => {
-  dataLayer.forEach((f) => dataLayer.remove(f));
-  clearLabels();
-};
-
-  if (
-    !zoningLayer?.visible ||
-    !bounds ||
-    (zoom ?? 0) < (zoningLayer.data?.minZoom ?? MIN_CADASTRE_ZOOM)
-  ) {
-    clearLayer();
-    return;
-  }
-
-  const now = Date.now();
-  if (now - (lastFetchRef.current.zoning070 || 0) < CADASTRE_FETCH_THROTTLE_MS)
-    return;
-  lastFetchRef.current.zoning070 = now;
-
-  let cancelled = false;
-
-  (async () => {
-    try {
-      const geojson = await fetchArcgisGeojsonInView(
-        zoningLayer.data.url,
-        bounds,
-        zoningLayer.data.where || "1=1"
-      );
-      if (cancelled) return;
-
-      clearLayer();
-      dataLayer.addGeoJson(geojson);
-      const nextLabels = [];
-
-const labelFieldCandidates = [
-  "zone_code",
-  "zone",
-  "r_code",
-  "rcode",
-  "coding",
-  "code",
-  "name",
-  "label",
-];
-
-const getZoneLabel = (feature) => {
-  for (const key of labelFieldCandidates) {
-    const v = feature.getProperty(key);
-    if (v !== undefined && v !== null && String(v).trim() !== "") {
-      return String(v).trim();
-    }
-  }
-  return "";
-};
-
-const makeLabelMarker = (text, position) =>
-  new window.google.maps.Marker({
-    position,
-    map,
-    clickable: false,
-    zIndex: 1,
-    icon: {
-      path: "M 0 0",
-      strokeOpacity: 0,
-      fillOpacity: 0,
-      scale: 0,
-    },
-    label: {
-      text,
-      color: "#8b0000",
-      fontWeight: "700",
-      fontSize: zoom >= 15 ? "12px" : "10px",
-    },
-  });
-
-dataLayer.forEach((feature) => {
-  const text = getZoneLabel(feature);
-  const center = getCentroidFromGeometry(feature.getGeometry());
-  if (!center || !text) return;
-
-  nextLabels.push(makeLabelMarker(text, center));
-
-  if ((zoom ?? 0) >= 15) {
-    const latStep = 0.0035;
-    const lngStep = 0.0035;
-
-    nextLabels.push(
-      makeLabelMarker(
-        text,
-        new window.google.maps.LatLng(center.lat() + latStep, center.lng())
-      )
-    );
-    nextLabels.push(
-      makeLabelMarker(
-        text,
-        new window.google.maps.LatLng(center.lat() - latStep, center.lng())
-      )
-    );
-    nextLabels.push(
-      makeLabelMarker(
-        text,
-        new window.google.maps.LatLng(center.lat(), center.lng() + lngStep)
-      )
-    );
-    nextLabels.push(
-      makeLabelMarker(
-        text,
-        new window.google.maps.LatLng(center.lat(), center.lng() - lngStep)
-      )
-    );
-  }
-});
-
-store.labels = nextLabels;
-    } catch (err) {
-      console.warn("Zoning fetch failed:", err);
-      clearLayer();
-    }
-  })();
-
-  return () => {
-    cancelled = true;
-  };
+  run();
 }, [layers, viewTick, isAppVisible]);
-  
+
   const toggleLayer = (id) => {
     setLayers((prev) =>
       prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l))

@@ -832,15 +832,15 @@ markCurrentFieldsSaved();
         <table className="ts-table" style={{ borderCollapse: "collapse", fontSize: "0.85rem" }}>
             <thead>
               <tr>
-                <th className="ts-head ts-sticky ts-sticky-day">Day</th>
-                <th className="ts-head ts-sticky ts-sticky-date">Date</th>
-                <th className="ts-head ts-col-colleague">Work colleague</th>
-                <th className="ts-head ts-col-start">Start</th>
-                <th className="ts-head ts-col-finish">Finish</th>
-                <th className="ts-head ts-col-lunch">Lunch</th>
-                <th className="ts-head ts-col-hours">Hours</th>
-                <th className="ts-head ts-col-notes">Notes</th>
-              </tr>
+  <th className="ts-head ts-sticky ts-sticky-day">Day</th>
+  <th className="ts-head ts-sticky ts-sticky-date">Date</th>
+  <th className="ts-head ts-col-start">Start</th>
+  <th className="ts-head ts-col-finish">Finish</th>
+  <th className="ts-head ts-col-lunch">Lunch</th>
+  <th className="ts-head ts-col-hours">Hours</th>
+  <th className="ts-head ts-col-colleague">Work colleague</th>
+  <th className="ts-head ts-col-notes">Notes</th>
+</tr>
             </thead>
             <tbody>
               {week1Days.map((date) => {
@@ -850,17 +850,6 @@ markCurrentFieldsSaved();
                   className={row.isoKey === todayIso ? "ts-today" : ""}>
                     <td className="ts-cell ts-cell-day ts-sticky ts-sticky-day">{row.dayName}</td>
                     <td className="ts-cell ts-cell-date ts-sticky ts-sticky-date">{formatDateLabel(row.date)}</td>
-                    <td className="ts-cell ts-col-colleague">
-                      <input
-                        type="text"
-                        list="colleagues-list"
-                        className={inputClass(row.isoKey, "colleague")}
-                        value={row.colleague}
-                        onChange={(e) => handleFieldChange(row.isoKey, "colleague", e.target.value)}
-                        placeholder="Worked with"
-                        disabled={!isEditable}
-                      />
-                    </td>
               <td className="ts-cell ts-cell-time ts-col-start">
   <div className="ts-time-wrap">
     <input
@@ -939,6 +928,17 @@ markCurrentFieldsSaved();
   </div>
 </td>
                     <td className="ts-cell ts-cell-hours ts-col-hours">{row.workedHoursDecimal}</td>
+                      <td className="ts-cell ts-col-colleague">
+                      <input
+                        type="text"
+                        list="colleagues-list"
+                        className={inputClass(row.isoKey, "colleague")}
+                        value={row.colleague}
+                        onChange={(e) => handleFieldChange(row.isoKey, "colleague", e.target.value)}
+                        placeholder="Worked with"
+                        disabled={!isEditable}
+                      />
+                    </td>
                     <td className="ts-cell ts-col-notes">
                       <input
                         type="text"
@@ -955,7 +955,7 @@ markCurrentFieldsSaved();
             </tbody>
             <tfoot>
               <tr>
-                <td className="ts-foot" colSpan={6} style={{ textAlign: "right" }}>
+                <td className="ts-foot" colSpan={5} style={{ textAlign: "right" }}>
                   Weekly total
                 </td>
                 <td className="ts-foot ts-cell-hours">{minutesToHoursDecimal(week1TotalMinutes)}</td>
@@ -974,15 +974,15 @@ markCurrentFieldsSaved();
         <table className="ts-table" style={{ borderCollapse: "collapse", fontSize: "0.85rem" }}>
             <thead>
               <tr>
-                <th className="ts-head ts-sticky ts-sticky-day">Day</th>
-                <th className="ts-head ts-sticky ts-sticky-date">Date</th>
-                <th className="ts-head ts-col-colleague">Work colleague</th>
-                <th className="ts-head ts-col-start">Start</th>
-                <th className="ts-head ts-col-finish">Finish</th>
-                <th className="ts-head ts-col-lunch">Lunch</th>
-                <th className="ts-head ts-col-hours">Hours</th>
-                <th className="ts-head ts-col-notes">Notes</th>
-              </tr>
+  <th className="ts-head ts-sticky ts-sticky-day">Day</th>
+  <th className="ts-head ts-sticky ts-sticky-date">Date</th>
+  <th className="ts-head ts-col-start">Start</th>
+  <th className="ts-head ts-col-finish">Finish</th>
+  <th className="ts-head ts-col-lunch">Lunch</th>
+  <th className="ts-head ts-col-hours">Hours</th>
+  <th className="ts-head ts-col-colleague">Work colleague</th>
+  <th className="ts-head ts-col-notes">Notes</th>
+</tr>
             </thead>
             <tbody>
               {week2Days.map((date) => {
@@ -992,17 +992,6 @@ markCurrentFieldsSaved();
                   className={row.isoKey === todayIso ? "ts-today" : ""}>
                     <td className="ts-cell ts-cell-day ts-sticky ts-sticky-day">{row.dayName}</td>
                     <td className="ts-cell ts-cell-date ts-sticky ts-sticky-date">{formatDateLabel(row.date)}</td>
-                    <td className="ts-cell ts-col-colleague">
-                      <input
-                        type="text"
-                        list="colleagues-list"
-                        className={inputClass(row.isoKey, "colleague")}
-                        value={row.colleague}
-                        onChange={(e) => handleFieldChange(row.isoKey, "colleague", e.target.value)}
-                        placeholder="Worked with"
-                        disabled={!isEditable} 
-                      />
-                    </td>
 <td className="ts-cell ts-cell-time ts-col-start">
   <div className="ts-time-wrap">
     <input
@@ -1082,6 +1071,17 @@ markCurrentFieldsSaved();
   </div>
 </td>
                     <td className="ts-cell ts-cell-hours ts-col-hours">{row.workedHoursDecimal}</td>
+                    <td className="ts-cell ts-col-colleague">
+                      <input
+                        type="text"
+                        list="colleagues-list"
+                        className={inputClass(row.isoKey, "colleague")}
+                        value={row.colleague}
+                        onChange={(e) => handleFieldChange(row.isoKey, "colleague", e.target.value)}
+                        placeholder="Worked with"
+                        disabled={!isEditable} 
+                      />
+                    </td>
                     <td className="ts-cell ts-col-notes">
                       <input
                         type="text"
@@ -1098,14 +1098,14 @@ markCurrentFieldsSaved();
             </tbody>
             <tfoot>
               <tr>
-                <td className="ts-foot" colSpan={6} style={{ textAlign: "right" }}>
+                <td className="ts-foot" colSpan={5} style={{ textAlign: "right" }}>
                   Weekly total
                 </td>
                 <td className="ts-foot ts-cell-hours">{minutesToHoursDecimal(week2TotalMinutes)}</td>
                 <td className="ts-foot"></td>
               </tr>
               <tr>
-                <td className="ts-foot" colSpan={6} style={{ textAlign: "right" }}>
+                <td className="ts-foot" colSpan={5} style={{ textAlign: "right" }}>
                   Fortnight total
                 </td>
                 <td className="ts-foot ts-cell-hours">{minutesToHoursDecimal(fortnightTotalMinutes)}</td>
