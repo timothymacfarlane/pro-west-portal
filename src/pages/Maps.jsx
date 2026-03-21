@@ -145,6 +145,10 @@ const LGATE_233_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Boundaries/MapServer/14/query"; // LGA Boundaries (LGATE-233)
 const DPLH_070_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Property_and_Planning/MapServer/111/query"; // R-Codes Zoning (DPLH-070)
+const WCORP_068_QUERY =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer/17/query"; // Sewer Gravity Pipe (WCORP-068)
+const WCORP_026_QUERY =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer/1/query"; // Sewer Manhole (WCORP-026)
 
   // ---- Speed knobs ----
 const MIN_GEODETIC_ZOOM = 12;
@@ -747,6 +751,8 @@ const lastFetchRef = useRef({
   cad001: 0,
   lga233: 0,
   zoning070: 0,
+  sewer068: 0,
+  sewer026: 0,
 });
 
   const clustererRef = useRef(null);
@@ -2971,6 +2977,8 @@ const handleMyLocation = () => {
       const hasCad = prev.some((l) => l.id === "cad001");
       const hasLGA = prev.some((l) => l.id === "lga233");
       const hasZoning = prev.some((l) => l.id === "zoning070");
+      const hasSewer = prev.some((l) => l.id === "sewer068");
+      const hasSewerMh = prev.some((l) => l.id === "sewer026");
       const next = [...prev];
 
     if (!hasSSM)
@@ -3112,6 +3120,51 @@ if (!hasRM)
         }),
     },
   });
+  if (!hasSewerMh)
+  next.push({
+    id: "sewer026",
+    name: "Sewer Manholes (WCORP-026)",
+    type: "point",
+    visible: false,
+    data: {
+      url: WCORP_026_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      symbol: {
+        path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
+        fillColor: "#ff4da6",
+        fillOpacity: 1,
+        strokeColor: "#ffffff",
+        strokeWeight: 1.5,
+        scale: 4.5,
+      },
+      layerTag: "SEWER MH",
+      idFields: ["pacid,toplev"],
+      nameFields: ["pacid,toplev"],
+      label: null,
+      filterFn: (feature) => !isDestroyed(feature?.properties || {}),
+popupBuilder: ({ props }) => {
+  const id = props?.pacid;
+  const rl = props?.toplev;
+
+  return `
+    <div style="min-width:160px; font-family:Inter,sans-serif; font-size:13px;">
+      <div style="font-weight:800; margin-bottom:6px;">Sewer Manhole</div>
+
+      <div><b>ID:</b> ${id ?? "-"}</div>
+
+      <div><b>Lid RL:</b> ${
+        rl !== null && rl !== undefined && rl !== ""
+          ? Number(rl).toFixed(3)
+          : "-"
+      }</div>
+    </div>
+  `;
+},
+      cluster: false,
+    },
+  });
            if (!hasCad)
         next.push({
           id: "cad001",
@@ -3189,6 +3242,48 @@ if (!hasRM)
             },
           },
         });
+        if (!hasSewer)
+  next.push({
+    id: "sewer068",
+    name: "Sewer Gravity Pipes (WCORP-068)",
+    type: "line",
+    visible: false,
+    data: {
+      url: WCORP_068_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+style: (feature) => {
+  const maintype = String(feature.getProperty("maintype") || "").toUpperCase();
+
+  // Bright, bold pink styling
+  if (maintype.includes("TREATED")) {
+    return {
+      clickable: false,
+      strokeColor: "#ff2d95", // bright pink
+      strokeWeight: 3,        // thicker
+      strokeOpacity: 0.6,
+    };
+  }
+
+  if (maintype.includes("TRANSFER")) {
+    return {
+      clickable: false,
+      strokeColor: "#ff007f", // even stronger pink
+      strokeWeight: 4,        // thickest for mains
+      strokeOpacity: 0.6,
+    };
+  }
+
+  return {
+    clickable: false,
+    strokeColor: "#ff4da6", // standard bright pink
+    strokeWeight: 3,
+    strokeOpacity: 0.6,
+  };
+},
+    },
+  });
       return next;
     });
   }, []);
@@ -3269,13 +3364,14 @@ useEffect(() => {
       clustererRef.current = new MarkerClusterer({ map, markers: [] });
     }
 
-    const visibleMarkers = [];
-    pointLayers.forEach((layer) => {
-      if (!layer.visible) return;
-      const store = pointLayersRef.current.get(layer.id);
-      if (!store) return;
-      visibleMarkers.push(...store.markers);
-    });
+  const visibleMarkers = [];
+pointLayers.forEach((layer) => {
+  if (!layer.visible) return;
+  if (layer.data?.cluster === false) return;
+  const store = pointLayersRef.current.get(layer.id);
+  if (!store) return;
+  visibleMarkers.push(...store.markers);
+});
 
     clustererRef.current.clearMarkers();
     if (visibleMarkers.length) clustererRef.current.addMarkers(visibleMarkers);
@@ -4147,7 +4243,25 @@ onBlur={() => {
                       ))}
                   </div>                
                 </div>
-
+<div className="maps-layer-section">
+  <div className="maps-layer-section-title">Services</div>
+  <div className="layers-list">
+    {layers
+      .filter((l) => ["sewer068", "sewer026"].includes(l.id))
+      .map((l) => (
+        <div key={l.id} className="layer-row layer-row-compact">
+          <label className="layer-left">
+            <input
+              type="checkbox"
+              checked={l.visible}
+              onChange={() => toggleLayer(l.id)}
+            />
+            <span className="layer-name">{l.name}</span>
+          </label>
+        </div>
+      ))}
+  </div>
+</div>
                 <div className="maps-layer-section">
                   <div className="maps-layer-section-title">Local Authority</div>
                   <div className="layers-list">
@@ -4435,7 +4549,13 @@ onBlur={() => {
             {activeTab === "legend" && (
               <div className="panel-card">
                 <div className="panel-card-title">Legend</div>
-
+ <div className="maps-legend-row">
+                    <span className="maps-legend-line" />
+                    <div>
+                      <div className="maps-legend-title">Cadastre</div>
+                      <div className="maps-legend-sub">LGATE-001 (thin white boundary)</div>
+                    </div>
+                  </div>
                 <div className="maps-legend">
                   <div className="maps-legend-row">
                     <span className="maps-legend-swatch swatch-ssm" />
@@ -4462,12 +4582,32 @@ onBlur={() => {
                   </div>
 
                   <div className="maps-legend-row">
-                    <span className="maps-legend-line" />
-                    <div>
-                      <div className="maps-legend-title">Cadastre</div>
-                      <div className="maps-legend-sub">LGATE-001 (thin white boundary)</div>
-                    </div>
-                  </div>
+  <span
+    className="maps-legend-line"
+       style={{ background: "#ff4da6", height: 3 }}
+  />
+  <div>
+    <div className="maps-legend-title">Sewer Gravity Pipes</div>
+    <div className="maps-legend-sub">WCORP-068 (pink utility line)</div>
+  </div>
+</div>
+<div className="maps-legend-row">
+  <span
+    className="maps-legend-swatch"
+    style={{
+      display: "inline-block",
+      width: 10,
+      height: 10,
+      borderRadius: "50%",
+      background: "#ff4da6",
+      border: "1.5px solid #ffffff",
+    }}
+  />
+  <div>
+    <div className="maps-legend-title">Sewer Manholes</div>
+    <div className="maps-legend-sub">WCORP-026 (pink point)</div>
+  </div>
+</div>
                   <div className="maps-legend-row">
                     <span
                       className="maps-legend-line"

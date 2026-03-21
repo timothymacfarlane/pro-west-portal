@@ -3068,3 +3068,9 @@ body,
 .schedule-grid-wrapper::-webkit-scrollbar-thumb:hover {
   background: #a9a9a9;
 }
+/* Reduce Google Maps InfoWindow close button size */
+.gm-ui-hover-effect {
+  transform: scale(0.6) !important;  /* adjust: 0.5–0.7 works well */
+  top: 4px !important;
+  right: 4px !important;
+}
