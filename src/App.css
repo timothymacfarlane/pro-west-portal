@@ -3191,6 +3191,7 @@ body,
   justify-content: center;
   cursor: pointer;
   box-sizing: border-box;
+  z-index: 20;
 }
 
 .job-planning-add-btn:hover {
