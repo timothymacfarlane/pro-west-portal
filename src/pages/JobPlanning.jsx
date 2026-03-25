@@ -103,18 +103,28 @@ function JobPlanning() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [calendarDraggedKey, setCalendarDraggedKey] = useState(null);
 
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [editItems, setEditItems] = useState([]);
-  const [highlightedJobKey, setHighlightedJobKey] = useState(null);
-  const [draggedJobKey, setDraggedJobKey] = useState(null);
-  const [dragOverJobKey, setDragOverJobKey] = useState(null);
-  const topScrollRef = useRef(null);
-  const bottomScrollRef = useRef(null);
+  const UNSCHEDULED_KEY = "__UNSCHEDULED__";
 
-  const [jobQuery, setJobQuery] = useState("");
-  const [jobSuggestions, setJobSuggestions] = useState([]);
-  const [jobLoading, setJobLoading] = useState(false);
+const [selectedDate, setSelectedDate] = useState(null);
+const [editItems, setEditItems] = useState([]);
+const [unscheduledItems, setUnscheduledItems] = useState([]);
+const [highlightedJobKey, setHighlightedJobKey] = useState(null);
+const [draggedJobKey, setDraggedJobKey] = useState(null);
+const [dragOverJobKey, setDragOverJobKey] = useState(null);
+ const topScrollRef = useRef(null);
+const bottomScrollRef = useRef(null);
+const editorLoadedRef = useRef(false);
+const autosaveTimerRef = useRef(null);
+
+const [jobQuery, setJobQuery] = useState("");
+const [jobSuggestions, setJobSuggestions] = useState([]);
+const [jobLoading, setJobLoading] = useState(false);
+const [modalTarget, setModalTarget] = useState(null);
+const [editorModalOpen, setEditorModalOpen] = useState(false);
+const [newJobColour, setNewJobColour] = useState("");
+const [selectedJobSuggestion, setSelectedJobSuggestion] = useState(null);
 
   const calendarDays = useMemo(() => buildCalendarDays(currentMonth), [currentMonth]);
 
@@ -130,69 +140,73 @@ function JobPlanning() {
   const monthValue = formatMonthInput(currentMonth);
   const todayISO = formatISO(new Date());
 
-  // ---------- Access guard ----------
-  if (!isAdmin) {
-    return (
-      <PageLayout icon="🗓️" title="Job Planning" subtitle="Admin only">
-        <div className="card">
-          <h3 className="card-title">Access denied</h3>
-          <p className="card-subtitle">This page is only available to admin users.</p>
-        </div>
-      </PageLayout>
-    );
-  }
+ 
 
   // ---------- Load month data ----------
-  useEffect(() => {
-    let cancelled = false;
-    if (!isAppVisible) return;
+useEffect(() => {
+  let cancelled = false;
+  if (!isAppVisible) return;
 
-    const loadPlans = async () => {
-      setLoading(true);
-      setError("");
+  const loadPlans = async () => {
+    setLoading(true);
+    setError("");
 
-      try {
-        const from = formatISO(calendarDays[0]);
-        const to = formatISO(calendarDays[41]);
+    try {
+      const from = formatISO(calendarDays[0]);
+      const to = formatISO(calendarDays[41]);
 
-        const { data, error } = await supabase
+      const [
+        scheduledResult,
+        unscheduledResult,
+      ] = await Promise.all([
+        supabase
           .from("job_planning_entries")
           .select("*")
           .gte("date", from)
           .lte("date", to)
           .order("date", { ascending: true })
           .order("sort_order", { ascending: true })
-          .order("created_at", { ascending: true });
+          .order("created_at", { ascending: true }),
 
-        if (error) throw error;
-        if (cancelled) return;
+        supabase
+          .from("job_planning_unscheduled")
+          .select("*")
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: true }),
+      ]);
 
-        const grouped = {};
+      if (scheduledResult.error) throw scheduledResult.error;
+      if (unscheduledResult.error) throw unscheduledResult.error;
+      if (cancelled) return;
 
-        for (const row of data || []) {
-          if (!grouped[row.date]) grouped[row.date] = [];
-          grouped[row.date].push(row);
-        }
+      const grouped = {};
 
-        setPlansByDate(grouped);
-      } catch (err) {
-        console.error("Error loading job planning entries:", err);
-        if (!cancelled) {
-          const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
-          setError(`Could not load job planning calendar. (${msg})`);
-          setPlansByDate({});
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+      for (const row of scheduledResult.data || []) {
+        if (!grouped[row.date]) grouped[row.date] = [];
+        grouped[row.date].push(row);
       }
-    };
 
-    loadPlans();
+      setPlansByDate(grouped);
+      setUnscheduledItems(unscheduledResult.data || []);
+    } catch (err) {
+      console.error("Error loading job planning entries:", err);
+      if (!cancelled) {
+        const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+        setError(`Could not load job planning calendar. (${msg})`);
+        setPlansByDate({});
+        setUnscheduledItems([]);
+      }
+    } finally {
+      if (!cancelled) setLoading(false);
+    }
+  };
 
-    return () => {
-      cancelled = true;
-    };
-  }, [calendarDays, isAppVisible]);
+  loadPlans();
+
+  return () => {
+    cancelled = true;
+  };
+}, [calendarDays, isAppVisible]);
 
   useEffect(() => {
   const top = topScrollRef.current;
@@ -230,22 +244,144 @@ useEffect(() => {
 }, [calendarDays, plansByDate, selectedDate]);
 
   // ---------- Sync editor when day changes ----------
-  useEffect(() => {
-    if (!selectedDate) return;
+useEffect(() => {
+  if (!selectedDate) return;
 
-    const currentItems = plansByDate[selectedDate] || [];
-    const hydrated = currentItems.map((item, index) => ({
-      ...item,
-      client_key: item.id || `${item.job_number}-${selectedDate}-${index}`,
-    }));
+  const sourceItems =
+    selectedDate === UNSCHEDULED_KEY
+      ? unscheduledItems
+      : (plansByDate[selectedDate] || []);
 
-   setEditItems(hydrated);
-setJobQuery("");
-setJobSuggestions([]);
-setHighlightedJobKey(null);
-setDraggedJobKey(null);
-setDragOverJobKey(null);
-  }, [selectedDate, plansByDate]);
+  const hydrated = sourceItems.map((item, index) => ({
+    ...item,
+    client_key: item.id || `${item.job_number}-${selectedDate}-${index}`,
+  }));
+editorLoadedRef.current = false;
+  setEditItems(hydrated);
+  setJobQuery("");
+  setJobSuggestions([]);
+  setHighlightedJobKey(null);
+  setDraggedJobKey(null);
+  setDragOverJobKey(null);
+}, [selectedDate, plansByDate, unscheduledItems]);
+
+useEffect(() => {
+  if (!editorModalOpen || !selectedDate) return;
+
+  if (!editorLoadedRef.current) {
+    editorLoadedRef.current = true;
+    return;
+  }
+
+  if (autosaveTimerRef.current) {
+    clearTimeout(autosaveTimerRef.current);
+  }
+
+  autosaveTimerRef.current = setTimeout(async () => {
+    try {
+      setError("");
+
+      if (selectedDate === UNSCHEDULED_KEY) {
+        const { error: deleteError } = await supabase
+          .from("job_planning_unscheduled")
+          .delete()
+          .gt("id", 0);
+
+        if (deleteError) throw deleteError;
+
+        if (editItems.length > 0) {
+          const payload = editItems.map((item, index) => ({
+            job_number: String(item.job_number || "").trim(),
+            suburb: String(item.suburb || "").trim(),
+            notes: String(item.notes || "").trim(),
+            colour: String(item.colour || "").trim(),
+            sort_order: index,
+            created_by: user?.id || null,
+            updated_by: user?.id || null,
+            updated_at: new Date().toISOString(),
+          }));
+
+          const { data, error } = await supabase
+            .from("job_planning_unscheduled")
+            .insert(payload)
+            .select()
+            .order("sort_order", { ascending: true });
+
+          if (error) throw error;
+
+          const rows = data || [];
+          setUnscheduledItems(rows);
+          setEditItems(
+            rows.map((item, index) => ({
+              ...item,
+              client_key: item.id || `${item.job_number}-${UNSCHEDULED_KEY}-${index}`,
+            }))
+          );
+        } else {
+          setUnscheduledItems([]);
+        }
+      } else {
+        const { error: deleteError } = await supabase
+          .from("job_planning_entries")
+          .delete()
+          .eq("date", selectedDate);
+
+        if (deleteError) throw deleteError;
+
+        if (editItems.length > 0) {
+          const payload = editItems.map((item, index) => ({
+            date: selectedDate,
+            job_number: String(item.job_number || "").trim(),
+            suburb: String(item.suburb || "").trim(),
+            notes: String(item.notes || "").trim(),
+            colour: String(item.colour || "").trim(),
+            sort_order: index,
+            created_by: user?.id || null,
+            updated_by: user?.id || null,
+            updated_at: new Date().toISOString(),
+          }));
+
+          const { data, error } = await supabase
+            .from("job_planning_entries")
+            .insert(payload)
+            .select()
+            .order("sort_order", { ascending: true });
+
+          if (error) throw error;
+
+          const rows = data || [];
+          setPlansByDate((prev) => ({
+            ...prev,
+            [selectedDate]: rows,
+          }));
+
+          setEditItems(
+            rows.map((item, index) => ({
+              ...item,
+              client_key: item.id || `${item.job_number}-${selectedDate}-${index}`,
+            }))
+          );
+        } else {
+          setPlansByDate((prev) => {
+            const next = { ...prev };
+            delete next[selectedDate];
+            return next;
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Autosave failed:", err);
+      const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+      setError(`Could not autosave changes. (${msg})`);
+    }
+  }, 500);
+
+  return () => {
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+  };
+}, [editItems, editorModalOpen, selectedDate, user?.id]);
 
   // ---------- Month nav ----------
   const handlePrevMonth = () => {
@@ -274,10 +410,44 @@ setDragOverJobKey(null);
     setSelectedDate(null);
   };
 
-  const onDayClick = (dateISO) => {
-    setSelectedDate(dateISO);
-  };
+ const openEditorModalForDay = (dateISO) => {
+  setSelectedDate(dateISO);
+  setEditorModalOpen(true);
+};
 
+const openEditorModalForUnscheduled = () => {
+  setSelectedDate(UNSCHEDULED_KEY);
+  setEditorModalOpen(true);
+};
+
+const closeEditorModal = () => {
+  setEditorModalOpen(false);
+  setSelectedDate(null);
+};
+
+const openAddModal = (targetKey) => {
+  setModalTarget(targetKey);
+  setJobQuery("");
+  setJobSuggestions([]);
+  setNewJobColour("");
+  setSelectedJobSuggestion(null);
+};
+
+const closeAddModal = () => {
+  setModalTarget(null);
+  setJobQuery("");
+  setJobSuggestions([]);
+  setNewJobColour("");
+  setSelectedJobSuggestion(null);
+};
+
+const cancelAutosave = () => {
+  if (autosaveTimerRef.current) {
+    clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = null;
+  }
+  editorLoadedRef.current = false;
+};
   // ---------- Job search ----------
   useEffect(() => {
     let cancelled = false;
@@ -350,60 +520,138 @@ setDragOverJobKey(null);
     }
   };
 
- const addPlannedJob = async (job) => {
+const addPlannedJob = async (job) => {
   const jobNumber = String(job.job_number);
+  const targetKey = modalTarget ?? selectedDate;
 
-  if (editItems.some((item) => String(item.job_number) === jobNumber)) {
-    setJobQuery("");
-    setJobSuggestions([]);
+  if (!targetKey) return;
+cancelAutosave();
+  const targetItems =
+    targetKey === UNSCHEDULED_KEY
+      ? unscheduledItems
+      : (plansByDate[targetKey] || []);
+
+  if (targetItems.some((item) => String(item.job_number) === jobNumber)) {
+   setJobQuery("");
+setJobSuggestions([]);
+setSelectedJobSuggestion(null);
+closeAddModal();
     return;
   }
 
-  const suburb = await resolveSuburbForJob(job);
+  try {
+    setSaving(true);
+    setError("");
 
-  const newKey = `new-${jobNumber}-${Date.now()}`;
+    const suburb = await resolveSuburbForJob(job);
 
-  setEditItems((prev) => {
-    const next = [
-     {
-  id: null,
-  client_key: newKey,
-  date: selectedDate,
-  job_number: jobNumber,
-  suburb,
-  notes: "",
-  colour: "",
-  sort_order: 0,
-},
-      ...prev,
-    ].map((item, index) => ({
-      ...item,
-      sort_order: index,
-    }));
+    if (targetKey === UNSCHEDULED_KEY) {
+      const payload = {
+        job_number: jobNumber,
+        suburb,
+        notes: "",
+        colour: newJobColour,
+        sort_order: targetItems.length,
+        created_by: user?.id || null,
+        updated_by: user?.id || null,
+        updated_at: new Date().toISOString(),
+      };
 
-    return next;
-  });
+      const { data, error } = await supabase
+        .from("job_planning_unscheduled")
+        .insert(payload)
+        .select()
+        .single();
 
-  // 🔥 highlight the new job
-  setHighlightedJobKey(newKey);
+      if (error) throw error;
 
-  // remove highlight after 1.5 seconds
-  setTimeout(() => {
-    setHighlightedJobKey(null);
-  }, 1500);
+      const nextUnscheduled = [data, ...unscheduledItems].map((item, index) => ({
+        ...item,
+        sort_order: index,
+      }));
 
-  setJobQuery("");
-  setJobSuggestions([]);
+      setUnscheduledItems(nextUnscheduled);
+
+      if (selectedDate === UNSCHEDULED_KEY) {
+        setEditItems(
+          nextUnscheduled.map((item, index) => ({
+            ...item,
+            client_key: item.id || `${item.job_number}-${UNSCHEDULED_KEY}-${index}`,
+          }))
+        );
+      }
+
+      setHighlightedJobKey(data.id || `new-${jobNumber}-${Date.now()}`);
+    } else {
+      const payload = {
+        date: targetKey,
+        job_number: jobNumber,
+        suburb,
+        notes: "",
+        colour: newJobColour,
+        sort_order: targetItems.length,
+        created_by: user?.id || null,
+        updated_by: user?.id || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data, error } = await supabase
+        .from("job_planning_entries")
+        .insert(payload)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      const nextDayItems = [data, ...(plansByDate[targetKey] || [])].map((item, index) => ({
+        ...item,
+        sort_order: index,
+      }));
+
+      setPlansByDate((prev) => ({
+        ...prev,
+        [targetKey]: nextDayItems,
+      }));
+
+      if (selectedDate === targetKey) {
+        setEditItems(
+          nextDayItems.map((item, index) => ({
+            ...item,
+            client_key: item.id || `${item.job_number}-${targetKey}-${index}`,
+          }))
+        );
+      }
+
+      setHighlightedJobKey(data.id || `new-${jobNumber}-${Date.now()}`);
+    }
+
+    setTimeout(() => {
+      setHighlightedJobKey(null);
+    }, 1500);
+
+    setJobQuery("");
+    setJobSuggestions([]);
+    closeAddModal();
+  } catch (err) {
+    console.error("Error adding planned job:", err);
+    const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+    setError(`Could not add this job. (${msg})`);
+  } finally {
+    setSaving(false);
+  }
 };
 
-  const handleJobKeyDown = (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      if (jobSuggestions.length > 0) {
-        void addPlannedJob(jobSuggestions[0]);
-      }
+ const handleJobKeyDown = (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (jobSuggestions.length > 0) {
+      const picked = jobSuggestions[0];
+      setSelectedJobSuggestion(picked);
+      setJobQuery(String(picked.job_number));
+      setJobSuggestions([]);
     }
-  };
+  }
+};
 
   const updateEditItem = (clientKey, field, value) => {
     setEditItems((prev) =>
@@ -418,33 +666,265 @@ setDragOverJobKey(null);
     );
   };
 
-  const removeEditItem = (clientKey) => {
-    setEditItems((prev) =>
-      prev
-        .filter((item) => item.client_key !== clientKey)
-        .map((item, index) => ({
-          ...item,
+const removeEditItem = async (item) => {
+  cancelAutosave();
+
+  try {
+    setSaving(true);
+    setError("");
+
+    if (selectedDate === UNSCHEDULED_KEY) {
+      if (item.id != null) {
+        const { error: deleteError } = await supabase
+          .from("job_planning_unscheduled")
+          .delete()
+          .eq("id", item.id);
+
+        if (deleteError) throw deleteError;
+      }
+
+      const nextUnscheduled = unscheduledItems
+        .filter((x) => {
+          if (item.id != null && x.id != null) return x.id !== item.id;
+          return x.client_key !== item.client_key && String(x.job_number) !== String(item.job_number);
+        })
+        .map((x, index) => ({
+          ...x,
           sort_order: index,
+        }));
+
+      setUnscheduledItems(nextUnscheduled);
+      setEditItems(
+        nextUnscheduled.map((x, index) => ({
+          ...x,
+          client_key: x.id || `${x.job_number}-${UNSCHEDULED_KEY}-${index}`,
         }))
+      );
+    } else {
+      if (item.id != null) {
+        const { error: deleteError } = await supabase
+          .from("job_planning_entries")
+          .delete()
+          .eq("id", item.id);
+
+        if (deleteError) throw deleteError;
+      }
+
+      const nextDayItems = (plansByDate[selectedDate] || [])
+        .filter((x) => {
+          if (item.id != null && x.id != null) return x.id !== item.id;
+          return x.client_key !== item.client_key && String(x.job_number) !== String(item.job_number);
+        })
+        .map((x, index) => ({
+          ...x,
+          sort_order: index,
+        }));
+
+      setPlansByDate((prev) => {
+        const next = { ...prev };
+        if (nextDayItems.length > 0) {
+          next[selectedDate] = nextDayItems;
+        } else {
+          delete next[selectedDate];
+        }
+        return next;
+      });
+
+      setEditItems(
+        nextDayItems.map((x, index) => ({
+          ...x,
+          client_key: x.id || `${x.job_number}-${selectedDate}-${index}`,
+        }))
+      );
+    }
+  } catch (err) {
+    console.error("Error removing planned item:", err);
+    const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+    setError(`Could not remove job. (${msg})`);
+  } finally {
+    setSaving(false);
+  }
+};
+
+const moveItemToUnscheduled = async (item) => {
+  cancelAutosave();
+
+  try {
+    if (!selectedDate || selectedDate === UNSCHEDULED_KEY) return;
+
+    setSaving(true);
+    setError("");
+
+    if (item.id != null) {
+      const { error: deleteError } = await supabase
+        .from("job_planning_entries")
+        .delete()
+        .eq("id", item.id);
+
+      if (deleteError) throw deleteError;
+    }
+
+    const insertPayload = {
+      job_number: String(item.job_number || "").trim(),
+      suburb: String(item.suburb || "").trim(),
+      notes: String(item.notes || "").trim(),
+      colour: String(item.colour || "").trim(),
+      sort_order: 0,
+      created_by: user?.id || null,
+      updated_by: user?.id || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: insertedRow, error: insertError } = await supabase
+      .from("job_planning_unscheduled")
+      .insert(insertPayload)
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+
+    const nextDayItems = (plansByDate[selectedDate] || [])
+      .filter((x) => {
+        if (item.id != null && x.id != null) return x.id !== item.id;
+        return (
+          x.client_key !== item.client_key &&
+          String(x.job_number) !== String(item.job_number)
+        );
+      })
+      .map((x, index) => ({
+        ...x,
+        sort_order: index,
+      }));
+
+    setPlansByDate((prev) => {
+      const next = { ...prev };
+      if (nextDayItems.length > 0) {
+        next[selectedDate] = nextDayItems;
+      } else {
+        delete next[selectedDate];
+      }
+      return next;
+    });
+
+    setEditItems(
+      nextDayItems.map((x, index) => ({
+        ...x,
+        client_key: x.id || `${x.job_number}-${selectedDate}-${index}`,
+      }))
     );
-  };
 
-const cycleJobColour = (clientKey) => {
-  setEditItems((prev) =>
-    prev.map((item) => {
-      if (item.client_key !== clientKey) return item;
+    const nextUnscheduled = [
+      insertedRow,
+      ...unscheduledItems.filter((x) => {
+        if (item.id != null && x.id != null) return x.id !== item.id;
+        return (
+          x.client_key !== item.client_key &&
+          String(x.job_number) !== String(item.job_number)
+        );
+      }),
+    ].map((x, index) => ({
+      ...x,
+      sort_order: index,
+    }));
 
-      const currentIndex = JOB_COLOURS.findIndex((c) => c.value === (item.colour || ""));
-      const nextIndex = currentIndex === -1
-        ? 1
-        : (currentIndex + 1) % JOB_COLOURS.length;
+    setUnscheduledItems(nextUnscheduled);
+  } catch (err) {
+    console.error("Error moving item to unscheduled:", err);
+    const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+    setError(`Could not move job to unscheduled. (${msg})`);
+  } finally {
+    setSaving(false);
+  }
+};
 
-      return {
-        ...item,
-        colour: JOB_COLOURS[nextIndex].value,
-      };
-    })
-  );
+const moveItemToSelectedDay = async (item, targetDateISO) => {
+  cancelAutosave();
+
+  try {
+    if (!targetDateISO || selectedDate !== UNSCHEDULED_KEY) return;
+
+    setSaving(true);
+    setError("");
+
+    // 1. Remove from unscheduled table
+    if (item.id != null) {
+      const { error: deleteError } = await supabase
+        .from("job_planning_unscheduled")
+        .delete()
+        .eq("id", item.id);
+
+      if (deleteError) throw deleteError;
+    }
+
+    // 2. Insert into scheduled table
+    const insertPayload = {
+      date: targetDateISO,
+      job_number: String(item.job_number || "").trim(),
+      suburb: String(item.suburb || "").trim(),
+      notes: String(item.notes || "").trim(),
+      colour: String(item.colour || "").trim(),
+      sort_order: 0,
+      created_by: user?.id || null,
+      updated_by: user?.id || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: insertedRow, error: insertError } = await supabase
+      .from("job_planning_entries")
+      .insert(insertPayload)
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+
+    // 3. Rebuild UNSCHEDULED list (remove moved item)
+    const nextUnscheduled = unscheduledItems
+      .filter((x) => {
+        if (item.id != null && x.id != null) return x.id !== item.id;
+        return (
+          x.client_key !== item.client_key &&
+          String(x.job_number) !== String(item.job_number)
+        );
+      })
+      .map((x, index) => ({
+        ...x,
+        sort_order: index,
+      }));
+
+    setUnscheduledItems(nextUnscheduled);
+
+    // update editor (because we are in UNSCHEDULED modal)
+    setEditItems(
+      nextUnscheduled.map((x, index) => ({
+        ...x,
+        client_key: x.id || `${x.job_number}-${UNSCHEDULED_KEY}-${index}`,
+      }))
+    );
+
+    // 4. Add to target day (top of list)
+    const nextTargetItems = [
+      insertedRow,
+      ...(plansByDate[targetDateISO] || []).filter((x) => {
+        if (insertedRow.id != null && x.id != null) return x.id !== insertedRow.id;
+        return String(x.job_number) !== String(item.job_number);
+      }),
+    ].map((x, index) => ({
+      ...x,
+      sort_order: index,
+    }));
+
+    setPlansByDate((prev) => ({
+      ...prev,
+      [targetDateISO]: nextTargetItems,
+    }));
+
+  } catch (err) {
+    console.error("Error moving item to selected day:", err);
+    const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+    setError(`Could not move job to day. (${msg})`);
+  } finally {
+    setSaving(false);
+  }
 };
 
   const moveEditItem = (fromKey, toKey) => {
@@ -481,6 +961,169 @@ const handleDragEnd = () => {
   setDragOverJobKey(null);
 };
 
+const makeCalendarDragKey = (bucketKey, item, index) =>
+  `${bucketKey}::${item.id ?? item.client_key ?? item.job_number ?? index}`;
+
+const persistCalendarOrder = async (bucketKey, rows) => {
+  cancelAutosave();
+  try {
+    setError("");
+
+    if (bucketKey === UNSCHEDULED_KEY) {
+      const { error: deleteError } = await supabase
+        .from("job_planning_unscheduled")
+        .delete()
+        .gt("id", 0);
+
+      if (deleteError) throw deleteError;
+
+      if (rows.length > 0) {
+        const payload = rows.map((item, index) => ({
+          job_number: String(item.job_number || "").trim(),
+          suburb: String(item.suburb || "").trim(),
+          notes: String(item.notes || "").trim(),
+          colour: String(item.colour || "").trim(),
+          sort_order: index,
+          created_by: user?.id || null,
+          updated_by: user?.id || null,
+          updated_at: new Date().toISOString(),
+        }));
+
+        const { data, error } = await supabase
+          .from("job_planning_unscheduled")
+          .insert(payload)
+          .select()
+          .order("sort_order", { ascending: true });
+
+        if (error) throw error;
+
+        const savedRows = data || [];
+        setUnscheduledItems(savedRows);
+
+        if (selectedDate === UNSCHEDULED_KEY) {
+          setEditItems(
+            savedRows.map((item, index) => ({
+              ...item,
+              client_key: item.id || `${item.job_number}-${UNSCHEDULED_KEY}-${index}`,
+            }))
+          );
+        }
+      } else {
+        setUnscheduledItems([]);
+      }
+    } else {
+      const { error: deleteError } = await supabase
+        .from("job_planning_entries")
+        .delete()
+        .eq("date", bucketKey);
+
+      if (deleteError) throw deleteError;
+
+      if (rows.length > 0) {
+        const payload = rows.map((item, index) => ({
+          date: bucketKey,
+          job_number: String(item.job_number || "").trim(),
+          suburb: String(item.suburb || "").trim(),
+          notes: String(item.notes || "").trim(),
+          colour: String(item.colour || "").trim(),
+          sort_order: index,
+          created_by: user?.id || null,
+          updated_by: user?.id || null,
+          updated_at: new Date().toISOString(),
+        }));
+
+        const { data, error } = await supabase
+          .from("job_planning_entries")
+          .insert(payload)
+          .select()
+          .order("sort_order", { ascending: true });
+
+        if (error) throw error;
+
+        const savedRows = data || [];
+
+        setPlansByDate((prev) => ({
+          ...prev,
+          [bucketKey]: savedRows,
+        }));
+
+        if (selectedDate === bucketKey) {
+          setEditItems(
+            savedRows.map((item, index) => ({
+              ...item,
+              client_key: item.id || `${item.job_number}-${bucketKey}-${index}`,
+            }))
+          );
+        }
+      } else {
+        setPlansByDate((prev) => {
+          const next = { ...prev };
+          delete next[bucketKey];
+          return next;
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Could not persist calendar reorder:", err);
+    const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+    setError(`Could not save reordered jobs. (${msg})`);
+  }
+};
+
+const reorderCalendarItems = (bucketKey, fromKey, toKey) => {
+  const source =
+    bucketKey === UNSCHEDULED_KEY
+      ? [...unscheduledItems]
+      : [...(plansByDate[bucketKey] || [])];
+
+  const keyed = source.map((item, index) => ({
+    ...item,
+    __dragKey: makeCalendarDragKey(bucketKey, item, index),
+  }));
+
+  const fromIndex = keyed.findIndex((item) => item.__dragKey === fromKey);
+  const toIndex = keyed.findIndex((item) => item.__dragKey === toKey);
+
+  if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return;
+
+  const next = [...keyed];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+
+  const cleaned = next.map(({ __dragKey, ...item }, index) => ({
+    ...item,
+    sort_order: index,
+  }));
+
+  if (bucketKey === UNSCHEDULED_KEY) {
+    setUnscheduledItems(cleaned);
+
+    if (selectedDate === UNSCHEDULED_KEY) {
+      setEditItems(
+        cleaned.map((item, index) => ({
+          ...item,
+          client_key: item.id || `${item.job_number}-${UNSCHEDULED_KEY}-${index}`,
+        }))
+      );
+    }
+  } else {
+    setPlansByDate((prev) => ({
+      ...prev,
+      [bucketKey]: cleaned,
+    }));
+
+    if (selectedDate === bucketKey) {
+      setEditItems(
+        cleaned.map((item, index) => ({
+          ...item,
+          client_key: item.id || `${item.job_number}-${bucketKey}-${index}`,
+        }))
+      );
+    }
+  }
+
+  void persistCalendarOrder(bucketKey, cleaned);
+};
 const handleDropOnItem = (targetKey) => {
   if (!draggedJobKey || !targetKey || draggedJobKey === targetKey) {
     setDraggedJobKey(null);
@@ -493,13 +1136,53 @@ const handleDropOnItem = (targetKey) => {
   setDragOverJobKey(null);
 };
   // ---------- Save / clear ----------
-  const handleSave = async () => {
-    if (!selectedDate) return;
+const handleSave = async () => {
+  if (!selectedDate) return;
 
-    setSaving(true);
-    setError("");
+  setSaving(true);
+  setError("");
 
-    try {
+ if (autosaveTimerRef.current) {
+    clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = null;
+  }
+  editorLoadedRef.current = false;
+
+  try {
+    if (selectedDate === UNSCHEDULED_KEY) {
+      const { error: deleteError } = await supabase
+        .from("job_planning_unscheduled")
+        .delete()
+        .gt("id", 0);
+
+      if (deleteError) throw deleteError;
+
+      let insertedRows = [];
+
+      if (editItems.length > 0) {
+        const payload = editItems.map((item, index) => ({
+          job_number: String(item.job_number || "").trim(),
+          suburb: String(item.suburb || "").trim(),
+          notes: String(item.notes || "").trim(),
+          colour: String(item.colour || "").trim(),
+          sort_order: index,
+          created_by: user?.id || null,
+          updated_by: user?.id || null,
+          updated_at: new Date().toISOString(),
+        }));
+
+        const { data, error } = await supabase
+          .from("job_planning_unscheduled")
+          .insert(payload)
+          .select()
+          .order("sort_order", { ascending: true });
+
+        if (error) throw error;
+        insertedRows = data || [];
+      }
+
+      setUnscheduledItems(insertedRows);
+    } else {
       const { error: deleteError } = await supabase
         .from("job_planning_entries")
         .delete()
@@ -510,17 +1193,17 @@ const handleDropOnItem = (targetKey) => {
       let insertedRows = [];
 
       if (editItems.length > 0) {
-      const payload = editItems.map((item, index) => ({
-  date: selectedDate,
-  job_number: String(item.job_number || "").trim(),
-  suburb: String(item.suburb || "").trim(),
-  notes: String(item.notes || "").trim(),
-  colour: String(item.colour || "").trim(),
-  sort_order: index,
-  created_by: user?.id || null,
-  updated_by: user?.id || null,
-  updated_at: new Date().toISOString(),
-}));
+        const payload = editItems.map((item, index) => ({
+          date: selectedDate,
+          job_number: String(item.job_number || "").trim(),
+          suburb: String(item.suburb || "").trim(),
+          notes: String(item.notes || "").trim(),
+          colour: String(item.colour || "").trim(),
+          sort_order: index,
+          created_by: user?.id || null,
+          updated_by: user?.id || null,
+          updated_at: new Date().toISOString(),
+        }));
 
         const { data, error } = await supabase
           .from("job_planning_entries")
@@ -541,22 +1224,41 @@ const handleDropOnItem = (targetKey) => {
         }
         return next;
       });
-    } catch (err) {
-      console.error("Error saving day plan:", err);
-      const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
-      setError(`Could not save this day plan. (${msg})`);
-    } finally {
-      setSaving(false);
     }
-  };
+  } catch (err) {
+    console.error("Error saving plan:", err);
+    const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+    setError(`Could not save this plan. (${msg})`);
+} finally {
+  setSaving(false);
+  setEditorModalOpen(false);
+  setSelectedDate(null);
+}
+};
 
-  const handleClearDay = async () => {
-    if (!selectedDate) return;
+const handleClearDay = async () => {
+  if (!selectedDate) return;
 
-    setSaving(true);
-    setError("");
+  setSaving(true);
+  setError("");
 
-    try {
+  if (autosaveTimerRef.current) {
+  clearTimeout(autosaveTimerRef.current);
+  autosaveTimerRef.current = null;
+}
+editorLoadedRef.current = false;
+
+  try {
+    if (selectedDate === UNSCHEDULED_KEY) {
+      const { error } = await supabase
+        .from("job_planning_unscheduled")
+        .delete()
+        .gt("id", 0);
+
+      if (error) throw error;
+
+      setUnscheduledItems([]);
+    } else {
       const { error } = await supabase
         .from("job_planning_entries")
         .delete()
@@ -569,18 +1271,21 @@ const handleDropOnItem = (targetKey) => {
         delete next[selectedDate];
         return next;
       });
-
-      setEditItems([]);
-      setJobQuery("");
-      setJobSuggestions([]);
-    } catch (err) {
-      console.error("Error clearing day plan:", err);
-      const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
-      setError(`Could not clear this day plan. (${msg})`);
-    } finally {
-      setSaving(false);
     }
-  };
+
+    setEditItems([]);
+    setJobQuery("");
+    setJobSuggestions([]);
+  } catch (err) {
+    console.error("Error clearing plan:", err);
+    const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+    setError(`Could not clear this plan. (${msg})`);
+} finally {
+  setSaving(false);
+  setEditorModalOpen(false);
+  setSelectedDate(null);
+}
+};
 
   const buildTooltip = (dateISO, items) => {
     const lines = [longDateLabel(dateISO)];
@@ -601,11 +1306,23 @@ const handleDropOnItem = (targetKey) => {
     return lines.join("\n");
   };
 
+ // ---------- Access guard ----------
+  if (!isAdmin) {
+    return (
+      <PageLayout icon="🗓️" title="Job Planning" subtitle="Admin only">
+        <div className="card">
+          <h3 className="card-title">Access denied</h3>
+          <p className="card-subtitle">This page is only available to admin users.</p>
+        </div>
+      </PageLayout>
+    );
+  }
+
   return (
     <PageLayout
       icon="📅"
       title="Job Planning"
-      subtitle="Monthly Job Planning – admin only"
+      subtitle="Schedule Jobs – Admin Only"
     >
       <div className="card schedule-card">
         <div className="schedule-header">
@@ -615,17 +1332,19 @@ const handleDropOnItem = (targetKey) => {
           </div>
 
           <div className="schedule-week-buttons">
-            <button type="button" className="btn-pill" onClick={handlePrevMonth}>
-              ◀ Previous month
-            </button>
+            <button type="button" className="btn-pill job-planning-month-btn" onClick={handlePrevMonth}>
+  <span className="job-planning-month-btn-desktop">◀ Previous Month</span>
+  <span className="job-planning-month-btn-mobile">◀ Prev. Month</span>
+</button>
 
             <button type="button" className="btn-pill" onClick={handleThisMonth}>
-              This month
+              This Month
             </button>
 
-            <button type="button" className="btn-pill" onClick={handleNextMonth}>
-              Next month ▶
-            </button>
+            <button type="button" className="btn-pill job-planning-month-btn" onClick={handleNextMonth}>
+  <span className="job-planning-month-btn-desktop">Next Month ▶</span>
+  <span className="job-planning-month-btn-mobile">Next Month ▶</span>
+</button>
 
             <div
               style={{
@@ -663,185 +1382,249 @@ const handleDropOnItem = (targetKey) => {
           </div>
         )}
 
-        <div className="schedule-grid-scroll-top" ref={topScrollRef}>
-  <div className="schedule-grid-scroll-inner" />
-</div>
-
-<div
-  className="schedule-grid-wrapper"
-  ref={bottomScrollRef}
-  style={{ WebkitOverflowScrolling: "touch" }}
+<div className="job-planning-main-layout">
+  <div
+    className={
+      "job-planning-unscheduled-panel" +
+      (selectedDate === UNSCHEDULED_KEY ? " job-planning-selected-cell" : "")
+    }
+  >
+    <button
+  type="button"
+  className="job-planning-add-btn"
+  onClick={(e) => {
+    e.stopPropagation();
+    openAddModal(UNSCHEDULED_KEY);
+  }}
+  title="Add unscheduled job"
 >
-  <table className="job-planning-grid">
-            <thead>
-              <tr>
-                {DAY_HEADERS.map((day) => (
-                  <th key={day} className="job-planning-col-day">
-                    {day}
-                  </th>
-                ))}
-              </tr>
-            </thead>
+  +
+</button>
+    <div className="job-planning-day-cell-inner">
+      <div className="job-planning-day-header">
+        <div className="job-planning-day-date-wrap">
+          <div className="job-planning-unscheduled-title">Unscheduled Jobs</div>
+        </div>
 
-            <tbody>
-              {calendarRows.map((row, rowIndex) => (
-                <tr key={`row-${rowIndex}`}>
-                  {row.map((day) => {
-                    const iso = formatISO(day);
-                    const items = plansByDate[iso] || [];
-                    const isToday = iso === todayISO;
-                    const isSelected = selectedDate === iso;
-                    const inCurrentMonth = day.getMonth() === currentMonth.getMonth();
+        {unscheduledItems.length > 0 && (
+          <div className="job-planning-day-count">
+            {unscheduledItems.length} job{unscheduledItems.length === 1 ? "" : "s"}
+          </div>
+        )}
+      </div>
 
-                    return (
-                      <td
-                        key={iso}
-                        className={
-                          "job-planning-day-cell" +
-                          (isToday ? " job-planning-today-cell" : "") +
-                          (isSelected ? " job-planning-selected-cell" : "") +
-                          (!inCurrentMonth ? " job-planning-outside-month" : "")
-                        }
-                        onClick={() => onDayClick(iso)}
-                        title={buildTooltip(iso, items)}
-                      >
-                        <div className="job-planning-day-cell-inner">
-                          <div className="job-planning-day-header">
-                            <div className="job-planning-day-date-wrap">
-                              <div className="job-planning-day-number">{day.getDate()}</div>
-                              {!inCurrentMonth && (
-                                <div className="job-planning-day-mini-month">
-                                  {day.toLocaleDateString("en-AU", { month: "short" })}
-                                </div>
-                              )}
-                            </div>
+      <div className="job-planning-day-jobs job-planning-unscheduled-scroll">
+        {unscheduledItems.length === 0 ? (
+          <div className="job-planning-empty-note">No unscheduled jobs</div>
+        ) : (
+          unscheduledItems.map((item, index) => (
+<div
+  key={item.id || `unscheduled-${item.job_number}-${index}`}
+  className={
+    "job-planning-day-job" +
+    (item.colour ? ` job-planning-day-job--${item.colour}` : "")
+  }
+  onClick={(e) => {
+  e.stopPropagation();
+  openEditorModalForUnscheduled();
+}}
+  draggable
+  onDragStart={(e) => {
+    e.stopPropagation();
+    setCalendarDraggedKey(makeCalendarDragKey(UNSCHEDULED_KEY, item, index));
+  }}
+  onDragOver={(e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }}
+  onDrop={(e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const targetKey = makeCalendarDragKey(UNSCHEDULED_KEY, item, index);
+    reorderCalendarItems(UNSCHEDULED_KEY, calendarDraggedKey, targetKey);
+    setCalendarDraggedKey(null);
+  }}
+  onDragEnd={() => setCalendarDraggedKey(null)}
+>
+              <div className="job-planning-day-job-top">
+                <span className="job-planning-day-job-number">{item.job_number}</span>
+                {item.suburb && (
+                  <span className="job-planning-day-job-suburb">{item.suburb}</span>
+                )}
+              </div>
 
-                            {items.length > 0 && (
-  <div className="job-planning-day-count">
-    {items.length} job{items.length === 1 ? "" : "s"}
+              {item.notes && (
+                <div className="job-planning-day-job-notes">{item.notes}</div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   </div>
-)}
-                          </div>
 
-                          <div className="job-planning-day-jobs">
-                            {items.length === 0 ? (
-                              <div className="job-planning-empty-note">No jobs planned</div>
-                            ) : (
-                              items.map((item, index) => (
-                              <div
+  <div className="job-planning-calendar-wrap">
+    <div className="schedule-grid-scroll-top" ref={topScrollRef}>
+      <div className="schedule-grid-scroll-inner" />
+    </div>
+
+    <div
+      className="schedule-grid-wrapper"
+      ref={bottomScrollRef}
+      style={{ WebkitOverflowScrolling: "touch" }}
+    >
+      <table className="job-planning-grid">
+        <thead>
+          <tr>
+            {DAY_HEADERS.map((day) => (
+              <th key={day} className="job-planning-col-day">
+                {day}
+              </th>
+            ))}
+          </tr>
+        </thead>
+
+        <tbody>
+          {calendarRows.map((row, rowIndex) => (
+            <tr key={`row-${rowIndex}`}>
+              {row.map((day) => {
+                const iso = formatISO(day);
+                const items = plansByDate[iso] || [];
+                const isToday = iso === todayISO;
+                const isSelected = selectedDate === iso;
+                const inCurrentMonth = day.getMonth() === currentMonth.getMonth();
+
+                return (
+                  
+                  <td
+                    key={iso}
+                    className={
+                      "job-planning-day-cell" +
+                      (isToday ? " job-planning-today-cell" : "") +
+                      (isSelected ? " job-planning-selected-cell" : "") +
+                      (!inCurrentMonth ? " job-planning-outside-month" : "")
+                    }
+                    title={buildTooltip(iso, items)}
+                  >
+                    <button
+  type="button"
+  className="job-planning-add-btn"
+  onClick={(e) => {
+    e.stopPropagation();
+    openAddModal(iso);
+  }}
+  title="Add job to this day"
+>
+  +
+</button>
+                    <div className="job-planning-day-cell-inner">
+                      <div className="job-planning-day-header">
+                        <div className="job-planning-day-date-wrap">
+                          <div className="job-planning-day-number">{day.getDate()}</div>
+                          {!inCurrentMonth && (
+                            <div className="job-planning-day-mini-month">
+                              {day.toLocaleDateString("en-AU", { month: "short" })}
+                            </div>
+                          )}
+                        </div>
+
+                        {items.length > 0 && (
+                          <div className="job-planning-day-count">
+                            {items.length} job{items.length === 1 ? "" : "s"}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="job-planning-day-jobs">
+                        {items.length === 0 ? (
+                          <div className="job-planning-empty-note">No jobs planned</div>
+                        ) : (
+                          items.map((item, index) => (
+                         <div
   key={item.id || `${iso}-${item.job_number}-${index}`}
   className={
     "job-planning-day-job" +
     (item.colour ? ` job-planning-day-job--${item.colour}` : "")
   }
+  onClick={(e) => {
+  e.stopPropagation();
+  openEditorModalForDay(iso);
+}}
+  draggable
+  onDragStart={(e) => {
+    e.stopPropagation();
+    setCalendarDraggedKey(makeCalendarDragKey(iso, item, index));
+  }}
+  onDragOver={(e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }}
+  onDrop={(e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const targetKey = makeCalendarDragKey(iso, item, index);
+    reorderCalendarItems(iso, calendarDraggedKey, targetKey);
+    setCalendarDraggedKey(null);
+  }}
+  onDragEnd={() => setCalendarDraggedKey(null)}
 >
-                                  <div className="job-planning-day-job-top">
-                                    <span className="job-planning-day-job-number">
-                                      {item.job_number}
-                                    </span>
-                                    {item.suburb && (
-                                      <span className="job-planning-day-job-suburb">
-                                        {item.suburb}
-                                      </span>
-                                    )}
-                                  </div>
+                              <div className="job-planning-day-job-top">
+                                <span className="job-planning-day-job-number">
+                                  {item.job_number}
+                                </span>
+                                {item.suburb && (
+                                  <span className="job-planning-day-job-suburb">
+                                    {item.suburb}
+                                  </span>
+                                )}
+                              </div>
 
-                                  {item.notes && (
-                                    <div className="job-planning-day-job-notes">{item.notes}</div>
-                                  )}
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                              {item.notes && (
+                                <div className="job-planning-day-job-notes">{item.notes}</div>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 
         <p className="schedule-footer-note">
           Logged in as <strong>{user?.email}</strong>. You have admin editing rights.
         </p>
       </div>
 
-      {selectedDate && (
-        <div className="card schedule-editor-card">
-          <h3 className="card-title">Edit day plan</h3>
-          <p className="card-subtitle">{longDateLabel(selectedDate)}</p>
+      {editorModalOpen && selectedDate && (
+  <div
+    className="job-planning-modal-overlay"
+    onClick={closeEditorModal}
+  >
+    <div
+      className="job-planning-modal-card job-planning-editor-modal-card"
+      onClick={(e) => e.stopPropagation()}
+    >
+         <h3 className="card-title">
+  {selectedDate === UNSCHEDULED_KEY ? "Edit unscheduled jobs" : "Edit day plan"}
+</h3>
+<p className="card-subtitle">
+  {selectedDate === UNSCHEDULED_KEY ? "Jobs waiting to be scheduled" : longDateLabel(selectedDate)}
+</p>
 
-          <div className="schedule-editor-grid">
-            <div className="schedule-editor-row">
-              <label className="schedule-editor-label">Job ref</label>
-
-              <div style={{ position: "relative" }}>
-                <input
-                  className="maps-search-input"
-                  type="text"
-                  value={jobQuery}
-                  onChange={(e) => setJobQuery(e.target.value)}
-                  onKeyDown={handleJobKeyDown}
-                  placeholder="Type job number (exact)…"
-                />
-
-                {(jobLoading || jobSuggestions.length > 0) && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      right: 0,
-                      top: "100%",
-                      marginTop: "4px",
-                      background: "#fff",
-                      border: "1px solid #ddd",
-                      borderRadius: "8px",
-                      zIndex: 50,
-                      maxHeight: "220px",
-                      overflowY: "auto",
-                    }}
-                  >
-                    {jobLoading && (
-                      <div style={{ padding: "8px", fontSize: "0.8rem", opacity: 0.7 }}>
-                        Searching…
-                      </div>
-                    )}
-
-                    {!jobLoading &&
-                      jobSuggestions.map((job) => (
-                        <button
-                          key={job.job_number}
-                          type="button"
-                          onClick={() => void addPlannedJob(job)}
-                          style={{
-                            display: "block",
-                            width: "100%",
-                            textAlign: "left",
-                            padding: "8px",
-                            border: "none",
-                            background: "transparent",
-                            cursor: "pointer",
-                          }}
-                        >
-                          <div style={{ fontWeight: 600 }}>{job.job_number}</div>
-                          {job.full_address && (
-                            <div style={{ fontSize: "0.75rem", opacity: 0.75 }}>
-                              {job.full_address}
-                            </div>
-                          )}
-                        </button>
-                      ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
 
           <div className="job-planning-editor-summary">
-            {editItems.length} planned job{editItems.length === 1 ? "" : "s"} for this day
-          </div>
+  {editItems.length} {selectedDate === UNSCHEDULED_KEY ? "unscheduled" : "planned"} job
+  {editItems.length === 1 ? "" : "s"}
+  {selectedDate === UNSCHEDULED_KEY ? "" : " for this day"}
+</div>
 
           {editItems.length === 0 ? (
             <div className="job-planning-empty-editor">
@@ -853,7 +1636,7 @@ const handleDropOnItem = (targetKey) => {
   Drag jobs up or down to set the order for this day.
 </p>
               {editItems.map((item) => (
-                <div
+              <div
   key={item.client_key}
   className={
     "job-planning-edit-item" +
@@ -863,7 +1646,14 @@ const handleDropOnItem = (targetKey) => {
     (dragOverJobKey === item.client_key ? " job-planning-drag-over" : "")
   }
   draggable
-  onDragStart={() => handleDragStart(item.client_key)}
+  onDragStart={(e) => {
+    const interactive = e.target.closest("button, select, input, textarea, option");
+    if (interactive) {
+      e.preventDefault();
+      return;
+    }
+    handleDragStart(item.client_key);
+  }}
   onDragEnter={(e) => {
     e.preventDefault();
     handleDragEnter(item.client_key);
@@ -886,23 +1676,81 @@ const handleDropOnItem = (targetKey) => {
       <div className="job-planning-drag-hint">Drag to reorder</div>
     </div>
 
-    <div className="job-planning-job-actions">
-      <button
-        type="button"
-        className="btn-pill"
-        onClick={() => cycleJobColour(item.client_key)}
-      >
-        Set Colour
-      </button>
+<div
+  className="job-planning-job-actions"
+  onMouseDown={(e) => e.stopPropagation()}
+  onDragStart={(e) => e.stopPropagation()}
+>
+  <select
+    className="maps-search-input"
+    style={{ minWidth: "130px", maxWidth: "140px" }}
+    value={item.colour || ""}
+    draggable={false}
+    onMouseDown={(e) => e.stopPropagation()}
+    onChange={(e) => updateEditItem(item.client_key, "colour", e.target.value)}
+  >
+    {JOB_COLOURS.map((colour) => (
+      <option key={colour.value} value={colour.value}>
+        {colour.label}
+      </option>
+    ))}
+  </select>
 
-      <button
-        type="button"
-        className="btn-pill"
-        onClick={() => removeEditItem(item.client_key)}
-      >
-        Remove
-      </button>
-    </div>
+  {selectedDate !== UNSCHEDULED_KEY && (
+    <button
+      type="button"
+      className="btn-pill"
+      draggable={false}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void moveItemToUnscheduled(item);
+      }}
+    >
+      Move to Unscheduled
+    </button>
+  )}
+
+  {selectedDate === UNSCHEDULED_KEY && (
+    <button
+      type="button"
+      className="btn-pill"
+      draggable={false}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void moveItemToSelectedDay(item, todayISO);
+      }}
+    >
+      Move to Today
+    </button>
+  )}
+
+  <button
+    type="button"
+    className="btn-pill"
+    draggable={false}
+    onMouseDown={(e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    }}
+    onClick={(e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void removeEditItem(item);
+    }}
+  >
+    Remove
+  </button>
+</div>
   </div>
 </div>
 
@@ -957,17 +1805,155 @@ const handleDropOnItem = (targetKey) => {
               Clear day
             </button>
 
-            <button
-              type="button"
-              className="btn-pill"
-              onClick={() => setSelectedDate(null)}
-              disabled={saving}
-            >
-              Close
-            </button>
+           <button
+  type="button"
+  className="btn-pill"
+  onClick={closeEditorModal}
+  disabled={saving}
+>
+  Close
+</button>
           </div>
+     </div>   
+</div>   
+)}
+   {modalTarget && (
+  <div
+    className="job-planning-modal-overlay"
+    onClick={closeAddModal}
+  >
+    <div
+      className="job-planning-modal-card"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <h3 className="card-title" style={{ marginBottom: "0.35rem" }}>
+        Add job
+      </h3>
+
+      <p className="card-subtitle" style={{ marginBottom: "0.75rem" }}>
+        {modalTarget === UNSCHEDULED_KEY
+          ? "Add to Unscheduled Jobs"
+          : `Add to ${longDateLabel(modalTarget)}`}
+      </p>
+
+      <div className="schedule-editor-row">
+        <label className="schedule-editor-label">Job ref</label>
+
+        <div style={{ position: "relative" }}>
+          <input
+            className="maps-search-input"
+            type="text"
+            value={jobQuery}
+            onChange={(e) => setJobQuery(e.target.value)}
+            onKeyDown={handleJobKeyDown}
+            placeholder="Type job number (exact)…"
+            autoFocus
+          />
+
+          {(jobLoading || jobSuggestions.length > 0) && (
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: "100%",
+                marginTop: "4px",
+                background: "#fff",
+                border: "1px solid #ddd",
+                borderRadius: "8px",
+                zIndex: 50,
+                maxHeight: "220px",
+                overflowY: "auto",
+              }}
+            >
+              {jobLoading && (
+                <div style={{ padding: "8px", fontSize: "0.8rem", opacity: 0.7 }}>
+                  Searching…
+                </div>
+              )}
+
+              {!jobLoading &&
+                jobSuggestions.map((job) => (
+                  <button
+                    key={job.job_number}
+                    type="button"
+                    onClick={() => {
+                      setSelectedJobSuggestion(job);
+                      setJobQuery(String(job.job_number));
+                      setJobSuggestions([]);
+                    }}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "8px",
+                      border: "none",
+                      background: "transparent",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600 }}>{job.job_number}</div>
+                    {job.full_address && (
+                      <div style={{ fontSize: "0.75rem", opacity: 0.75 }}>
+                        {job.full_address}
+                      </div>
+                    )}
+                  </button>
+                ))}
+            </div>
+          )}
         </div>
-      )}
+
+        {selectedJobSuggestion && (
+          <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#555" }}>
+            Selected job: <strong>{selectedJobSuggestion.job_number}</strong>
+          </div>
+        )}
+      </div>
+
+      <div className="schedule-editor-row" style={{ marginTop: "0.75rem" }}>
+        <label className="schedule-editor-label">Colour</label>
+        <select
+          className="maps-search-input"
+          value={newJobColour}
+          onChange={(e) => setNewJobColour(e.target.value)}
+        >
+          {JOB_COLOURS.map((colour) => (
+            <option key={colour.value} value={colour.value}>
+              {colour.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div
+        style={{
+          marginTop: "1rem",
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: "0.5rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <button type="button" className="btn-pill" onClick={closeAddModal}>
+          Cancel
+        </button>
+
+        <button
+          type="button"
+          className="btn-pill primary"
+          disabled={!selectedJobSuggestion || saving}
+          onClick={() => {
+            if (!selectedJobSuggestion) return;
+            void addPlannedJob(selectedJobSuggestion);
+          }}
+        >
+          {saving ? "Adding…" : "Add job"}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
     </PageLayout>
   );
 }

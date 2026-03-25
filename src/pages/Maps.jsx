@@ -1,10 +1,22 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
-import proj4 from "proj4";
+import {
+  DEFAULT_PROJECTION_CODE,
+  PROJECTION_GROUPS,
+  PROJECTION_OPTIONS,
+  registerProjectionDefs,
+  mgaToWgs84,
+  wgs84ToMga2020,
+  projectCoords,
+  projectLonLatTo,
+  projectToLonLat,
+  getProjectionLabel,
+} from "../lib/projections.js";
 import { supabase } from "../lib/supabaseClient.js";
 import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 
+registerProjectionDefs();
 /**
  * Safe Point constructor:
  * If google maps is already loaded, use google.maps.Point.
@@ -328,20 +340,8 @@ function buildPopupRowsForExample(props = {}, nameOverride) {
   const mgaE = firstProp(props, ["mga2020_easting", "easting"]);
   const mgaN = firstProp(props, ["mga2020_northing", "northing"]);
 
-  const pcgE = firstProp(props, [
-    "pcg2020_easting",
-    "project_grid_easting",
-    "projectgrid_easting",
-    "proj_grid_e",
-    "pg_easting",
-  ]);
-  const pcgN = firstProp(props, [
-    "pcg2020_northing",
-    "project_grid_northing",
-    "projectgrid_northing",
-    "proj_grid_n",
-    "pg_northing",
-  ]);
+   const pcgE = firstProp(props, ["pcg2020_easting"]);
+  const pcgN = firstProp(props, ["pcg2020_northing"]);
 
   const rows = [
     ["GEODETIC POINT NAME", pretty(pointName, 0)],
@@ -462,48 +462,7 @@ function approxPolygonAreaM2(latLngPath) {
   }
   return Math.abs(area2) / 2;
 }
-/* ------------------------------------------------------------------- */
 
-/* ================================
-   ✅ Portal Jobs: MGA2020 -> WGS84
-   ================================ */
-proj4.defs(
-  "EPSG:7850",
-  "+proj=utm +zone=50 +south +ellps=GRS80 +units=m +no_defs"
-);
-proj4.defs(
-  "EPSG:7851",
-  "+proj=utm +zone=51 +south +ellps=GRS80 +units=m +no_defs"
-);
-proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
-
-function mgaToWgs84(zone, easting, northing) {
-  const z = Number(zone);
-  const e = Number(easting);
-  const n = Number(northing);
-  if (!z || !Number.isFinite(e) || !Number.isFinite(n)) return null;
-  const src = z === 51 ? "EPSG:7851" : "EPSG:7850";
-  const [lon, lat] = proj4(src, "EPSG:4326", [e, n]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  return { lat, lng: lon };
-}
-function wgs84ToMga2020(lat, lng) {
-  const la = Number(lat);
-  const lo = Number(lng);
-  if (!Number.isFinite(la) || !Number.isFinite(lo)) return null;
-
-  // Standard UTM zone from longitude
-  const zone = Math.floor((lo + 180) / 6) + 1;
-
-  // Your EPSG defs only cover zones 50 & 51 (WA spans 49–52, but your portal uses 50/51)
-  const src = "EPSG:4326";
-  const dst = zone === 51 ? "EPSG:7851" : "EPSG:7850";
-
-  const [e, n] = proj4(src, dst, [lo, la]);
-  if (!Number.isFinite(e) || !Number.isFinite(n)) return null;
-
-  return { zone: zone === 51 ? 51 : 50, easting: e, northing: n };
-}
 
 function fmtMGA(x) {
   const v = Number(x);
@@ -690,12 +649,24 @@ function getFirstDefinedValue(obj = {}, keys = []) {
   return "";
 }
 
-function getFeaturePointName(props = {}, fields = []) {
+function getFeaturePointName(props = {}, fields = [], fallback = "") {
   const v = getFirstDefinedValue(props, fields);
-  return v ? String(v).trim() : "";
+  if (v !== undefined && v !== null && String(v).trim() !== "") {
+    return String(v).trim();
+  }
+  return fallback ? String(fallback).trim() : "";
 }
 
-function getFeaturePointId(props = {}, fallback) {
+function getFeaturePointId(props = {}, layer, fallback = "") {
+  const idFields = layer?.data?.idFields || [];
+
+  const picked = idFields
+    .map((key) => props?.[key])
+    .filter((v) => v !== undefined && v !== null && String(v).trim() !== "")
+    .map((v) => String(v).trim());
+
+  if (picked.length) return picked.join("_");
+
   return (
     props.objectid ||
     props.OBJECTID ||
@@ -707,6 +678,20 @@ function getFeaturePointId(props = {}, fallback) {
     props.rm_point_number ||
     fallback
   );
+}
+
+function getFeatureZValue(props = {}, layer) {
+  const zFields = layer?.data?.zFields || [];
+  const v = getFirstDefinedValue(props, zFields);
+  return v !== undefined && v !== null && String(v).trim() !== "" ? v : "";
+}
+
+function getFeatureLabelText(props = {}, layer) {
+  const labelFields = layer?.data?.dxfLabelFields || [];
+  const v = getFirstDefinedValue(props, labelFields);
+  return v !== undefined && v !== null && String(v).trim() !== ""
+    ? String(v).trim()
+    : "";
 }
 
 function Maps() {
@@ -794,7 +779,28 @@ const lineLayersRef = useRef(new Map());
   const lastMeasureLatLngRef = useRef(null);
   const lastMeasureSavedRef = useRef(false);
   const measureOverlaysByNoteIdRef = useRef(new Map());
+  const mainInfoOpenRef = useRef(false);
+  const activeMainInfoKeyRef = useRef(null);   // `${layerId}::${markerId}`
+  const activeMainInfoLayerRef = useRef(null);
 
+    // Export
+  const exportModeRef = useRef(null); // "rectangle" | "polygon" | null
+  const [exportMode, setExportMode] = useState(null);
+  const [exportPanelOpen, setExportPanelOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportHasFence, setExportHasFence] = useState(false);
+  const [exportFormat, setExportFormat] = useState("dxf");
+  const [exportProjection, setExportProjection] = useState(DEFAULT_PROJECTION_CODE);
+  const [exportWarning, setExportWarning] = useState("");
+  const [exportSummary, setExportSummary] = useState(null);
+  const [exportCountSummary, setExportCountSummary] = useState(null);
+  const [exportLargeConfirmArmed, setExportLargeConfirmArmed] = useState(false);
+
+  const exportListenersRef = useRef([]);
+  const exportFenceRef = useRef(null);      // rectangle or polygon overlay
+  const exportPathRef = useRef([]);         // polygon path points
+  const exportGeometryRef = useRef(null);   // cached geometry for ArcGIS query
 
   // ✅ Map Notes (synced via Supabase, cached locally for fast startup/offline)
   const MAP_NOTES_CACHE_KEY = "pw_maps_notes_cache_v1";
@@ -1032,6 +1038,25 @@ useEffect(() => {
     }
   }, [portalSelectedJobId]);
 
+    const visibleExportableLayers = useMemo(
+    () =>
+      (layers || []).filter(
+        (l) => l.visible && l.data?.exportable
+      ),
+    [layers]
+  );
+
+  const exportProjectionPreview = useMemo(() => {
+    return (
+      PROJECTION_OPTIONS.find((opt) => opt.code === exportProjection)?.label ||
+      getProjectionLabel(exportProjection)
+    );
+  }, [exportProjection]);
+
+  const exportFilenamePreview = useMemo(() => {
+    const ext = exportFormat === "csv" ? "csv" : "dxf";
+    return `PWS_Maps_Export_${exportProjection}_${ext}_YYYY-MM-DD_HH-mm-ss.${ext}`;
+  }, [exportProjection, exportFormat]);
 
   /* ================================
      ✅ Map Notes (pins)
@@ -1757,7 +1782,16 @@ const notePayload = {
     map.setTilt(0);
   }
 });
-    infoWindowRef.current = new window.google.maps.InfoWindow();
+infoWindowRef.current = new window.google.maps.InfoWindow({
+  maxWidth: isSmallScreen() ? 260 : 340,
+  disableAutoPan: true,
+});
+
+window.google.maps.event.addListener(infoWindowRef.current, "closeclick", () => {
+  mainInfoOpenRef.current = false;
+  activeMainInfoKeyRef.current = null;
+  activeMainInfoLayerRef.current = null;
+});
     hoverInfoWindowRef.current = new window.google.maps.InfoWindow({
       disableAutoPan: true,
     });
@@ -1825,6 +1859,28 @@ const notePayload = {
       distBtn.onclick = () => startDistanceMeasure();
       areaBtn.onclick = () => startAreaMeasure();
       locBtn.onclick = () => handleMyLocation();
+      const exportBtn = document.createElement("button");
+exportBtn.type = "button";
+exportBtn.dataset.action = "export";
+exportBtn.title = "Export visible layers";
+exportBtn.setAttribute("aria-label", "Export visible layers");
+exportBtn.textContent = "⬇";
+
+Object.assign(exportBtn.style, {
+  width: "34px",
+  height: "34px",
+  display: "grid",
+  placeItems: "center",
+  borderRadius: "10px",
+  border: "2px solid #111",
+  background: "#fff",
+  color: "#111",
+  fontWeight: "900",
+  cursor: "pointer",
+  fontSize: "15px",
+  padding: "0",
+});
+      exportBtn.onclick = () => toggleExportPanel();
       histBtn.onclick = () => {
         const c = map.getCenter();
         const url = buildGoogleEarthUrl(c.lat(), c.lng(), map.getZoom());
@@ -1847,15 +1903,16 @@ const notePayload = {
       div.appendChild(locBtn);
       div.appendChild(histBtn);
       div.appendChild(svBtn);
+      div.appendChild(exportBtn);
       div.appendChild(finishBtn);
       div.appendChild(clearBtn);
 
       map.controls[window.google.maps.ControlPosition.TOP_LEFT].push(div);
       toolsControlDivRef.current = div;
     }
-
+ 
     // Persist view/type on idle + tick
- map.addListener("idle", () => {
+map.addListener("idle", () => {
   if (idleDebounceRef.current) clearTimeout(idleDebounceRef.current);
 
   idleDebounceRef.current = setTimeout(() => {
@@ -1871,6 +1928,9 @@ const notePayload = {
       mapZoom: z,
       mapTypeId: mapRef.current.getMapTypeId(),
     });
+
+    // Don’t refresh point layers while the main popup is open
+    if (mainInfoOpenRef.current) return;
 
     setViewTick((t) => t + 1);
   }, REFRESH_DEBOUNCE_MS);
@@ -1979,29 +2039,41 @@ if (!isWA) {
     addressAutocompleteRef.current = autocomplete;
   }, [activeTab]);
 
-  // ✅ Keep top tools visual state in sync
+   // Keep top tools visual state in sync
   useEffect(() => {
-  const div = toolsControlDivRef.current;
-  if (!div) return;
+    const div = toolsControlDivRef.current;
+    if (!div) return;
 
-  const btns = Array.from(div.querySelectorAll("button"));
-  btns.forEach((b) => {
-    const action = b.dataset.action;
-    const active =
-      (action === "distance" && measureMode === "distance") ||
-      (action === "area" && measureMode === "area") ||
-      (action === "location" && isFollowingLocation);
+    const btns = Array.from(div.querySelectorAll("button"));
+    btns.forEach((b) => {
+      const action = b.dataset.action;
+      const active =
+        (action === "distance" && measureMode === "distance") ||
+        (action === "area" && measureMode === "area") ||
+        (action === "location" && isFollowingLocation) ||
+        (
+          action === "export" &&
+          (exportPanelOpen || !!exportMode || exportHasFence || exportDialogOpen)
+        );
 
-    b.style.background = active ? "#000" : "#fff";
-    b.style.color = active ? "#fff" : "#000";
-  });
+      b.style.background = active ? "#000" : "#fff";
+      b.style.color = active ? "#fff" : "#000";
+    });
 
-  const clearBtn = div.querySelector('button[data-action="clear"]');
-  if (clearBtn) clearBtn.style.display = hasMeasure ? "grid" : "none";
+    const clearBtn = div.querySelector('button[data-action="clear"]');
+    if (clearBtn) clearBtn.style.display = hasMeasure ? "grid" : "none";
 
-  const finishBtn = div.querySelector('button[data-action="finish"]');
-  if (finishBtn) finishBtn.style.display = measureMode ? "grid" : "none";
-}, [measureMode, hasMeasure, isFollowingLocation]);
+    const finishBtn = div.querySelector('button[data-action="finish"]');
+    if (finishBtn) finishBtn.style.display = measureMode ? "grid" : "none";
+  }, [
+    measureMode,
+    hasMeasure,
+    isFollowingLocation,
+    exportPanelOpen,
+    exportMode,
+    exportHasFence,
+    exportDialogOpen,
+  ]);
 
 
   /* ======================================
@@ -2113,6 +2185,31 @@ if (!isWA) {
     setTimeout(makeLatestInfoWindowDraggable, 0);
   });
 };
+
+function openMainInfoWindow({ html, marker, markerId, layerId }) {
+  const map = mapRef.current;
+  if (!map || !window.google || !infoWindowRef.current) return;
+
+  try {
+    infoWindowRef.current.close();
+  } catch {
+    // ignore
+  }
+
+  mainInfoOpenRef.current = true;
+  activeMainInfoKeyRef.current = `${layerId}::${markerId}`;
+  activeMainInfoLayerRef.current = layerId;
+
+  infoWindowRef.current.setContent(html);
+  infoWindowRef.current.open({ anchor: marker, map });
+
+  window.google.maps.event.addListenerOnce(infoWindowRef.current, "domready", () => {
+    setTimeout(() => {
+      makeLatestInfoWindowDraggable();
+    }, 0);
+  });
+}
+
   const openPortalInfo = (job, pt, marker) => {
     const map = mapRef.current;
     if (!map || !window.google) return;
@@ -2908,7 +3005,8 @@ const handleMyLocation = () => {
     }
   };
 
-  const startDistanceMeasure = () => {
+   const startDistanceMeasure = () => {
+    clearExportInteraction();
     clearMeasure();
     const map = mapRef.current;
     if (!map || !window.google) return;
@@ -2937,7 +3035,8 @@ const handleMyLocation = () => {
     measureListenersRef.current = [clickL, rightL, dblL];
   };
 
-  const startAreaMeasure = () => {
+    const startAreaMeasure = () => {
+    clearExportInteraction();
     clearMeasure();
     const map = mapRef.current;
     if (!map || !window.google) return;
@@ -2967,6 +3066,1029 @@ const handleMyLocation = () => {
 
     measureListenersRef.current = [clickL, rightL, dblL];
   };
+
+  function clearExportListeners() {
+    const googleMaps = window.google?.maps;
+    if (!googleMaps) return;
+
+    (exportListenersRef.current || []).forEach((listener) => {
+      try {
+        googleMaps.event.removeListener(listener);
+      } catch {
+        // ignore
+      }
+    });
+
+    exportListenersRef.current = [];
+  }
+
+  function clearExportFenceVisual() {
+    try {
+      exportFenceRef.current?.setMap?.(null);
+    } catch {
+      // ignore
+    }
+
+    exportFenceRef.current = null;
+    exportPathRef.current = [];
+    exportGeometryRef.current = null;
+    setExportHasFence(false);
+  }
+
+  function resetExportDrawingState({ keepPanel = true } = {}) {
+    clearExportListeners();
+    clearExportFenceVisual();
+
+    exportModeRef.current = null;
+    setExportMode(null);
+    setExportDialogOpen(false);
+    setExportSummary(null);
+    setExportWarning("");
+    setExportCountSummary(null);
+    setExportLargeConfirmArmed(false);
+
+    if (!keepPanel) {
+      setExportPanelOpen(false);
+    }
+
+    try {
+      mapRef.current?.setOptions({ draggableCursor: null });
+    } catch {
+      // ignore
+    }
+  }
+
+  function clearExportInteraction() {
+    resetExportDrawingState({ keepPanel: false });
+  }
+
+  function beginExportPanel() {
+    clearMeasure();
+    setNoteAddMode(false);
+    resetExportDrawingState({ keepPanel: true });
+    setExportPanelOpen(true);
+  }
+
+  function toggleExportPanel() {
+    const isOpen =
+      exportPanelOpen || !!exportMode || exportHasFence || exportDialogOpen;
+
+    if (isOpen) {
+      clearExportInteraction();
+      return;
+    }
+
+    beginExportPanel();
+  }
+
+  function startRectangleExportFence() {
+    const map = mapRef.current;
+    if (!map || !window.google?.maps) return;
+
+    clearMeasure();
+    setNoteAddMode(false);
+    resetExportDrawingState({ keepPanel: true });
+    setExportPanelOpen(true);
+
+    exportModeRef.current = "rectangle";
+    setExportMode("rectangle");
+
+    try {
+      map.setOptions({ draggableCursor: "crosshair" });
+    } catch {
+      // ignore
+    }
+
+    let firstCorner = null;
+
+    const clickL = map.addListener("click", (e) => {
+      if (!e?.latLng) return;
+
+      if (!firstCorner) {
+        firstCorner = e.latLng;
+        setExportWarning("Rectangle started — click the opposite corner.");
+        return;
+      }
+
+      const bounds = new window.google.maps.LatLngBounds(firstCorner, e.latLng);
+      const sw = bounds.getSouthWest();
+      const ne = bounds.getNorthEast();
+
+      exportFenceRef.current = new window.google.maps.Rectangle({
+        map,
+        bounds,
+        strokeColor: "#111111",
+        strokeOpacity: 1,
+        strokeWeight: 2,
+        fillColor: "#111111",
+        fillOpacity: 0.08,
+        clickable: false,
+        editable: false,
+      });
+
+      exportGeometryRef.current = {
+        geometry: `${sw.lng()},${sw.lat()},${ne.lng()},${ne.lat()}`,
+        geometryType: "esriGeometryEnvelope",
+        spatialRel: "esriSpatialRelIntersects",
+        inSR: "4326",
+      };
+
+      setExportHasFence(true);
+      setExportWarning("");
+      clearExportListeners();
+
+      exportModeRef.current = null;
+      setExportMode(null);
+
+      try {
+        map.setOptions({ draggableCursor: null });
+      } catch {
+        // ignore
+      }
+    });
+
+    const rightL = map.addListener("rightclick", () => {
+      resetExportDrawingState({ keepPanel: true });
+    });
+
+    exportListenersRef.current = [clickL, rightL];
+  }
+
+  function finishPolygonExportFence() {
+    const map = mapRef.current;
+    if (!map || !window.google?.maps) return;
+
+    const path = exportPathRef.current || [];
+    if (path.length < 3) {
+      setExportWarning("Polygon fence needs at least 3 points.");
+      return;
+    }
+
+    const ring = path.map((p) => [p.lng(), p.lat()]);
+    ring.push([path[0].lng(), path[0].lat()]);
+
+    exportGeometryRef.current = {
+      geometry: JSON.stringify({
+        rings: [ring],
+        spatialReference: { wkid: 4326 },
+      }),
+      geometryType: "esriGeometryPolygon",
+      spatialRel: "esriSpatialRelIntersects",
+      inSR: "4326",
+    };
+
+    setExportHasFence(true);
+    setExportWarning("");
+    clearExportListeners();
+
+    exportModeRef.current = null;
+    setExportMode(null);
+
+    try {
+      map.setOptions({ draggableCursor: null });
+    } catch {
+      // ignore
+    }
+  }
+
+  function startPolygonExportFence() {
+    const map = mapRef.current;
+    if (!map || !window.google?.maps) return;
+
+    clearMeasure();
+    setNoteAddMode(false);
+    resetExportDrawingState({ keepPanel: true });
+    setExportPanelOpen(true);
+
+    exportModeRef.current = "polygon";
+    setExportMode("polygon");
+
+    exportFenceRef.current = new window.google.maps.Polygon({
+      map,
+      paths: [],
+      strokeColor: "#111111",
+      strokeOpacity: 1,
+      strokeWeight: 2,
+      fillColor: "#111111",
+      fillOpacity: 0.08,
+      clickable: false,
+      editable: false,
+    });
+
+    try {
+      map.setOptions({ draggableCursor: "crosshair" });
+    } catch {
+      // ignore
+    }
+
+    const clickL = map.addListener("click", (e) => {
+      if (!e?.latLng) return;
+      exportPathRef.current.push(e.latLng);
+      exportFenceRef.current?.setPath(exportPathRef.current);
+      setExportWarning(
+        "Polygon drawing — click more points, then right-click or double-click to finish."
+      );
+    });
+
+    const rightL = map.addListener("rightclick", () => {
+      finishPolygonExportFence();
+    });
+
+    const dblL = map.addListener("dblclick", () => {
+      finishPolygonExportFence();
+    });
+
+    exportListenersRef.current = [clickL, rightL, dblL];
+  }
+
+  const LARGE_EXPORT_FEATURE_THRESHOLD = 5000;
+  const EXPORT_PAGE_SIZE = 1000;
+
+  function isGeographicProjectionCode(code = "") {
+    return ["EPSG:7844", "EPSG:4283", "EPSG:4203", "EPSG:4326", "CIG92", "CKIG92"].includes(code);
+  }
+
+  function formatExportNumber(value, projectionCode, kind = "xy") {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "";
+
+    if (kind === "z") return num.toFixed(3);
+    return isGeographicProjectionCode(projectionCode) ? num.toFixed(8) : num.toFixed(3);
+  }
+
+  function sanitizeDxfLayerName(name = "Layer") {
+    const cleaned = String(name || "Layer")
+      .replace(/[<>\/\\":;?*|=,+\[\]\(\)']/g, "_")
+      .replace(/\s+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "");
+
+    return (cleaned || "Layer").slice(0, 50);
+  }
+
+function hexToDxfTrueColor(hex = "") {
+  const raw = String(hex || "").trim();
+  const normal = raw.startsWith("#") ? raw.slice(1) : raw;
+
+  if (!/^[0-9a-fA-F]{6}$/.test(normal)) return null;
+
+  const r = parseInt(normal.slice(0, 2), 16);
+  const g = parseInt(normal.slice(2, 4), 16);
+  const b = parseInt(normal.slice(4, 6), 16);
+
+  if (![r, g, b].every(Number.isFinite)) return null;
+
+  return (r << 16) + (g << 8) + b;
+}
+
+function getPointLayerDxfTrueColor(layer) {
+  const sym = layer?.data?.symbol || {};
+  const hex = sym.fillColor || sym.strokeColor || "#ffffff";
+  return hexToDxfTrueColor(hex);
+}
+
+function sanitizeDxfText(text = "") {
+  return String(text || "")
+    .replace(/\r?\n/g, " ")
+    .replace(/[^\x20-\x7E]/g, "")
+    .trim()
+    .slice(0, 240);
+}
+
+  function getLayerExportName(layer) {
+    return sanitizeDxfLayerName(
+      layer?.data?.outputLayerName || layer?.name || layer?.id || "Layer"
+    );
+  }
+
+  function buildSafeTimestamp() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+
+    return [
+      d.getFullYear(),
+      pad(d.getMonth() + 1),
+      pad(d.getDate()),
+    ].join("-") + "_" + [
+      pad(d.getHours()),
+      pad(d.getMinutes()),
+      pad(d.getSeconds()),
+    ].join("-");
+  }
+
+  function buildExportFilename(format, projectionCode) {
+    const ext = format === "csv" ? "csv" : "dxf";
+    return `PWS_Maps_Export_${projectionCode}_${ext}_${buildSafeTimestamp()}.${ext}`;
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function fetchArcgisCountByFence(url, fence, where = "1=1") {
+    const params = new URLSearchParams({
+      where,
+      returnCountOnly: "true",
+      f: "json",
+      geometry: fence.geometry,
+      geometryType: fence.geometryType,
+      spatialRel: fence.spatialRel || "esriSpatialRelIntersects",
+      inSR: fence.inSR || "4326",
+      t: Date.now().toString(),
+    });
+
+    const res = await fetch(`${url}?${params.toString()}`);
+    const json = await res.json();
+
+    if (json?.error) throw new Error(json.error.message || "ArcGIS count error");
+    return Number(json?.count || 0);
+  }
+
+  async function fetchArcgisGeojsonByFence(url, fence, where = "1=1", pageSize = EXPORT_PAGE_SIZE) {
+    const allFeatures = [];
+    let offset = 0;
+    let safety = 0;
+
+    while (safety < 50) {
+      const params = new URLSearchParams({
+        where,
+        outFields: "*",
+        f: "geojson",
+        outSR: "4326",
+        geometry: fence.geometry,
+        geometryType: fence.geometryType,
+        spatialRel: fence.spatialRel || "esriSpatialRelIntersects",
+        inSR: fence.inSR || "4326",
+        returnGeometry: "true",
+        returnZ: "true",
+        resultOffset: String(offset),
+        resultRecordCount: String(pageSize),
+        t: Date.now().toString(),
+      });
+
+      const res = await fetch(`${url}?${params.toString()}`);
+      const json = await res.json();
+
+      if (json?.error) throw new Error(json.error.message || "ArcGIS query error");
+
+      const features = json?.features || [];
+      allFeatures.push(...features);
+
+      const exceeded = !!json?.exceededTransferLimit;
+      if (!features.length || (!exceeded && features.length < pageSize)) {
+        break;
+      }
+
+      offset += features.length;
+      safety += 1;
+    }
+
+    return { type: "FeatureCollection", features: allFeatures };
+  }
+
+  function applyLayerExportFilter(featureCollection, layer) {
+    const filterFn = layer?.data?.filterFn;
+    if (typeof filterFn !== "function") return featureCollection;
+
+    return {
+      ...featureCollection,
+      features: (featureCollection?.features || []).filter((feature) => {
+        try {
+          return !!filterFn(feature);
+        } catch {
+          return true;
+        }
+      }),
+    };
+  }
+
+  function getLineCoordinateSets(geometry) {
+    if (!geometry) return [];
+    if (geometry.type === "LineString") return [geometry.coordinates || []];
+    if (geometry.type === "MultiLineString") return geometry.coordinates || [];
+    return [];
+  }
+
+  function getPolygonRingSets(geometry) {
+    if (!geometry) return [];
+    if (geometry.type === "Polygon") return geometry.coordinates || [];
+    if (geometry.type === "MultiPolygon") {
+      return (geometry.coordinates || []).flatMap((poly) => poly || []);
+    }
+    return [];
+  }
+
+  function getPointCoordinateSets(geometry) {
+    if (!geometry) return [];
+    if (geometry.type === "Point") return [geometry.coordinates || []];
+    if (geometry.type === "MultiPoint") return geometry.coordinates || [];
+    return [];
+  }
+
+  function getLineLabelCoord(coords = []) {
+    if (!coords.length) return null;
+    return coords[Math.floor(coords.length / 2)] || coords[0] || null;
+  }
+
+  function getPolygonLabelCoord(ring = []) {
+    if (!ring.length) return null;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (const coord of ring) {
+      const x = Number(coord?.[0]);
+      const y = Number(coord?.[1]);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+    return [(minX + maxX) / 2, (minY + maxY) / 2];
+  }
+
+  function csvEscape(value) {
+    if (value === null || value === undefined) return "";
+    const s = String(value);
+    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  }
+
+  function getFirstNumericProp(props = {}, keys = []) {
+    for (const key of keys) {
+      const raw = props?.[key];
+      const num = Number(raw);
+      if (Number.isFinite(num)) return num;
+    }
+    return null;
+  }
+
+  function getExpectedMga2020ZoneForProjection(projectionCode) {
+    const map = {
+      "EPSG:7849": 49,
+      "EPSG:7850": 50,
+      "EPSG:7851": 51,
+      "EPSG:7852": 52,
+    };
+    return map[projectionCode] ?? null;
+  }
+
+function getPreferredPointXY(coord, props, projectionCode) {
+  const id =
+    props?.geodetic_point_pid ||
+    props?.reference_mark_pid ||
+    props?.point_number ||
+    props?.rm_point_number ||
+    "";
+
+  const lng = Number(coord?.[0]);
+  const lat = Number(coord?.[1]);
+
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+
+  const reprojectFromGeometry = (targetCode, source) => {
+    const [x, y] = projectCoords(lng, lat, "EPSG:4326", targetCode);
+
+    console.log(`EXPORT DEBUG ${source}`, {
+      projectionCode: targetCode,
+      id,
+      lng,
+      lat,
+      x,
+      y,
+    });
+
+    return { x, y, source };
+  };
+
+  // 1) Only trust EXPLICIT PCG2020 fields for PCG2020
+  if (projectionCode === "PCG2020") {
+    const e = getFirstNumericProp(props, ["pcg2020_easting"]);
+    const n = getFirstNumericProp(props, ["pcg2020_northing"]);
+
+    if (Number.isFinite(e) && Number.isFinite(n)) {
+      console.log("EXPORT DEBUG native-pcg2020", {
+        projectionCode,
+        id,
+        x: e,
+        y: n,
+        pcg2020_easting: props?.pcg2020_easting,
+        pcg2020_northing: props?.pcg2020_northing,
+      });
+
+      return { x: e, y: n, source: "native-pcg2020" };
+    }
+
+    return reprojectFromGeometry("PCG2020", "reprojected-to-pcg2020");
+  }
+
+  // 2) Only trust EXPLICIT PCG94 fields for PCG94
+  if (projectionCode === "PCG94") {
+    const e = getFirstNumericProp(props, [
+      "pcg94_easting",
+      "pcg1994_easting",
+      "project_grid_94_easting",
+    ]);
+    const n = getFirstNumericProp(props, [
+      "pcg94_northing",
+      "pcg1994_northing",
+      "project_grid_94_northing",
+    ]);
+
+    if (Number.isFinite(e) && Number.isFinite(n)) {
+      console.log("EXPORT DEBUG native-pcg94", {
+        projectionCode,
+        id,
+        x: e,
+        y: n,
+        pcg94_easting: props?.pcg94_easting,
+        pcg94_northing: props?.pcg94_northing,
+      });
+
+      return { x: e, y: n, source: "native-pcg94" };
+    }
+
+    return reprojectFromGeometry("PCG94", "reprojected-to-pcg94");
+  }
+
+  // 3) Native MGA2020 zone fields for MGA2020 exports
+  const expectedZone = getExpectedMga2020ZoneForProjection(projectionCode);
+  if (expectedZone !== null) {
+    const zone = getFirstNumericProp(props, ["mga2020_zone", "zone"]);
+    const e = getFirstNumericProp(props, ["mga2020_easting", "easting"]);
+    const n = getFirstNumericProp(props, ["mga2020_northing", "northing"]);
+
+    if (
+      Number.isFinite(zone) &&
+      Number.isFinite(e) &&
+      Number.isFinite(n) &&
+      Number(zone) === expectedZone
+    ) {
+      console.log("EXPORT DEBUG native-mga2020", {
+        projectionCode,
+        id,
+        x: e,
+        y: n,
+        mga2020_zone: props?.mga2020_zone,
+        mga2020_easting: props?.mga2020_easting,
+        mga2020_northing: props?.mga2020_northing,
+      });
+
+      return { x: e, y: n, source: "native-mga2020" };
+    }
+  }
+
+  // 4) Everything else: reproject from geometry
+  return reprojectFromGeometry(projectionCode, "reprojected-geometry");
+}
+  function collectCsvRowsFromCollections(collections, projectionCode) {
+    const rows = [];
+    const preferredOrder = [];
+    const attrKeySet = new Set();
+
+    for (const { layer, featureCollection } of collections) {
+      (layer?.data?.exportFieldOrder || []).forEach((key) => {
+        if (!preferredOrder.includes(key)) preferredOrder.push(key);
+      });
+
+      (featureCollection?.features || []).forEach((feature, featureIndex) => {
+        const props = feature?.properties || {};
+        const baseId = getFeaturePointId(
+          props,
+          layer,
+          `${layer?.id || "feature"}_${featureIndex + 1}`
+        );
+
+        const pointSets = getPointCoordinateSets(feature?.geometry);
+pointSets.forEach((coord, pointIndex) => {
+  const preferredXY = getPreferredPointXY(coord, props, projectionCode);
+  if (!preferredXY) return;
+
+  const { x, y } = preferredXY;
+
+  const geomZ = Number(coord?.[2]);
+  const attrZ = getFeatureZValue(props, layer);
+  const zValue = Number.isFinite(geomZ) ? geomZ : attrZ;
+
+          Object.keys(props).forEach((key) => attrKeySet.add(key));
+
+          rows.push({
+            feature_id: pointSets.length > 1 ? `${baseId}_${pointIndex + 1}` : baseId,
+            x: formatExportNumber(x, projectionCode, "xy"),
+            y: formatExportNumber(y, projectionCode, "xy"),
+            z:
+              zValue !== "" && zValue !== null && zValue !== undefined
+                ? formatExportNumber(zValue, projectionCode, "z")
+                : "",
+            layer_name: layer?.name || layer?.id || "Layer",
+            attributes: props,
+          });
+        });
+      });
+    }
+
+    const orderedAttrKeys = [
+      ...preferredOrder.filter((key) => attrKeySet.has(key)),
+      ...Array.from(attrKeySet)
+        .filter((key) => !preferredOrder.includes(key))
+        .sort((a, b) => a.localeCompare(b)),
+    ];
+
+    return { rows, orderedAttrKeys };
+  }
+
+  function buildCombinedPointCsv(collections, projectionCode) {
+    const { rows, orderedAttrKeys } = collectCsvRowsFromCollections(collections, projectionCode);
+
+    if (!rows.length) {
+      throw new Error("No point features found inside the fence for CSV export.");
+    }
+
+    const header = ["feature_id", "x", "y", "z", "layer_name", ...orderedAttrKeys];
+
+    const lines = [
+      header.map(csvEscape).join(","),
+      ...rows.map((row) =>
+        [
+          row.feature_id,
+          row.x,
+          row.y,
+          row.z,
+          row.layer_name,
+          ...orderedAttrKeys.map((key) => row.attributes?.[key] ?? ""),
+        ]
+          .map(csvEscape)
+          .join(",")
+      ),
+    ];
+
+    return lines.join("\r\n");
+  }
+
+  function dxfPair(code, value) {
+    return `${code}\n${value}\n`;
+  }
+
+  function buildDxfLayerTable(layerNames) {
+    const unique = Array.from(new Set(layerNames));
+    let out = "";
+    out += dxfPair(0, "SECTION");
+    out += dxfPair(2, "TABLES");
+    out += dxfPair(0, "TABLE");
+    out += dxfPair(2, "LAYER");
+    out += dxfPair(70, unique.length);
+
+    unique.forEach((layerName) => {
+      out += dxfPair(0, "LAYER");
+      out += dxfPair(2, layerName);
+      out += dxfPair(70, 0);
+      out += dxfPair(62, 7);
+      out += dxfPair(6, "CONTINUOUS");
+    });
+
+    out += dxfPair(0, "ENDTAB");
+    out += dxfPair(0, "ENDSEC");
+    return out;
+  }
+
+  function buildDxfPointEntity(layerName, x, y, z = 0, trueColor = null) {
+    let out = "";
+    out += dxfPair(0, "POINT");
+    out += dxfPair(8, layerName);
+
+    if (Number.isFinite(trueColor)) {
+      out += dxfPair(420, trueColor);
+    }
+
+    out += dxfPair(10, x);
+    out += dxfPair(20, y);
+    out += dxfPair(30, z);
+    return out;
+  }
+
+  function buildDxfTextEntity(layerName, x, y, text, height, z = 0, trueColor = null) {
+    const safe = sanitizeDxfText(text);
+    if (!safe) return "";
+
+    let out = "";
+    out += dxfPair(0, "TEXT");
+    out += dxfPair(8, layerName);
+
+    if (Number.isFinite(trueColor)) {
+      out += dxfPair(420, trueColor);
+    }
+
+    out += dxfPair(10, x);
+    out += dxfPair(20, y);
+    out += dxfPair(30, z);
+    out += dxfPair(40, height);
+    out += dxfPair(1, safe);
+    out += dxfPair(7, "STANDARD");
+    return out;
+  }
+
+  function buildDxfLwPolylineEntity(layerName, points, closed = false) {
+    if (!Array.isArray(points) || points.length < 2) return "";
+
+    let out = "";
+    out += dxfPair(0, "LWPOLYLINE");
+    out += dxfPair(8, layerName);
+    out += dxfPair(90, points.length);
+    out += dxfPair(70, closed ? 1 : 0);
+
+    points.forEach((pt) => {
+      out += dxfPair(10, pt.x);
+      out += dxfPair(20, pt.y);
+    });
+
+    return out;
+  }
+
+  function buildDxfFromCollections(collections, projectionCode) {
+    const layerNames = [];
+    let entities = "";
+
+    const textHeight = isGeographicProjectionCode(projectionCode) ? 0.00015 : 1.5;
+
+    for (const { layer, featureCollection } of collections) {
+      const layerName = getLayerExportName(layer);
+      layerNames.push(layerName);
+
+      (featureCollection?.features || []).forEach((feature) => {
+        const props = feature?.properties || {};
+        const geometry = feature?.geometry;
+        const labelText = getFeatureLabelText(props, layer);
+
+const pointSets = getPointCoordinateSets(geometry);
+if (pointSets.length) {
+  const pointTrueColor = getPointLayerDxfTrueColor(layer);
+
+  pointSets.forEach((coord) => {
+    const preferredXY = getPreferredPointXY(coord, props, projectionCode);
+    if (!preferredXY) return;
+
+    const { x, y } = preferredXY;
+
+    const geomZ = Number(coord?.[2]);
+    const attrZ = getFeatureZValue(props, layer);
+    const zValue =
+      Number.isFinite(geomZ)
+        ? geomZ
+        : Number.isFinite(Number(attrZ))
+        ? Number(attrZ)
+        : 0;
+
+    entities += buildDxfPointEntity(layerName, x, y, zValue, pointTrueColor);
+
+    if (labelText) {
+      entities += buildDxfTextEntity(
+        layerName,
+        x,
+        y,
+        labelText,
+        textHeight,
+        zValue,
+        pointTrueColor
+      );
+    }
+  });
+  return;
+}
+
+        const lineSets = getLineCoordinateSets(geometry);
+        if (lineSets.length) {
+          lineSets.forEach((coords) => {
+            const pts = coords
+              .map((coord) => {
+                const lng = Number(coord?.[0]);
+                const lat = Number(coord?.[1]);
+                if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+                const [x, y] = projectCoords(lng, lat, "EPSG:4326", projectionCode);
+                return { x, y };
+              })
+              .filter(Boolean);
+
+            if (pts.length >= 2) {
+              entities += buildDxfLwPolylineEntity(layerName, pts, false);
+            }
+          });
+
+          if (labelText && lineSets[0]?.length) {
+            const anchor = getLineLabelCoord(lineSets[0]);
+            if (anchor) {
+              const [x, y] = projectCoords(anchor[0], anchor[1], "EPSG:4326", projectionCode);
+              entities += buildDxfTextEntity(layerName, x, y, labelText, textHeight);
+            }
+          }
+          return;
+        }
+
+        const ringSets = getPolygonRingSets(geometry);
+        if (ringSets.length) {
+          ringSets.forEach((ring) => {
+            const pts = ring
+              .map((coord) => {
+                const lng = Number(coord?.[0]);
+                const lat = Number(coord?.[1]);
+                if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+                const [x, y] = projectCoords(lng, lat, "EPSG:4326", projectionCode);
+                return { x, y };
+              })
+              .filter(Boolean);
+
+            if (pts.length >= 3) {
+              const first = pts[0];
+              const last = pts[pts.length - 1];
+              const alreadyClosed = first.x === last.x && first.y === last.y;
+              const finalPts = alreadyClosed ? pts.slice(0, -1) : pts;
+              entities += buildDxfLwPolylineEntity(layerName, finalPts, true);
+            }
+          });
+
+          if (labelText && ringSets[0]?.length) {
+            const anchor = getPolygonLabelCoord(ringSets[0]);
+            if (anchor) {
+              const [x, y] = projectCoords(anchor[0], anchor[1], "EPSG:4326", projectionCode);
+              entities += buildDxfTextEntity(layerName, x, y, labelText, textHeight);
+            }
+          }
+        }
+      });
+    }
+
+    let out = "";
+    out += dxfPair(0, "SECTION");
+    out += dxfPair(2, "HEADER");
+    out += dxfPair(0, "ENDSEC");
+    out += buildDxfLayerTable(layerNames);
+    out += dxfPair(0, "SECTION");
+    out += dxfPair(2, "ENTITIES");
+    out += entities;
+    out += dxfPair(0, "ENDSEC");
+    out += dxfPair(0, "EOF");
+
+    return out;
+  }
+
+  async function executeExport() {
+    console.log("EXPORT DEBUG selected projection", exportProjection);
+    if (!exportGeometryRef.current) {
+      setExportWarning("Draw a fence first.");
+      return;
+    }
+
+    const selectedLayers =
+      exportFormat === "csv"
+        ? visibleExportableLayers.filter(
+            (layer) =>
+              layer.type === "point" &&
+              (layer.data?.exportFormats || []).includes("csv")
+          )
+        : visibleExportableLayers.filter((layer) =>
+            (layer.data?.exportFormats || []).includes("dxf")
+          );
+
+    if (!selectedLayers.length) {
+      setExportWarning(
+        exportFormat === "csv"
+          ? "CSV export currently only supports visible point layers."
+          : "Turn on at least one visible exportable layer first."
+      );
+      return;
+    }
+
+    setExportBusy(true);
+
+    try {
+      const countRows = await Promise.all(
+        selectedLayers.map(async (layer) => {
+          try {
+            const count = await fetchArcgisCountByFence(
+              layer.data.url,
+              exportGeometryRef.current,
+              layer.data?.where || "1=1"
+            );
+            return { layer, count };
+          } catch {
+            return { layer, count: null };
+          }
+        })
+      );
+
+      const totalFeatures = countRows.reduce(
+        (sum, row) => sum + (Number.isFinite(row.count) ? row.count : 0),
+        0
+      );
+
+      setExportCountSummary({
+        totalFeatures,
+        byLayer: countRows.map((row) => ({
+          layerName: row.layer.name,
+          count: row.count,
+        })),
+      });
+
+      if (
+        totalFeatures > LARGE_EXPORT_FEATURE_THRESHOLD &&
+        !exportLargeConfirmArmed
+      ) {
+        setExportLargeConfirmArmed(true);
+        setExportWarning(
+          `Large export warning: about ${totalFeatures.toLocaleString()} features across ${selectedLayers.length} visible layer${
+            selectedLayers.length === 1 ? "" : "s"
+          }. Click Export again to continue.`
+        );
+        return;
+      }
+
+      const collections = await Promise.all(
+        selectedLayers.map(async (layer) => {
+          const raw = await fetchArcgisGeojsonByFence(
+            layer.data.url,
+            exportGeometryRef.current,
+            layer.data?.where || "1=1",
+            Math.min(EXPORT_PAGE_SIZE, layer.data?.maxFeatures || EXPORT_PAGE_SIZE)
+          );
+
+          return {
+            layer,
+            featureCollection: applyLayerExportFilter(raw, layer),
+          };
+        })
+      );
+
+      const filename = buildExportFilename(exportFormat, exportProjection);
+
+      if (exportFormat === "csv") {
+        const csvText = buildCombinedPointCsv(collections, exportProjection);
+        downloadBlob(
+          new Blob([csvText], { type: "text/csv;charset=utf-8;" }),
+          filename
+        );
+      } else {
+        const dxfText = buildDxfFromCollections(collections, exportProjection);
+        downloadBlob(
+          new Blob([dxfText], { type: "application/dxf;charset=utf-8;" }),
+          filename
+        );
+      }
+
+            setExportWarning(`Export complete: ${filename}`);
+//    clearExportInteraction();
+    } catch (e) {
+      console.error("Export failed:", e);
+      setExportWarning(`Export failed: ${e?.message || "unknown error"}`);
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  function openExportDialog() {
+    if (!exportHasFence || !exportGeometryRef.current) {
+      setExportCountSummary(null);
+      setExportLargeConfirmArmed(false);
+      setExportWarning("Draw a fence first.");
+      return;
+    }
+
+    if (!visibleExportableLayers.length) {
+      setExportWarning("Turn on at least one exportable layer first.");
+      return;
+    }
+
+    const csvPointLayers = visibleExportableLayers.filter(
+      (l) =>
+        l.type === "point" &&
+        (l.data?.exportFormats || []).includes("csv")
+    );
+
+    setExportSummary({
+      totalVisibleLayers: visibleExportableLayers.length,
+      totalCsvPointLayers: csvPointLayers.length,
+      layerNames: visibleExportableLayers.map((l) => l.name),
+    });
+
+    setExportCountSummary(null);
+    setExportLargeConfirmArmed(false);
+    setExportWarning("");
+    setExportDialogOpen(true);
+  }
+
+  async function handleExportDialogSubmit() {
+    await executeExport();
+  }
 
   // ---------- Inject geodetic + cadastre layers ----------
   useEffect(() => {
@@ -3029,6 +4151,20 @@ const handleMyLocation = () => {
           name,
           props: { ...props, lat, lng },
         }),
+        exportable: true,
+exportFormats: ["csv", "dxf"],
+zFields: ["reduced_level", "reducedlevel", "height"],
+dxfLabelFields: ["geodetic_point_name", "point_number"],
+exportFieldOrder: [
+  "geodetic_point_pid",
+  "point_number",
+  "geodetic_point_name",
+  "vert_datum",
+  "reduced_level",
+  "mga2020_zone",
+  "mga2020_easting",
+  "mga2020_northing",
+],
     },
   });
 
@@ -3081,6 +4217,20 @@ if (!hasBM)
           name,
           props: { ...props, lat, lng },
         }),
+        exportable: true,
+exportFormats: ["csv", "dxf"],
+zFields: ["reduced_level", "reducedlevel", "height"],
+dxfLabelFields: ["geodetic_point_name", "point_number"],
+exportFieldOrder: [
+  "geodetic_point_pid",
+  "point_number",
+  "geodetic_point_name",
+  "vert_datum",
+  "reduced_level",
+  "mga2020_zone",
+  "mga2020_easting",
+  "mga2020_northing",
+],
     },
   });
 
@@ -3118,6 +4268,20 @@ if (!hasRM)
           name,
           props: { ...props, lat, lng },
         }),
+        exportable: true,
+exportFormats: ["csv", "dxf"],
+zFields: ["reduced_level", "reducedlevel", "height"],
+dxfLabelFields: ["reference_mark_name", "rm_point_number"],
+exportFieldOrder: [
+  "reference_mark_pid",
+  "rm_point_number",
+  "reference_mark_name",
+  "latest_status",
+  "reduced_level",
+  "mga2020_zone",
+  "mga2020_easting",
+  "mga2020_northing",
+],
     },
   });
   if (!hasSewerMh)
@@ -3126,44 +4290,49 @@ if (!hasRM)
     name: "Sewer Manholes (WCORP-026)",
     type: "point",
     visible: false,
-    data: {
-      url: WCORP_026_QUERY,
-      where: "1=1",
-      minZoom: MIN_CADASTRE_ZOOM,
-      maxFeatures: MAX_FEATURES_PER_VIEW,
-      symbol: {
-        path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
-        fillColor: "#ff4da6",
-        fillOpacity: 1,
-        strokeColor: "#ffffff",
-        strokeWeight: 1.5,
-        scale: 4.5,
-      },
-      layerTag: "SEWER MH",
-      idFields: ["pacid,toplev"],
-      nameFields: ["pacid,toplev"],
-      label: null,
-      filterFn: (feature) => !isDestroyed(feature?.properties || {}),
-popupBuilder: ({ props }) => {
-  const id = props?.pacid;
-  const rl = props?.toplev;
+data: {
+  url: WCORP_026_QUERY,
+  where: "1=1",
+  minZoom: MIN_CADASTRE_ZOOM,
+  maxFeatures: MAX_FEATURES_PER_VIEW,
+  symbol: {
+    path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
+    fillColor: "#ff4da6",
+    fillOpacity: 1,
+    strokeColor: "#ffffff",
+    strokeWeight: 1.5,
+    scale: 4.5,
+  },
+  layerTag: "SEWER MH",
+  exportable: true,
+  exportFormats: ["csv", "dxf"],
+  idFields: ["pacid", "objectid", "OBJECTID", "fid"],
+  nameFields: ["pacid"],
+  zFields: ["toplev"],
+  dxfLabelFields: ["pacid"],
+  exportFieldOrder: ["pacid", "toplev", "objectid", "OBJECTID", "fid"],
+  label: null,
+  filterFn: (feature) => !isDestroyed(feature?.properties || {}),
+  popupBuilder: ({ props }) => {
+    const id = props?.pacid;
+    const rl = props?.toplev;
 
-  return `
-    <div style="min-width:160px; font-family:Inter,sans-serif; font-size:13px;">
-      <div style="font-weight:800; margin-bottom:6px;">Sewer Manhole</div>
+    return `
+      <div style="min-width:160px; font-family:Inter,sans-serif; font-size:13px;">
+        <div style="font-weight:800; margin-bottom:6px;">Sewer Manhole</div>
 
-      <div><b>ID:</b> ${id ?? "-"}</div>
+        <div><b>ID:</b> ${id ?? "-"}</div>
 
-      <div><b>Lid RL:</b> ${
-        rl !== null && rl !== undefined && rl !== ""
-          ? Number(rl).toFixed(3)
-          : "-"
-      }</div>
-    </div>
-  `;
+        <div><b>Lid RL:</b> ${
+          rl !== null && rl !== undefined && rl !== ""
+            ? Number(rl).toFixed(3)
+            : "-"
+        }</div>
+      </div>
+    `;
+  },
+  cluster: false,
 },
-      cluster: false,
-    },
   });
            if (!hasCad)
         next.push({
@@ -3183,6 +4352,10 @@ popupBuilder: ({ props }) => {
               fillOpacity: 0.0,
             },
             labels: null,
+            exportable: true,
+exportFormats: ["dxf"],
+dxfLabelFields: [],
+outputLayerName: "Cadastre",
           },
         });
       if (!hasLGA)
@@ -3211,6 +4384,10 @@ popupBuilder: ({ props }) => {
               fontSize: (zoom) => (zoom >= 12 ? "12px" : "10px"),
               repeatAtZoom: null,
             },
+            exportable: true,
+exportFormats: ["dxf"],
+dxfLabelFields: ["name", "lga_name", "local_government_authority"],
+outputLayerName: "Local_Authority",
           },
         });
       if (!hasZoning)
@@ -3240,6 +4417,10 @@ popupBuilder: ({ props }) => {
               repeatAtZoom: 15,
               repeatOffset: { lat: 0.0035, lng: 0.0035 },
             },
+            exportable: true,
+exportFormats: ["dxf"],
+dxfLabelFields: ["zone_code", "zone", "r_code", "rcode", "name", "label"],
+outputLayerName: "Zoning",
           },
         });
         if (!hasSewer)
@@ -3253,6 +4434,10 @@ popupBuilder: ({ props }) => {
       where: "1=1",
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: MAX_FEATURES_PER_VIEW,
+       exportable: true,
+exportFormats: ["dxf"],
+dxfLabelFields: [],
+outputLayerName: "Sewer_Gravity_Pipes",
 style: (feature) => {
   const maintype = String(feature.getProperty("maintype") || "").toUpperCase();
 
@@ -3359,23 +4544,26 @@ useEffect(() => {
     store.markers = [];
   };
 
-  const syncClusterer = () => {
-    if (!clustererRef.current) {
-      clustererRef.current = new MarkerClusterer({ map, markers: [] });
-    }
+const syncClusterer = () => {
+  if (!clustererRef.current) {
+    clustererRef.current = new MarkerClusterer({ map, markers: [] });
+  }
+
+  // Don’t re-cluster while a point popup is open
+  if (mainInfoOpenRef.current) return;
 
   const visibleMarkers = [];
-pointLayers.forEach((layer) => {
-  if (!layer.visible) return;
-  if (layer.data?.cluster === false) return;
-  const store = pointLayersRef.current.get(layer.id);
-  if (!store) return;
-  visibleMarkers.push(...store.markers);
-});
+  pointLayers.forEach((layer) => {
+    if (!layer.visible) return;
+    if (layer.data?.cluster === false) return;
+    const store = pointLayersRef.current.get(layer.id);
+    if (!store) return;
+    visibleMarkers.push(...store.markers);
+  });
 
-    clustererRef.current.clearMarkers();
-    if (visibleMarkers.length) clustererRef.current.addMarkers(visibleMarkers);
-  };
+  clustererRef.current.clearMarkers();
+  if (visibleMarkers.length) clustererRef.current.addMarkers(visibleMarkers);
+};
 
   pointLayers.forEach((layer) => {
     const store = ensureStore(layer);
@@ -3434,10 +4622,10 @@ pointLayers.forEach((layer) => {
           if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
           const fallbackId = `${lat.toFixed(6)},${lng.toFixed(6)}`;
-          const id = getFeaturePointId(props, fallbackId);
+          const id = getFeaturePointId(props, layer, fallbackId);
           nextIds.add(id);
 
-          const name = getFeaturePointName(props, layer.data?.nameFields || []);
+          const name = getFeaturePointName(props, layer.data?.nameFields || [], id);
           const showLabel = (zoom ?? 0) >= (layer.data?.label?.minZoom ?? 999);
 
           let marker = store.index.get(id);
@@ -3459,15 +4647,19 @@ pointLayers.forEach((layer) => {
               optimized: true,
             });
 
-            marker.addListener("click", () => {
-              const html =
-                typeof layer.data?.popupBuilder === "function"
-                  ? layer.data.popupBuilder({ name, props, lat, lng })
-                  : `<div style="font-weight:800;">${name || layer.name}</div>`;
+   marker.addListener("click", () => {
+  const html =
+    typeof layer.data?.popupBuilder === "function"
+      ? layer.data.popupBuilder({ name, props, lat, lng })
+      : `<div data-pw-drag-handle="1" style="font-weight:800;">${name || layer.name}</div>`;
 
-              infoWindowRef.current.setContent(html);
-              infoWindowRef.current.open(map, marker);
-            });
+  openMainInfoWindow({
+    html,
+    marker,
+    markerId: id,
+    layerId: layer.id,
+  });
+});
 
             store.index.set(id, marker);
           } else {
@@ -3488,12 +4680,17 @@ pointLayers.forEach((layer) => {
           }
         }
 
-        for (const [id, marker] of store.index.entries()) {
-          if (!nextIds.has(id)) {
-            marker.setMap(null);
-            store.index.delete(id);
-          }
-        }
+      for (const [id, marker] of store.index.entries()) {
+  const markerKey = `${layer.id}::${id}`;
+  const isActivePopupMarker =
+    mainInfoOpenRef.current &&
+    activeMainInfoKeyRef.current === markerKey;
+
+  if (!nextIds.has(id) && !isActivePopupMarker) {
+    marker.setMap(null);
+    store.index.delete(id);
+  }
+}
 
         store.markers = Array.from(store.index.values());
         totalVisible += store.markers.length;
@@ -3514,10 +4711,15 @@ pointLayers.forEach((layer) => {
 
   run();
 
-  const staleTimer = setInterval(() => {
-    const anyVisible = pointLayers.some((l) => l.visible);
-    if (anyVisible) setViewTick((t) => t + 1);
-  }, STALE_REFRESH_MS);
+const staleTimer = setInterval(() => {
+  const anyVisible = pointLayers.some((l) => l.visible);
+  if (!anyVisible) return;
+
+  // Don’t refresh point layers while a point popup is open
+  if (mainInfoOpenRef.current) return;
+
+  setViewTick((t) => t + 1);
+}, STALE_REFRESH_MS);
 
   return () => clearInterval(staleTimer);
 }, [layers, viewTick, isAppVisible]);
@@ -3846,6 +5048,368 @@ return (
         }}
       >
         <div ref={mapDivRef} className="maps-map" />
+
+      {exportPanelOpen && (
+  <div
+    style={{
+      position: "absolute",
+      top: isMobile ? 74 : 84,
+      left: 12,
+      zIndex: 14,
+      width: isMobile ? "calc(100vw - 24px)" : 320,
+      maxWidth: "calc(100vw - 24px)",
+
+      // ✅ keep the popup fully usable on small screens
+      maxHeight: isMobile ? "calc(100vh - 96px)" : "calc(100vh - 120px)",
+      overflowY: "auto",
+      overflowX: "hidden",
+      overscrollBehavior: "contain",
+      WebkitOverflowScrolling: "touch",
+
+      background: "rgba(255,255,255,0.98)",
+      backdropFilter: "blur(8px)",
+      border: "1px solid rgba(0,0,0,0.12)",
+      borderRadius: 16,
+      boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+      padding: 12,
+      paddingBottom: 18,
+    }}
+  >
+           <div
+  style={{
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 10,
+
+    // ✅ keep title + close button visible
+    position: "sticky",
+    top: -12,
+    zIndex: 2,
+    background: "rgba(255,255,255,0.98)",
+    paddingTop: 2,
+    paddingBottom: 8,
+  }}
+>
+              <div style={{ fontWeight: 950, fontSize: 13 }}>Export visible layers</div>
+              <button
+                type="button"
+                className="btn-pill"
+                style={{ padding: "5px 10px", fontSize: 11 }}
+                onClick={() => clearExportInteraction()}
+              >
+                Close
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+                gap: 8,
+              }}
+            >
+              <button
+                type="button"
+                className={`btn-pill ${exportMode === "rectangle" ? "primary" : ""}`}
+                onClick={startRectangleExportFence}
+              >
+                Draw Rectangle
+              </button>
+
+              <button
+                type="button"
+                className={`btn-pill ${exportMode === "polygon" ? "primary" : ""}`}
+                onClick={startPolygonExportFence}
+              >
+                Draw Polygon
+              </button>
+
+              <button
+                type="button"
+                className="btn-pill"
+                onClick={() => resetExportDrawingState({ keepPanel: true })}
+              >
+                Clear Fence
+              </button>
+
+              <button
+                type="button"
+                className={`btn-pill ${exportHasFence ? "primary" : ""}`}
+                onClick={openExportDialog}
+                disabled={!exportHasFence}
+                title={!exportHasFence ? "Draw a fence first" : "Continue to export options"}
+              >
+                Continue Export
+              </button>
+            </div>
+
+            <div
+              style={{
+                marginTop: 10,
+                padding: "10px 12px",
+                borderRadius: 12,
+                background: "rgba(0,0,0,0.04)",
+                border: "1px solid rgba(0,0,0,0.08)",
+                fontSize: 12,
+                fontWeight: 800,
+                color: "#222",
+              }}
+            >
+              {exportHasFence
+                ? "Fence ready — continue to export options."
+                : exportMode === "rectangle"
+                ? "Rectangle mode: click first corner, then click the opposite corner."
+                : exportMode === "polygon"
+                ? "Polygon mode: click points, then right-click or double-click to finish."
+                : "Choose Draw Rectangle or Draw Polygon to start."}
+            </div>
+
+            {!!visibleExportableLayers.length && (
+              <div style={{ marginTop: 10, fontSize: 11, color: "#444", fontWeight: 800 }}>
+                Visible exportable layers: {visibleExportableLayers.map((l) => l.name).join(", ")}
+              </div>
+            )}
+          </div>
+        )}
+
+        {exportDialogOpen && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 15,
+              background: "rgba(0,0,0,0.22)",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "flex-start",
+              padding: isMobile ? "72px 12px 12px" : "88px 16px 16px",
+            }}
+          >
+            <div
+              style={{
+                width: "min(560px, 100%)",
+                background: "#fff",
+                borderRadius: 18,
+                border: "1px solid rgba(0,0,0,0.12)",
+                boxShadow: "0 18px 36px rgba(0,0,0,0.22)",
+                padding: 16,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 12,
+                }}
+              >
+                <div style={{ fontWeight: 950, fontSize: 15 }}>Export options</div>
+                <button
+                  type="button"
+                  className="btn-pill"
+                  style={{ padding: "5px 10px", fontSize: 11 }}
+                  onClick={() => setExportDialogOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: "#333",
+                  marginBottom: 10,
+                }}
+              >
+                Fence ready. {exportSummary?.totalVisibleLayers || 0} visible exportable layer
+                {(exportSummary?.totalVisibleLayers || 0) === 1 ? "" : "s"} selected.
+              </div>
+
+              {!!exportSummary?.layerNames?.length && (
+                <div
+                  style={{
+                    marginBottom: 12,
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    background: "rgba(0,0,0,0.04)",
+                    border: "1px solid rgba(0,0,0,0.08)",
+                    fontSize: 12,
+                    color: "#222",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, marginBottom: 6 }}>Visible layers</div>
+                  <div>{exportSummary.layerNames.join(", ")}</div>
+                </div>
+              )}
+
+              {exportCountSummary ? (
+                <div
+                  style={{
+                    marginBottom: 12,
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    background: "rgba(25,118,210,0.08)",
+                    border: "1px solid rgba(25,118,210,0.18)",
+                    fontSize: 12,
+                    color: "#123",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, marginBottom: 6 }}>
+                    Estimated features
+                  </div>
+
+                  <div style={{ fontWeight: 800, marginBottom: 6 }}>
+                    Total: {(exportCountSummary.totalFeatures || 0).toLocaleString()}
+                  </div>
+
+                  <div style={{ display: "grid", gap: 4 }}>
+                    {(exportCountSummary.byLayer || []).map((row) => (
+                      <div key={row.layerName}>
+                        {row.layerName}:{" "}
+                        {Number.isFinite(row.count)
+                          ? row.count.toLocaleString()
+                          : "count unavailable"}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+                  gap: 10,
+                }}
+              >
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 900 }}>Format</span>
+                  <select
+                    value={exportFormat}
+                    onChange={(e) => setExportFormat(e.target.value)}
+                    className="maps-search-input"
+                    style={{ ...panelInputStyle, marginTop: 0 }}
+                  >
+                    <option value="dxf">DXF</option>
+                    <option value="csv">CSV</option>
+                  </select>
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 900 }}>Projection</span>
+                  <select
+                    value={exportProjection}
+                    onChange={(e) => setExportProjection(e.target.value)}
+                    className="maps-search-input"
+                    style={{ ...panelInputStyle, marginTop: 0 }}
+                  >
+                    {PROJECTION_GROUPS.map((group) => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.options.map((opt) => (
+                          <option key={opt.code} value={opt.code}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  background: "rgba(25,118,210,0.08)",
+                  border: "1px solid rgba(25,118,210,0.18)",
+                  fontSize: 12,
+                }}
+              >
+                <div style={{ fontWeight: 900, marginBottom: 4 }}>Projection</div>
+                <div>{exportProjectionPreview}</div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  background: "rgba(0,0,0,0.04)",
+                  border: "1px solid rgba(0,0,0,0.08)",
+                  fontSize: 12,
+                }}
+              >
+                <div style={{ fontWeight: 900, marginBottom: 4 }}>Filename preview</div>
+                <div style={{ wordBreak: "break-word" }}>{exportFilenamePreview}</div>
+              </div>
+
+              {exportFormat === "csv" && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    background: "rgba(255,165,0,0.12)",
+                    border: "1px solid rgba(255,165,0,0.25)",
+                    fontSize: 12,
+                    fontWeight: 800,
+                  }}
+                >
+                  CSV will only include visible point layers inside the fence.
+                </div>
+              )}
+
+              {exportWarning ? (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    background: "rgba(211,47,47,0.10)",
+                    border: "1px solid rgba(211,47,47,0.18)",
+                    color: "#8a1f1f",
+                    fontWeight: 900,
+                    fontSize: 12,
+                  }}
+                >
+                  {exportWarning}
+                </div>
+              ) : null}
+
+              <div
+                style={{
+                  marginTop: 14,
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn-pill"
+                  onClick={() => setExportDialogOpen(false)}
+                >
+                  Back
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-pill primary"
+                  disabled={exportBusy}
+                  onClick={handleExportDialogSubmit}
+                >
+                  {exportBusy ? "Preparing…" : exportLargeConfirmArmed ? "Export Anyway" : "Export"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Left retractable panel */}
         <div
@@ -4324,14 +5888,22 @@ onBlur={() => {
                     type="button"
                     className={`btn-pill ${noteAddMode ? "primary" : ""}`}
                     style={{ padding: "6px 8px", fontSize: 11, flexShrink: 0 }}
-                    disabled={!!measureModeRef.current}
-                    title={
-                      measureModeRef.current
-                        ? "Clear measurement first"
-                        : noteAddMode
-                        ? "Tap on the map to place a note"
-                        : "Add a note by tapping on the map"
-                    }
+disabled={
+  !!measureModeRef.current ||
+  exportPanelOpen ||
+  !!exportModeRef.current ||
+  exportHasFence ||
+  exportDialogOpen
+}
+title={
+  measureModeRef.current
+    ? "Clear measurement first"
+    : exportPanelOpen || exportHasFence || exportDialogOpen || exportModeRef.current
+    ? "Finish or clear export first"
+    : noteAddMode
+    ? "Tap on the map to place a note"
+    : "Add a note by tapping on the map"
+}
                     onClick={() => setNoteAddMode((v) => !v)}
                   >
                     {noteAddMode ? "Tap map…" : "Add note"}
