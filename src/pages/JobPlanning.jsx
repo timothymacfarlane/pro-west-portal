@@ -94,6 +94,19 @@ const JOB_COLOURS = [
   { value: "purple", label: "Purple" },
 ];
 
+const COLOUR_HEX = {
+  red: "#e53935",
+  blue: "#1e88e5",
+  green: "#43a047",
+  yellow: "#fbc02d",
+  purple: "#8e24aa",
+};
+
+const getColourHex = (colour) => {
+  if (!colour) return "#333";
+  return COLOUR_HEX[colour] || "#333";
+};
+
 function JobPlanning() {
   const { user, isAdmin } = useAuth();
   const isAppVisible = useAppVisibilityContext();
@@ -113,7 +126,10 @@ const [unscheduledItems, setUnscheduledItems] = useState([]);
 const [highlightedJobKey, setHighlightedJobKey] = useState(null);
 const [draggedJobKey, setDraggedJobKey] = useState(null);
 const [dragOverJobKey, setDragOverJobKey] = useState(null);
- const topScrollRef = useRef(null);
+const [moveDatePickerKey, setMoveDatePickerKey] = useState(null);
+
+
+const topScrollRef = useRef(null);
 const bottomScrollRef = useRef(null);
 const editorLoadedRef = useRef(false);
 const autosaveTimerRef = useRef(null);
@@ -124,6 +140,7 @@ const [jobLoading, setJobLoading] = useState(false);
 const [modalTarget, setModalTarget] = useState(null);
 const [editorModalOpen, setEditorModalOpen] = useState(false);
 const [newJobColour, setNewJobColour] = useState("");
+const [newJobNotes, setNewJobNotes] = useState("");
 const [selectedJobSuggestion, setSelectedJobSuggestion] = useState(null);
 
   const calendarDays = useMemo(() => buildCalendarDays(currentMonth), [currentMonth]);
@@ -256,14 +273,16 @@ useEffect(() => {
     ...item,
     client_key: item.id || `${item.job_number}-${selectedDate}-${index}`,
   }));
-editorLoadedRef.current = false;
+
+  editorLoadedRef.current = false;
   setEditItems(hydrated);
   setJobQuery("");
   setJobSuggestions([]);
   setHighlightedJobKey(null);
   setDraggedJobKey(null);
   setDragOverJobKey(null);
-}, [selectedDate, plansByDate, unscheduledItems]);
+  setMoveDatePickerKey(null);
+}, [selectedDate]);
 
 useEffect(() => {
   if (!editorModalOpen || !selectedDate) return;
@@ -309,14 +328,8 @@ useEffect(() => {
 
           if (error) throw error;
 
-          const rows = data || [];
-          setUnscheduledItems(rows);
-          setEditItems(
-            rows.map((item, index) => ({
-              ...item,
-              client_key: item.id || `${item.job_number}-${UNSCHEDULED_KEY}-${index}`,
-            }))
-          );
+        const rows = data || [];
+setUnscheduledItems(rows);
         } else {
           setUnscheduledItems([]);
         }
@@ -349,18 +362,11 @@ useEffect(() => {
 
           if (error) throw error;
 
-          const rows = data || [];
-          setPlansByDate((prev) => ({
-            ...prev,
-            [selectedDate]: rows,
-          }));
-
-          setEditItems(
-            rows.map((item, index) => ({
-              ...item,
-              client_key: item.id || `${item.job_number}-${selectedDate}-${index}`,
-            }))
-          );
+     const rows = data || [];
+setPlansByDate((prev) => ({
+  ...prev,
+  [selectedDate]: rows,
+}));
         } else {
           setPlansByDate((prev) => {
             const next = { ...prev };
@@ -374,7 +380,7 @@ useEffect(() => {
       const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
       setError(`Could not autosave changes. (${msg})`);
     }
-  }, 500);
+  }, 1200);
 
   return () => {
     if (autosaveTimerRef.current) {
@@ -423,6 +429,7 @@ const openEditorModalForUnscheduled = () => {
 const closeEditorModal = () => {
   setEditorModalOpen(false);
   setSelectedDate(null);
+  setMoveDatePickerKey(null);
 };
 
 const openAddModal = (targetKey) => {
@@ -430,6 +437,7 @@ const openAddModal = (targetKey) => {
   setJobQuery("");
   setJobSuggestions([]);
   setNewJobColour("");
+  setNewJobNotes("");
   setSelectedJobSuggestion(null);
 };
 
@@ -438,6 +446,7 @@ const closeAddModal = () => {
   setJobQuery("");
   setJobSuggestions([]);
   setNewJobColour("");
+  setNewJobNotes("");
   setSelectedJobSuggestion(null);
 };
 
@@ -546,16 +555,16 @@ closeAddModal();
     const suburb = await resolveSuburbForJob(job);
 
     if (targetKey === UNSCHEDULED_KEY) {
-      const payload = {
-        job_number: jobNumber,
-        suburb,
-        notes: "",
-        colour: newJobColour,
-        sort_order: targetItems.length,
-        created_by: user?.id || null,
-        updated_by: user?.id || null,
-        updated_at: new Date().toISOString(),
-      };
+    const payload = {
+  job_number: jobNumber,
+  suburb,
+  notes: String(newJobNotes || "").trim(),
+  colour: newJobColour,
+  sort_order: targetItems.length,
+  created_by: user?.id || null,
+  updated_by: user?.id || null,
+  updated_at: new Date().toISOString(),
+};
 
       const { data, error } = await supabase
         .from("job_planning_unscheduled")
@@ -583,17 +592,17 @@ closeAddModal();
 
       setHighlightedJobKey(data.id || `new-${jobNumber}-${Date.now()}`);
     } else {
-      const payload = {
-        date: targetKey,
-        job_number: jobNumber,
-        suburb,
-        notes: "",
-        colour: newJobColour,
-        sort_order: targetItems.length,
-        created_by: user?.id || null,
-        updated_by: user?.id || null,
-        updated_at: new Date().toISOString(),
-      };
+    const payload = {
+  date: targetKey,
+  job_number: jobNumber,
+  suburb,
+  notes: String(newJobNotes || "").trim(),
+  colour: newJobColour,
+  sort_order: targetItems.length,
+  created_by: user?.id || null,
+  updated_by: user?.id || null,
+  updated_at: new Date().toISOString(),
+};
 
       const { data, error } = await supabase
         .from("job_planning_entries")
@@ -841,22 +850,34 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
   cancelAutosave();
 
   try {
-    if (!targetDateISO || selectedDate !== UNSCHEDULED_KEY) return;
+    if (!targetDateISO) return;
+    if (selectedDate !== UNSCHEDULED_KEY && selectedDate === targetDateISO) return;
 
     setSaving(true);
     setError("");
 
-    // 1. Remove from unscheduled table
-    if (item.id != null) {
-      const { error: deleteError } = await supabase
-        .from("job_planning_unscheduled")
-        .delete()
-        .eq("id", item.id);
+    // Remove from source table first
+    if (selectedDate === UNSCHEDULED_KEY) {
+      if (item.id != null) {
+        const { error: deleteError } = await supabase
+          .from("job_planning_unscheduled")
+          .delete()
+          .eq("id", item.id);
 
-      if (deleteError) throw deleteError;
+        if (deleteError) throw deleteError;
+      }
+    } else {
+      if (item.id != null) {
+        const { error: deleteError } = await supabase
+          .from("job_planning_entries")
+          .delete()
+          .eq("id", item.id);
+
+        if (deleteError) throw deleteError;
+      }
     }
 
-    // 2. Insert into scheduled table
+    // Insert into destination day
     const insertPayload = {
       date: targetDateISO,
       job_number: String(item.job_number || "").trim(),
@@ -877,53 +898,114 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
 
     if (insertError) throw insertError;
 
-    // 3. Rebuild UNSCHEDULED list (remove moved item)
-    const nextUnscheduled = unscheduledItems
-      .filter((x) => {
-        if (item.id != null && x.id != null) return x.id !== item.id;
-        return (
-          x.client_key !== item.client_key &&
-          String(x.job_number) !== String(item.job_number)
-        );
-      })
-      .map((x, index) => ({
+    if (selectedDate === UNSCHEDULED_KEY) {
+      const nextUnscheduled = unscheduledItems
+        .filter((x) => {
+          if (item.id != null && x.id != null) return x.id !== item.id;
+          return (
+            x.client_key !== item.client_key &&
+            String(x.job_number) !== String(item.job_number)
+          );
+        })
+        .map((x, index) => ({
+          ...x,
+          sort_order: index,
+        }));
+
+      setUnscheduledItems(nextUnscheduled);
+      setEditItems(
+        nextUnscheduled.map((x, index) => ({
+          ...x,
+          client_key: x.id || `${x.job_number}-${UNSCHEDULED_KEY}-${index}`,
+        }))
+      );
+
+      const nextTargetItems = [
+        insertedRow,
+        ...(plansByDate[targetDateISO] || []).filter((x) => {
+          if (insertedRow.id != null && x.id != null) return x.id !== insertedRow.id;
+          return String(x.job_number) !== String(item.job_number);
+        }),
+      ].map((x, index) => ({
         ...x,
         sort_order: index,
       }));
 
-    setUnscheduledItems(nextUnscheduled);
+      setPlansByDate((prev) => ({
+        ...prev,
+        [targetDateISO]: nextTargetItems,
+      }));
+    } else {
+      const sourceDayItems = plansByDate[selectedDate] || [];
+      const targetDayItems = plansByDate[targetDateISO] || [];
 
-    // update editor (because we are in UNSCHEDULED modal)
-    setEditItems(
-      nextUnscheduled.map((x, index) => ({
+      const nextSourceDayItems = sourceDayItems
+        .filter((x) => {
+          if (item.id != null && x.id != null) return x.id !== item.id;
+          return (
+            x.client_key !== item.client_key &&
+            String(x.job_number) !== String(item.job_number)
+          );
+        })
+        .map((x, index) => ({
+          ...x,
+          sort_order: index,
+        }));
+
+      const nextTargetItems = [
+        insertedRow,
+        ...targetDayItems.filter((x) => {
+          if (insertedRow.id != null && x.id != null) return x.id !== insertedRow.id;
+          return String(x.job_number) !== String(item.job_number);
+        }),
+      ].map((x, index) => ({
         ...x,
-        client_key: x.id || `${x.job_number}-${UNSCHEDULED_KEY}-${index}`,
-      }))
-    );
+        sort_order: index,
+      }));
 
-    // 4. Add to target day (top of list)
-    const nextTargetItems = [
-      insertedRow,
-      ...(plansByDate[targetDateISO] || []).filter((x) => {
-        if (insertedRow.id != null && x.id != null) return x.id !== insertedRow.id;
-        return String(x.job_number) !== String(item.job_number);
-      }),
-    ].map((x, index) => ({
-      ...x,
-      sort_order: index,
-    }));
+      setPlansByDate((prev) => {
+        const next = { ...prev };
 
-    setPlansByDate((prev) => ({
-      ...prev,
-      [targetDateISO]: nextTargetItems,
-    }));
+        if (nextSourceDayItems.length > 0) {
+          next[selectedDate] = nextSourceDayItems;
+        } else {
+          delete next[selectedDate];
+        }
 
+        next[targetDateISO] = nextTargetItems;
+
+        return next;
+      });
+
+      setEditItems(
+        nextSourceDayItems.map((x, index) => ({
+          ...x,
+          client_key: x.id || `${x.job_number}-${selectedDate}-${index}`,
+        }))
+      );
+    }
+
+    setMoveDatePickerKey(null);
   } catch (err) {
     console.error("Error moving item to selected day:", err);
     const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
-    setError(`Could not move job to day. (${msg})`);
+    setError(`Could not move job to date. (${msg})`);
   } finally {
     setSaving(false);
+  }
+};
+
+const triggerMoveDatePicker = (clientKey) => {
+  const input = document.getElementById(`move-date-input-${clientKey}`);
+  if (!input) return;
+
+  setMoveDatePickerKey(clientKey);
+
+  if (typeof input.showPicker === "function") {
+    input.showPicker();
+  } else {
+    input.focus();
+    input.click();
   }
 };
 
@@ -1645,15 +1727,6 @@ editorLoadedRef.current = false;
     (draggedJobKey === item.client_key ? " job-planning-dragging" : "") +
     (dragOverJobKey === item.client_key ? " job-planning-drag-over" : "")
   }
-  draggable
-  onDragStart={(e) => {
-    const interactive = e.target.closest("button, select, input, textarea, option");
-    if (interactive) {
-      e.preventDefault();
-      return;
-    }
-    handleDragStart(item.client_key);
-  }}
   onDragEnter={(e) => {
     e.preventDefault();
     handleDragEnter(item.client_key);
@@ -1665,15 +1738,28 @@ editorLoadedRef.current = false;
     e.preventDefault();
     handleDropOnItem(item.client_key);
   }}
-  onDragEnd={handleDragEnd}
 >
-                 <div className="job-planning-edit-item-header">
+ <div className="job-planning-edit-item-header">
+  <div
+    className="job-planning-drag-handle"
+    draggable
+    onDragStart={(e) => {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", item.client_key);
+      handleDragStart(item.client_key);
+    }}
+    onDragEnd={handleDragEnd}
+    title="Drag to reorder"
+  >
+    ⋮⋮
+  </div>
+
   <div className="job-planning-edit-item-header-left">
     <div>
       <div className="job-planning-edit-item-title">
         Job {item.job_number}
       </div>
-      <div className="job-planning-drag-hint">Drag to reorder</div>
+      <div className="job-planning-drag-hint">Use dots to drag</div>
     </div>
 
 <div
@@ -1683,14 +1769,24 @@ editorLoadedRef.current = false;
 >
   <select
     className="maps-search-input"
-    style={{ minWidth: "130px", maxWidth: "140px" }}
+    style={{
+      color: getColourHex(item.colour),
+      fontWeight: item.colour ? 600 : 400,
+    }}
     value={item.colour || ""}
     draggable={false}
     onMouseDown={(e) => e.stopPropagation()}
     onChange={(e) => updateEditItem(item.client_key, "colour", e.target.value)}
   >
     {JOB_COLOURS.map((colour) => (
-      <option key={colour.value} value={colour.value}>
+      <option
+        key={colour.value}
+        value={colour.value}
+        style={{
+          color: getColourHex(colour.value),
+          fontWeight: colour.value ? 600 : 400,
+        }}
+      >
         {colour.label}
       </option>
     ))}
@@ -1715,24 +1811,44 @@ editorLoadedRef.current = false;
     </button>
   )}
 
-  {selectedDate === UNSCHEDULED_KEY && (
-    <button
-      type="button"
-      className="btn-pill"
-      draggable={false}
-      onMouseDown={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        void moveItemToSelectedDay(item, todayISO);
-      }}
-    >
-      Move to Today
-    </button>
-  )}
+  <button
+    type="button"
+    className="btn-pill"
+    draggable={false}
+    onMouseDown={(e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    }}
+    onClick={(e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      triggerMoveDatePicker(item.client_key);
+    }}
+  >
+    Move to Date
+  </button>
+
+  <input
+  id={`move-date-input-${item.client_key}`}
+  type="date"
+  defaultValue={
+    selectedDate && selectedDate !== UNSCHEDULED_KEY ? selectedDate : todayISO
+  }
+  style={{
+    position: "absolute",
+    opacity: 0,
+    pointerEvents: "none",
+    width: 1,
+    height: 1,
+  }}
+  onChange={(e) => {
+    const picked = e.target.value;
+    if (!picked) return;
+    void moveItemToSelectedDay(item, picked);
+    e.target.value =
+      selectedDate && selectedDate !== UNSCHEDULED_KEY ? selectedDate : todayISO;
+  }}
+/>
 
   <button
     type="button"
@@ -1757,28 +1873,28 @@ editorLoadedRef.current = false;
                   <div className="schedule-editor-grid">
                     <div className="schedule-editor-row">
                       <label className="schedule-editor-label">Suburb</label>
-                      <input
-                        className="maps-search-input"
-                        type="text"
-                        value={item.suburb || ""}
-                        onChange={(e) =>
-                          updateEditItem(item.client_key, "suburb", e.target.value)
-                        }
-                        placeholder="Auto-filled from job address"
-                      />
+ <input
+  className="maps-search-input"
+  type="text"
+  value={item.suburb || ""}
+  onChange={(e) =>
+    updateEditItem(item.client_key, "suburb", e.target.value)
+  }
+  placeholder="Auto-filled from job address"
+/>
                     </div>
 
                     <div className="schedule-editor-row">
                       <label className="schedule-editor-label">Notes</label>
-                      <textarea
-                        className="maps-search-input"
-                        style={{ minHeight: "70px" }}
-                        value={item.notes || ""}
-                        onChange={(e) =>
-                          updateEditItem(item.client_key, "notes", e.target.value)
-                        }
-                        placeholder="Notes for this planned job"
-                      />
+<textarea
+  className="maps-search-input"
+  style={{ minHeight: "70px" }}
+  value={item.notes || ""}
+  onChange={(e) =>
+    updateEditItem(item.client_key, "notes", e.target.value)
+  }
+  placeholder="Notes for this planned job"
+/>
                     </div>
                   </div>
                 </div>
@@ -1796,14 +1912,14 @@ editorLoadedRef.current = false;
               {saving ? "Saving…" : "Save"}
             </button>
 
-            <button
-              type="button"
-              className="btn-pill"
-              onClick={handleClearDay}
-              disabled={saving}
-            >
-              Clear day
-            </button>
+           <button
+  type="button"
+  className="btn-pill"
+  onClick={handleClearDay}
+  disabled={saving}
+>
+  {selectedDate === UNSCHEDULED_KEY ? "Clear Jobs" : "Clear day"}
+</button>
 
            <button
   type="button"
@@ -1914,17 +2030,39 @@ editorLoadedRef.current = false;
       <div className="schedule-editor-row" style={{ marginTop: "0.75rem" }}>
         <label className="schedule-editor-label">Colour</label>
         <select
-          className="maps-search-input"
-          value={newJobColour}
-          onChange={(e) => setNewJobColour(e.target.value)}
-        >
-          {JOB_COLOURS.map((colour) => (
-            <option key={colour.value} value={colour.value}>
-              {colour.label}
-            </option>
-          ))}
+  className="maps-search-input"
+  value={newJobColour}
+  onChange={(e) => setNewJobColour(e.target.value)}
+  style={{
+    color: getColourHex(newJobColour),
+    fontWeight: newJobColour ? 600 : 400,
+  }}
+>
+         {JOB_COLOURS.map((colour) => (
+  <option
+    key={colour.value}
+    value={colour.value}
+    style={{
+      color: getColourHex(colour.value),
+      fontWeight: colour.value ? 600 : 400,
+    }}
+  >
+    {colour.label}
+  </option>
+))}
         </select>
       </div>
+
+<div className="schedule-editor-row" style={{ marginTop: "0.75rem" }}>
+  <label className="schedule-editor-label">Notes</label>
+  <textarea
+    className="maps-search-input"
+    style={{ minHeight: "70px" }}
+    value={newJobNotes}
+    onChange={(e) => setNewJobNotes(e.target.value)}
+    placeholder="Notes for this job"
+  />
+</div>
 
       <div
         style={{
