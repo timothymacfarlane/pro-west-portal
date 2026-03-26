@@ -682,21 +682,18 @@ const removeEditItem = async (item) => {
     setSaving(true);
     setError("");
 
-    if (selectedDate === UNSCHEDULED_KEY) {
-      if (item.id != null) {
-        const { error: deleteError } = await supabase
-          .from("job_planning_unscheduled")
-          .delete()
-          .eq("id", item.id);
+    const jobNumber = String(item.job_number || "").trim();
 
-        if (deleteError) throw deleteError;
-      }
+    if (selectedDate === UNSCHEDULED_KEY) {
+      const { error: deleteError } = await supabase
+        .from("job_planning_unscheduled")
+        .delete()
+        .eq("job_number", jobNumber);
+
+      if (deleteError) throw deleteError;
 
       const nextUnscheduled = unscheduledItems
-        .filter((x) => {
-          if (item.id != null && x.id != null) return x.id !== item.id;
-          return x.client_key !== item.client_key && String(x.job_number) !== String(item.job_number);
-        })
+        .filter((x) => String(x.job_number || "").trim() !== jobNumber)
         .map((x, index) => ({
           ...x,
           sort_order: index,
@@ -710,20 +707,18 @@ const removeEditItem = async (item) => {
         }))
       );
     } else {
-      if (item.id != null) {
-        const { error: deleteError } = await supabase
-          .from("job_planning_entries")
-          .delete()
-          .eq("id", item.id);
+      const sourceDate = selectedDate;
 
-        if (deleteError) throw deleteError;
-      }
+      const { error: deleteError } = await supabase
+        .from("job_planning_entries")
+        .delete()
+        .eq("date", sourceDate)
+        .eq("job_number", jobNumber);
 
-      const nextDayItems = (plansByDate[selectedDate] || [])
-        .filter((x) => {
-          if (item.id != null && x.id != null) return x.id !== item.id;
-          return x.client_key !== item.client_key && String(x.job_number) !== String(item.job_number);
-        })
+      if (deleteError) throw deleteError;
+
+      const nextDayItems = (plansByDate[sourceDate] || [])
+        .filter((x) => String(x.job_number || "").trim() !== jobNumber)
         .map((x, index) => ({
           ...x,
           sort_order: index,
@@ -732,9 +727,9 @@ const removeEditItem = async (item) => {
       setPlansByDate((prev) => {
         const next = { ...prev };
         if (nextDayItems.length > 0) {
-          next[selectedDate] = nextDayItems;
+          next[sourceDate] = nextDayItems;
         } else {
-          delete next[selectedDate];
+          delete next[sourceDate];
         }
         return next;
       });
@@ -742,7 +737,7 @@ const removeEditItem = async (item) => {
       setEditItems(
         nextDayItems.map((x, index) => ({
           ...x,
-          client_key: x.id || `${x.job_number}-${selectedDate}-${index}`,
+          client_key: x.id || `${x.job_number}-${sourceDate}-${index}`,
         }))
       );
     }
@@ -851,40 +846,44 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
 
   try {
     if (!targetDateISO) return;
+    if (!selectedDate) return;
     if (selectedDate !== UNSCHEDULED_KEY && selectedDate === targetDateISO) return;
+
+    const sourceKey = selectedDate;
+    const sourceJobNumber = String(item.job_number || "").trim();
+    const keepModalOpen = sourceKey === UNSCHEDULED_KEY;
 
     setSaving(true);
     setError("");
 
-    // Remove from source table first
-    if (selectedDate === UNSCHEDULED_KEY) {
-      if (item.id != null) {
-        const { error: deleteError } = await supabase
-          .from("job_planning_unscheduled")
-          .delete()
-          .eq("id", item.id);
+    // 1) Remove from source table
+    if (sourceKey === UNSCHEDULED_KEY) {
+      const { error: deleteError } = await supabase
+        .from("job_planning_unscheduled")
+        .delete()
+        .eq("job_number", sourceJobNumber);
 
-        if (deleteError) throw deleteError;
-      }
+      if (deleteError) throw deleteError;
     } else {
-      if (item.id != null) {
-        const { error: deleteError } = await supabase
-          .from("job_planning_entries")
-          .delete()
-          .eq("id", item.id);
+      const { error: deleteError } = await supabase
+        .from("job_planning_entries")
+        .delete()
+        .eq("date", sourceKey)
+        .eq("job_number", sourceJobNumber);
 
-        if (deleteError) throw deleteError;
-      }
+      if (deleteError) throw deleteError;
     }
 
-    // Insert into destination day
+    // 2) Insert into target date
+    const currentTargetItems = plansByDate[targetDateISO] || [];
+
     const insertPayload = {
       date: targetDateISO,
-      job_number: String(item.job_number || "").trim(),
+      job_number: sourceJobNumber,
       suburb: String(item.suburb || "").trim(),
       notes: String(item.notes || "").trim(),
       colour: String(item.colour || "").trim(),
-      sort_order: 0,
+      sort_order: currentTargetItems.length,
       created_by: user?.id || null,
       updated_by: user?.id || null,
       updated_at: new Date().toISOString(),
@@ -898,21 +897,17 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
 
     if (insertError) throw insertError;
 
-    if (selectedDate === UNSCHEDULED_KEY) {
+    // 3) Update local state
+    if (sourceKey === UNSCHEDULED_KEY) {
       const nextUnscheduled = unscheduledItems
-        .filter((x) => {
-          if (item.id != null && x.id != null) return x.id !== item.id;
-          return (
-            x.client_key !== item.client_key &&
-            String(x.job_number) !== String(item.job_number)
-          );
-        })
+        .filter((x) => String(x.job_number) !== sourceJobNumber)
         .map((x, index) => ({
           ...x,
           sort_order: index,
         }));
 
       setUnscheduledItems(nextUnscheduled);
+
       setEditItems(
         nextUnscheduled.map((x, index) => ({
           ...x,
@@ -920,59 +915,40 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
         }))
       );
 
-      const nextTargetItems = [
-        insertedRow,
-        ...(plansByDate[targetDateISO] || []).filter((x) => {
-          if (insertedRow.id != null && x.id != null) return x.id !== insertedRow.id;
-          return String(x.job_number) !== String(item.job_number);
-        }),
-      ].map((x, index) => ({
-        ...x,
-        sort_order: index,
-      }));
-
-      setPlansByDate((prev) => ({
-        ...prev,
-        [targetDateISO]: nextTargetItems,
-      }));
+      setPlansByDate((prev) => {
+        const existingTarget = prev[targetDateISO] || [];
+        return {
+          ...prev,
+          [targetDateISO]: [...existingTarget, insertedRow].map((x, index) => ({
+            ...x,
+            sort_order: index,
+          })),
+        };
+      });
     } else {
-      const sourceDayItems = plansByDate[selectedDate] || [];
-      const targetDayItems = plansByDate[targetDateISO] || [];
+      const sourceDayItems = plansByDate[sourceKey] || [];
 
       const nextSourceDayItems = sourceDayItems
-        .filter((x) => {
-          if (item.id != null && x.id != null) return x.id !== item.id;
-          return (
-            x.client_key !== item.client_key &&
-            String(x.job_number) !== String(item.job_number)
-          );
-        })
+        .filter((x) => String(x.job_number) !== sourceJobNumber)
         .map((x, index) => ({
           ...x,
           sort_order: index,
         }));
 
-      const nextTargetItems = [
-        insertedRow,
-        ...targetDayItems.filter((x) => {
-          if (insertedRow.id != null && x.id != null) return x.id !== insertedRow.id;
-          return String(x.job_number) !== String(item.job_number);
-        }),
-      ].map((x, index) => ({
-        ...x,
-        sort_order: index,
-      }));
-
       setPlansByDate((prev) => {
         const next = { ...prev };
+        const existingTarget = prev[targetDateISO] || [];
 
         if (nextSourceDayItems.length > 0) {
-          next[selectedDate] = nextSourceDayItems;
+          next[sourceKey] = nextSourceDayItems;
         } else {
-          delete next[selectedDate];
+          delete next[sourceKey];
         }
 
-        next[targetDateISO] = nextTargetItems;
+        next[targetDateISO] = [...existingTarget, insertedRow].map((x, index) => ({
+          ...x,
+          sort_order: index,
+        }));
 
         return next;
       });
@@ -980,12 +956,18 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
       setEditItems(
         nextSourceDayItems.map((x, index) => ({
           ...x,
-          client_key: x.id || `${x.job_number}-${selectedDate}-${index}`,
+          client_key: x.id || `${x.job_number}-${sourceKey}-${index}`,
         }))
       );
     }
 
     setMoveDatePickerKey(null);
+
+    // 4) Keep unscheduled modal open, but close scheduled-day modal if desired
+    if (!keepModalOpen) {
+      setEditorModalOpen(false);
+      setSelectedDate(null);
+    }
   } catch (err) {
     console.error("Error moving item to selected day:", err);
     const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
@@ -1685,11 +1667,8 @@ editorLoadedRef.current = false;
         </p>
       </div>
 
-      {editorModalOpen && selectedDate && (
-  <div
-    className="job-planning-modal-overlay"
-    onClick={closeEditorModal}
-  >
+   {editorModalOpen && selectedDate && (
+  <div className="job-planning-modal-overlay">
     <div
       className="job-planning-modal-card job-planning-editor-modal-card"
       onClick={(e) => e.stopPropagation()}
@@ -1841,12 +1820,10 @@ editorLoadedRef.current = false;
     width: 1,
     height: 1,
   }}
-  onChange={(e) => {
+  onChange={async (e) => {
     const picked = e.target.value;
     if (!picked) return;
-    void moveItemToSelectedDay(item, picked);
-    e.target.value =
-      selectedDate && selectedDate !== UNSCHEDULED_KEY ? selectedDate : todayISO;
+    await moveItemToSelectedDay(item, picked);
   }}
 />
 
@@ -1933,11 +1910,8 @@ editorLoadedRef.current = false;
      </div>   
 </div>   
 )}
-   {modalTarget && (
-  <div
-    className="job-planning-modal-overlay"
-    onClick={closeAddModal}
-  >
+ {modalTarget && (
+  <div className="job-planning-modal-overlay">
     <div
       className="job-planning-modal-card"
       onClick={(e) => e.stopPropagation()}

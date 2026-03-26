@@ -2768,6 +2768,31 @@ body,
    JOB PLANNING (NEW CLEAN UI)
    ========================= */
 
+   .job-planning-drag-handle {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid #e3e3e3;
+  background: #fafafa;
+  color: #777;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.job-planning-drag-handle:hover {
+  background: #f3f3f3;
+  border-color: #d6d6d6;
+}
+
+.job-planning-drag-handle:active {
+  cursor: grabbing;
+}
    .job-planning-month-btn-mobile {
   display: none;
 }
