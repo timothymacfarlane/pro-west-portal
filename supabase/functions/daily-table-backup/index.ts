@@ -12,6 +12,14 @@ const TABLES = [
   "documents",
   "map_notes",
   "schedule_people",
+  "document_favourites",
+  "document_versions",
+  "job_reassign_log",
+  "jobs_legacy_raw",
+  "notifications",
+  "take5_submissions",
+  "timesheet_locks",
+  "vehicle_prestart_submissions",
 ] as const;
 
 const KEEP_DAYS = 28;
