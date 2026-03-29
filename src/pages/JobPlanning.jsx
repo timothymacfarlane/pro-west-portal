@@ -56,6 +56,8 @@ function longDateLabel(dateISO) {
   });
 }
 
+
+
 function extractSuburbFromAddress(address) {
   if (!address) return "";
 
@@ -86,25 +88,41 @@ function buildCalendarDays(currentMonth) {
 const DAY_HEADERS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 const JOB_COLOURS = [
-  { value: "", label: "Default" },
-  { value: "red", label: "Red" },
-  { value: "blue", label: "Blue" },
-  { value: "green", label: "Green" },
-  { value: "yellow", label: "Yellow" },
-  { value: "purple", label: "Purple" },
+  { value: "", label: "White – Miscellaneous Note" },
+  { value: "red", label: "Red – Job to be calculated" },
+  { value: "yellow", label: "Yellow – Job ready - Date Fixed" },
+  { value: "green", label: "Green – Job checked (Field Ready) - Date Fixed" },
+  { value: "blue", label: "Blue – Job ready - Date Flexible" },
+  { value: "purple", label: "Purple – Cadastral Job" },
 ];
 
 const COLOUR_HEX = {
   red: "#e53935",
-  blue: "#1e88e5",
   green: "#43a047",
   yellow: "#fbc02d",
+  blue: "#1e88e5",
   purple: "#8e24aa",
 };
+
+const JOB_PLANNING_LEGEND = [
+  { label: "Job to be calculated", colour: "red" },
+  { label: "Job ready - Date Fixed", colour: "yellow" },
+  { label: "Job checked (Field Ready) - Date Fixed", colour: "green" },
+  { label: "Job ready - Date Flexible", colour: "blue" },
+  { label: "Cadastral Job", colour: "purple" },
+  { label: "Miscellaneous Note", colour: "" },
+];
 
 const getColourHex = (colour) => {
   if (!colour) return "#333";
   return COLOUR_HEX[colour] || "#333";
+};
+
+const NOTES_JOB_OPTION = {
+  job_number: "Notes",
+  full_address: "",
+  suburb: "Notes Only",
+  isNotesOnly: true,
 };
 
 function JobPlanning() {
@@ -117,6 +135,7 @@ function JobPlanning() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [calendarDraggedKey, setCalendarDraggedKey] = useState(null);
+  const [calendarDragOverKey, setCalendarDragOverKey] = useState(null);
 
   const UNSCHEDULED_KEY = "__UNSCHEDULED__";
 
@@ -127,23 +146,29 @@ const [highlightedJobKey, setHighlightedJobKey] = useState(null);
 const [draggedJobKey, setDraggedJobKey] = useState(null);
 const [dragOverJobKey, setDragOverJobKey] = useState(null);
 const [moveDatePickerKey, setMoveDatePickerKey] = useState(null);
-
+const [moveDateDrafts, setMoveDateDrafts] = useState({});
+const [toast, setToast] = useState("");
 
 const topScrollRef = useRef(null);
 const bottomScrollRef = useRef(null);
+const verticalScrollRef = useRef(null);
 const editorLoadedRef = useRef(false);
 const autosaveTimerRef = useRef(null);
+const dragAutoScrollFrameRef = useRef(null);
+const dragAutoScrollDirectionRef = useRef({ x: 0, y: 0 });
 
 const [jobQuery, setJobQuery] = useState("");
 const [jobSuggestions, setJobSuggestions] = useState([]);
 const [jobLoading, setJobLoading] = useState(false);
+const [jobActiveIdx, setJobActiveIdx] = useState(-1);
+const jobSearchDebounceRef = useRef(null);
+
 const [modalTarget, setModalTarget] = useState(null);
 const [editorModalOpen, setEditorModalOpen] = useState(false);
 const [newJobColour, setNewJobColour] = useState("");
 const [newJobNotes, setNewJobNotes] = useState("");
 const [selectedJobSuggestion, setSelectedJobSuggestion] = useState(null);
-
-  const calendarDays = useMemo(() => buildCalendarDays(currentMonth), [currentMonth]);
+const calendarDays = useMemo(() => buildCalendarDays(currentMonth), [currentMonth]);
 
   const calendarRows = useMemo(() => {
     return Array.from({ length: 6 }, (_, i) => calendarDays.slice(i * 7, i * 7 + 7));
@@ -274,121 +299,26 @@ useEffect(() => {
     client_key: item.id || `${item.job_number}-${selectedDate}-${index}`,
   }));
 
-  editorLoadedRef.current = false;
   setEditItems(hydrated);
   setJobQuery("");
   setJobSuggestions([]);
-  setHighlightedJobKey(null);
-  setDraggedJobKey(null);
-  setDragOverJobKey(null);
-  setMoveDatePickerKey(null);
+  setJobActiveIdx(-1);
+ setHighlightedJobKey(null);
+setDraggedJobKey(null);
+setDragOverJobKey(null);
+setMoveDatePickerKey(null);
+setMoveDateDrafts({});
 }, [selectedDate]);
 
 useEffect(() => {
-  if (!editorModalOpen || !selectedDate) return;
-
-  if (!editorLoadedRef.current) {
-    editorLoadedRef.current = true;
-    return;
-  }
-
-  if (autosaveTimerRef.current) {
-    clearTimeout(autosaveTimerRef.current);
-  }
-
-  autosaveTimerRef.current = setTimeout(async () => {
-    try {
-      setError("");
-
-      if (selectedDate === UNSCHEDULED_KEY) {
-        const { error: deleteError } = await supabase
-          .from("job_planning_unscheduled")
-          .delete()
-          .gt("id", 0);
-
-        if (deleteError) throw deleteError;
-
-        if (editItems.length > 0) {
-          const payload = editItems.map((item, index) => ({
-            job_number: String(item.job_number || "").trim(),
-            suburb: String(item.suburb || "").trim(),
-            notes: String(item.notes || "").trim(),
-            colour: String(item.colour || "").trim(),
-            sort_order: index,
-            created_by: user?.id || null,
-            updated_by: user?.id || null,
-            updated_at: new Date().toISOString(),
-          }));
-
-          const { data, error } = await supabase
-            .from("job_planning_unscheduled")
-            .insert(payload)
-            .select()
-            .order("sort_order", { ascending: true });
-
-          if (error) throw error;
-
-        const rows = data || [];
-setUnscheduledItems(rows);
-        } else {
-          setUnscheduledItems([]);
-        }
-      } else {
-        const { error: deleteError } = await supabase
-          .from("job_planning_entries")
-          .delete()
-          .eq("date", selectedDate);
-
-        if (deleteError) throw deleteError;
-
-        if (editItems.length > 0) {
-          const payload = editItems.map((item, index) => ({
-            date: selectedDate,
-            job_number: String(item.job_number || "").trim(),
-            suburb: String(item.suburb || "").trim(),
-            notes: String(item.notes || "").trim(),
-            colour: String(item.colour || "").trim(),
-            sort_order: index,
-            created_by: user?.id || null,
-            updated_by: user?.id || null,
-            updated_at: new Date().toISOString(),
-          }));
-
-          const { data, error } = await supabase
-            .from("job_planning_entries")
-            .insert(payload)
-            .select()
-            .order("sort_order", { ascending: true });
-
-          if (error) throw error;
-
-     const rows = data || [];
-setPlansByDate((prev) => ({
-  ...prev,
-  [selectedDate]: rows,
-}));
-        } else {
-          setPlansByDate((prev) => {
-            const next = { ...prev };
-            delete next[selectedDate];
-            return next;
-          });
-        }
-      }
-    } catch (err) {
-      console.error("Autosave failed:", err);
-      const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
-      setError(`Could not autosave changes. (${msg})`);
-    }
-  }, 1200);
-
   return () => {
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
     }
+    stopDragAutoScroll();
   };
-}, [editItems, editorModalOpen, selectedDate, user?.id]);
-
+}, []);
   // ---------- Month nav ----------
   const handlePrevMonth = () => {
     setCurrentMonth((prev) => addMonths(prev, -1));
@@ -430,12 +360,14 @@ const closeEditorModal = () => {
   setEditorModalOpen(false);
   setSelectedDate(null);
   setMoveDatePickerKey(null);
+  setMoveDateDrafts({});
 };
 
 const openAddModal = (targetKey) => {
   setModalTarget(targetKey);
   setJobQuery("");
   setJobSuggestions([]);
+  setJobActiveIdx(-1);
   setNewJobColour("");
   setNewJobNotes("");
   setSelectedJobSuggestion(null);
@@ -445,6 +377,7 @@ const closeAddModal = () => {
   setModalTarget(null);
   setJobQuery("");
   setJobSuggestions([]);
+  setJobActiveIdx(-1);
   setNewJobColour("");
   setNewJobNotes("");
   setSelectedJobSuggestion(null);
@@ -455,54 +388,324 @@ const cancelAutosave = () => {
     clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = null;
   }
-  editorLoadedRef.current = false;
 };
-  // ---------- Job search ----------
-  useEffect(() => {
-    let cancelled = false;
-    if (!isAppVisible) return;
 
-    if (!jobQuery || Number.isNaN(Number(jobQuery))) {
-      setJobSuggestions([]);
+const showToast = (message) => {
+  setToast(message);
+
+  if (showToast._timer) {
+    window.clearTimeout(showToast._timer);
+  }
+
+  showToast._timer = window.setTimeout(() => {
+    setToast("");
+  }, 2200);
+};
+
+const stopDragAutoScroll = () => {
+  dragAutoScrollDirectionRef.current = { x: 0, y: 0 };
+
+  if (dragAutoScrollFrameRef.current) {
+    cancelAnimationFrame(dragAutoScrollFrameRef.current);
+    dragAutoScrollFrameRef.current = null;
+  }
+};
+
+const startDragAutoScroll = (direction) => {
+  const nextDirection = {
+    x: direction?.x || 0,
+    y: direction?.y || 0,
+  };
+
+  if (!nextDirection.x && !nextDirection.y) {
+    stopDragAutoScroll();
+    return;
+  }
+
+  dragAutoScrollDirectionRef.current = nextDirection;
+
+  if (dragAutoScrollFrameRef.current) return;
+
+  const tick = () => {
+    const scroller = bottomScrollRef.current;
+    const activeDirection = dragAutoScrollDirectionRef.current;
+
+    if (!activeDirection || (!activeDirection.x && !activeDirection.y)) {
+      dragAutoScrollFrameRef.current = null;
       return;
     }
 
-    const t = setTimeout(async () => {
-      setJobLoading(true);
+    if (scroller && activeDirection.x) {
+      scroller.scrollLeft += activeDirection.x * 18;
+    }
 
-      try {
-        const q = jobQuery.trim();
+    if (activeDirection.y) {
+  const verticalScroller = verticalScrollRef.current;
+  if (verticalScroller) {
+    verticalScroller.scrollTop += activeDirection.y * 14;
+  } else {
+    window.scrollBy(0, activeDirection.y * 14);
+  }
+}
 
-        const { data, error } = await supabase.rpc("search_jobs", {
-          p_q: q,
-          p_limit: 10,
-        });
+    dragAutoScrollFrameRef.current = requestAnimationFrame(tick);
+  };
 
-        if (error) throw error;
+  dragAutoScrollFrameRef.current = requestAnimationFrame(tick);
+};
 
-        if (!cancelled) {
-          setJobSuggestions(
-            (data || []).map((r) => ({
-              job_number: String(r.job_number),
-              full_address: r.full_address || "",
-            }))
-          );
-        }
-      } catch (err) {
-        console.error("Job autocomplete failed:", err);
-        if (!cancelled) setJobSuggestions([]);
-      } finally {
-        if (!cancelled) setJobLoading(false);
-      }
-    }, 250);
+const handleCalendarDragAutoScroll = (event) => {
+  const horizontalScroller = bottomScrollRef.current;
+  const verticalScroller = verticalScrollRef.current;
+  if (!horizontalScroller) return;
 
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [jobQuery, isAppVisible]);
+  const hRect = horizontalScroller.getBoundingClientRect();
+  const vRect = verticalScroller
+    ? verticalScroller.getBoundingClientRect()
+    : {
+        top: 0,
+        bottom: window.innerHeight,
+      };
+
+  const edgeThresholdX = 80;
+  const edgeThresholdY = 90;
+
+  const x = event.clientX;
+  const y = event.clientY;
+
+  let dx = 0;
+  let dy = 0;
+
+  if (x < hRect.left + edgeThresholdX) {
+    dx = -1;
+  } else if (x > hRect.right - edgeThresholdX) {
+    dx = 1;
+  }
+
+  if (y < vRect.top + edgeThresholdY) {
+    dy = -1;
+  } else if (y > vRect.bottom - edgeThresholdY) {
+    dy = 1;
+  }
+
+  if (!dx && !dy) {
+    stopDragAutoScroll();
+  } else {
+    startDragAutoScroll({ x: dx, y: dy });
+  }
+};
+
+function safeText(v, fallback = "—") {
+  if (v == null) return fallback;
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  return fallback;
+}
+
+function addressSummaryFromRow(r) {
+  const a =
+    (r?.full_address || "").trim() ||
+    [r?.street_number, r?.street_name, r?.suburb].filter(Boolean).join(" ").trim() ||
+    (r?.suburb || "").trim() ||
+    "—";
+  return a;
+}
+
+function jobLotPlanText(row) {
+  const lot = (row?.lot_number || "").toString().trim();
+  const plan = (row?.plan_number || "").toString().trim();
+
+  if (lot && plan) return `(Lot ${lot} on ${plan})`;
+  if (lot) return `(Lot ${lot})`;
+  if (plan) return `(Plan ${plan})`;
+  return "";
+}
+
+function jobClientText(row) {
+  const company = String(row?.client_company || "").trim();
+  const first = String(row?.client_first_name || "").trim();
+  const surname = String(row?.client_surname || "").trim();
+  const person = [first, surname].filter(Boolean).join(" ").trim();
+
+  if (company && person) return `${company} · ${person}`;
+  if (company) return company;
+  if (person) return person;
+  return "";
+}
+
+function getJobBadge(jobNumber) {
+  const s = String(jobNumber ?? "").trim();
+  if (!s) return "#";
+  return s.length <= 3 ? s : s.slice(-4);
+}
+
+  // ---------- Job search ----------
+const runJobPlanningGlobalSuggest = async (query) => {
+const rawQ = String(query || "").trim();
+const q = rawQ.replace(/^#/, "");
+const lowerQ = q.toLowerCase();
+const isNotesShortcut = rawQ === "!!!";
+
+if (!rawQ) {
+  setJobSuggestions([]);
+  return [];
+}
+
+// Manual Notes option only when typing !!!
+if (isNotesShortcut) {
+  setJobSuggestions([NOTES_JOB_OPTION]);
+  return [NOTES_JOB_OPTION];
+}
+
+  setJobLoading(true);
+
+  try {
+    const isNumeric = /^\d+$/.test(q);
+
+    let queryBuilder = supabase
+      .from("jobs")
+      .select(`
+        id,
+        job_number,
+        full_address,
+        street_number,
+        street_name,
+        suburb,
+        client_company,
+        client_first_name,
+        client_surname,
+        lot_number,
+        plan_number,
+        job_type_legacy,
+        assigned_to
+      `)
+      .order("job_number", { ascending: false })
+      .limit(20);
+
+    if (isNumeric) {
+  const like = `%${q}%`;
+
+  queryBuilder = queryBuilder.or(
+    [
+      `job_number_text.like.${q}%`,
+      `street_number.ilike.${like}`,
+      `full_address.ilike.${like}`,
+      `suburb.ilike.${like}`,
+      `lot_number.ilike.${like}`,
+      `plan_number.ilike.${like}`,
+      `notes.ilike.${like}`,
+      `client_company.ilike.${like}`,
+    ].join(",")
+  );
+} else if (q.length <= 2) {
+  const like = `%${q}%`;
+
+  queryBuilder = queryBuilder.or(
+    [
+      `full_address.ilike.${like}`,
+      `suburb.ilike.${like}`,
+      `lot_number.ilike.${like}`,
+      `plan_number.ilike.${like}`,
+      `notes.ilike.${like}`,
+      `client_company.ilike.${like}`,
+      `client_first_name.ilike.${like}`,
+      `client_surname.ilike.${like}`,
+      `job_type_legacy.ilike.${like}`,
+    ].join(",")
+  );
+} else {
+  const ts = q
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => `${w}:*`)
+    .join(" & ");
+
+  queryBuilder = queryBuilder.textSearch("search_tsv", ts, { type: "tsquery" });
+}
+
+    const { data, error } = await queryBuilder;
+    if (error) throw error;
+
+const results = (data || []).map((r) => ({
+  id: r.id,
+  job_number: String(r.job_number),
+  full_address: r.full_address || "",
+  suburb: r.suburb || "",
+  job_type_legacy: r.job_type_legacy || "",
+  lot_number: r.lot_number || "",
+  plan_number: r.plan_number || "",
+  client_company: r.client_company || "",
+  client_first_name: r.client_first_name || "",
+  client_surname: r.client_surname || "",
+  address: addressSummaryFromRow(r),
+}));
+
+const orderedResults = isNumeric
+  ? [...results].sort((a, b) => {
+      const aJob = String(a.job_number || "").trim();
+      const bJob = String(b.job_number || "").trim();
+
+      const aExact = aJob === q ? 1 : 0;
+      const bExact = bJob === q ? 1 : 0;
+      if (aExact !== bExact) return bExact - aExact;
+
+      const aStarts = aJob.startsWith(q) ? 1 : 0;
+      const bStarts = bJob.startsWith(q) ? 1 : 0;
+      if (aStarts !== bStarts) return bStarts - aStarts;
+
+      return Number(bJob) - Number(aJob);
+    })
+  : results;
+
+setJobSuggestions(orderedResults);
+return orderedResults;
+  } catch (err) {
+    console.error("Job planning global search failed:", err);
+    setJobSuggestions([]);
+    return [];
+  } finally {
+    setJobLoading(false);
+  }
+};
+
+useEffect(() => {
+  if (!isAppVisible) return;
+
+  if (jobSearchDebounceRef.current) {
+    clearTimeout(jobSearchDebounceRef.current);
+  }
+
+  const q = String(jobQuery || "").trim();
+
+  if (!q) {
+    setJobSuggestions([]);
+    setJobActiveIdx(-1);
+    return;
+  }
+
+  jobSearchDebounceRef.current = setTimeout(() => {
+    void runJobPlanningGlobalSuggest(jobQuery);
+  }, 180);
+
+  return () => {
+    if (jobSearchDebounceRef.current) {
+      clearTimeout(jobSearchDebounceRef.current);
+    }
+  };
+}, [jobQuery, isAppVisible]);
+
+useEffect(() => {
+  setJobActiveIdx(-1);
+}, [jobQuery]);
+
+useEffect(() => {
+  setJobActiveIdx((i) => Math.min(i, (jobSuggestions?.length || 0) - 1));
+}, [jobSuggestions]);
 
   const resolveSuburbForJob = async (job) => {
+    if (job?.isNotesOnly || String(job?.job_number || "").trim().toLowerCase() === "notes") {
+  return "Notes Only";
+}
     // First try the address already returned by search_jobs
     const fromSearch = extractSuburbFromAddress(job.full_address);
     if (fromSearch) return fromSearch;
@@ -530,7 +733,7 @@ const cancelAutosave = () => {
   };
 
 const addPlannedJob = async (job) => {
-  const jobNumber = String(job.job_number);
+  const jobNumber = String(job.job_number || "").trim();
   const targetKey = modalTarget ?? selectedDate;
 
   if (!targetKey) return;
@@ -540,13 +743,16 @@ cancelAutosave();
       ? unscheduledItems
       : (plansByDate[targetKey] || []);
 
-  if (targetItems.some((item) => String(item.job_number) === jobNumber)) {
-   setJobQuery("");
-setJobSuggestions([]);
-setSelectedJobSuggestion(null);
-closeAddModal();
-    return;
-  }
+const isNotesOnly = job?.isNotesOnly || jobNumber.toLowerCase() === "notes";
+
+if (!isNotesOnly && targetItems.some((item) => String(item.job_number) === jobNumber)) {
+  setJobQuery("");
+  setJobSuggestions([]);
+  setJobActiveIdx(-1);
+  setSelectedJobSuggestion(null);
+  closeAddModal();
+  return;
+}
 
   try {
     setSaving(true);
@@ -638,9 +844,11 @@ closeAddModal();
       setHighlightedJobKey(null);
     }, 1500);
 
-    setJobQuery("");
-    setJobSuggestions([]);
-    closeAddModal();
+   setJobQuery("");
+setJobSuggestions([]);
+setJobActiveIdx(-1);
+setSelectedJobSuggestion(null);
+closeAddModal();
   } catch (err) {
     console.error("Error adding planned job:", err);
     const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
@@ -650,15 +858,53 @@ closeAddModal();
   }
 };
 
- const handleJobKeyDown = (e) => {
+const handleJobKeyDown = async (e) => {
+  const hasList = Array.isArray(jobSuggestions) && jobSuggestions.length > 0;
+
+  if (e.key === "ArrowDown") {
+    if (!hasList) return;
+    e.preventDefault();
+    setJobActiveIdx((i) => (i < jobSuggestions.length - 1 ? i + 1 : 0));
+    return;
+  }
+
+  if (e.key === "ArrowUp") {
+    if (!hasList) return;
+    e.preventDefault();
+    setJobActiveIdx((i) => (i > 0 ? i - 1 : jobSuggestions.length - 1));
+    return;
+  }
+
   if (e.key === "Enter") {
     e.preventDefault();
-    if (jobSuggestions.length > 0) {
-      const picked = jobSuggestions[0];
+
+    if (hasList) {
+      const picked =
+        jobActiveIdx >= 0 ? jobSuggestions[jobActiveIdx] : jobSuggestions[0];
+
+      if (picked) {
+        setSelectedJobSuggestion(picked);
+        setJobQuery(String(picked.job_number));
+        setJobSuggestions([]);
+        setJobActiveIdx(-1);
+      }
+      return;
+    }
+
+    const results = await runJobPlanningGlobalSuggest(jobQuery);
+    if (results.length === 1) {
+      const picked = results[0];
       setSelectedJobSuggestion(picked);
       setJobQuery(String(picked.job_number));
       setJobSuggestions([]);
+      setJobActiveIdx(-1);
     }
+    return;
+  }
+
+  if (e.key === "Escape") {
+    setJobSuggestions([]);
+    setJobActiveIdx(-1);
   }
 };
 
@@ -682,18 +928,26 @@ const removeEditItem = async (item) => {
     setSaving(true);
     setError("");
 
+    const itemId = item?.id ?? null;
     const jobNumber = String(item.job_number || "").trim();
 
     if (selectedDate === UNSCHEDULED_KEY) {
-      const { error: deleteError } = await supabase
-        .from("job_planning_unscheduled")
-        .delete()
-        .eq("job_number", jobNumber);
+      let deleteQuery = supabase.from("job_planning_unscheduled").delete();
 
+      if (itemId != null) {
+        deleteQuery = deleteQuery.eq("id", itemId);
+      } else {
+        deleteQuery = deleteQuery.eq("job_number", jobNumber);
+      }
+
+      const { error: deleteError } = await deleteQuery;
       if (deleteError) throw deleteError;
 
       const nextUnscheduled = unscheduledItems
-        .filter((x) => String(x.job_number || "").trim() !== jobNumber)
+        .filter((x) => {
+          if (itemId != null && x?.id != null) return x.id !== itemId;
+          return String(x.job_number || "").trim() !== jobNumber;
+        })
         .map((x, index) => ({
           ...x,
           sort_order: index,
@@ -709,16 +963,25 @@ const removeEditItem = async (item) => {
     } else {
       const sourceDate = selectedDate;
 
-      const { error: deleteError } = await supabase
+      let deleteQuery = supabase
         .from("job_planning_entries")
         .delete()
-        .eq("date", sourceDate)
-        .eq("job_number", jobNumber);
+        .eq("date", sourceDate);
 
+      if (itemId != null) {
+        deleteQuery = deleteQuery.eq("id", itemId);
+      } else {
+        deleteQuery = deleteQuery.eq("job_number", jobNumber);
+      }
+
+      const { error: deleteError } = await deleteQuery;
       if (deleteError) throw deleteError;
 
       const nextDayItems = (plansByDate[sourceDate] || [])
-        .filter((x) => String(x.job_number || "").trim() !== jobNumber)
+        .filter((x) => {
+          if (itemId != null && x?.id != null) return x.id !== itemId;
+          return String(x.job_number || "").trim() !== jobNumber;
+        })
         .map((x, index) => ({
           ...x,
           sort_order: index,
@@ -741,6 +1004,7 @@ const removeEditItem = async (item) => {
         }))
       );
     }
+    showToast(`Removed job ${item.job_number}.`);
   } catch (err) {
     console.error("Error removing planned item:", err);
     const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
@@ -832,6 +1096,7 @@ const moveItemToUnscheduled = async (item) => {
     }));
 
     setUnscheduledItems(nextUnscheduled);
+    showToast(`Moved job ${item.job_number} to unscheduled.`);
   } catch (err) {
     console.error("Error moving item to unscheduled:", err);
     const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
@@ -850,6 +1115,7 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
     if (selectedDate !== UNSCHEDULED_KEY && selectedDate === targetDateISO) return;
 
     const sourceKey = selectedDate;
+    const sourceItemId = item?.id ?? null;
     const sourceJobNumber = String(item.job_number || "").trim();
     const keepModalOpen = sourceKey === UNSCHEDULED_KEY;
 
@@ -858,19 +1124,33 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
 
     // 1) Remove from source table
     if (sourceKey === UNSCHEDULED_KEY) {
-      const { error: deleteError } = await supabase
-        .from("job_planning_unscheduled")
-        .delete()
-        .eq("job_number", sourceJobNumber);
+      let deleteQuery = supabase.from("job_planning_unscheduled").delete();
 
+      if (sourceItemId != null) {
+        deleteQuery = deleteQuery.eq("id", sourceItemId);
+      } else {
+        deleteQuery = deleteQuery.eq("job_number", sourceJobNumber);
+      }
+
+      const { error: deleteError } = await deleteQuery;
       if (deleteError) throw deleteError;
     } else {
-      const { error: deleteError } = await supabase
+      let deleteQuery = supabase
         .from("job_planning_entries")
         .delete()
-        .eq("date", sourceKey)
-        .eq("job_number", sourceJobNumber);
+        .eq("date", sourceKey);
 
+      if (sourceItemId != null) {
+        deleteQuery = deleteQuery.eq("id", sourceItemId);
+      } else {
+        deleteQuery = deleteQuery
+          .eq("job_number", sourceJobNumber)
+          .eq("notes", String(item.notes || "").trim())
+          .eq("suburb", String(item.suburb || "").trim())
+          .eq("colour", String(item.colour || "").trim());
+      }
+
+      const { error: deleteError } = await deleteQuery;
       if (deleteError) throw deleteError;
     }
 
@@ -900,7 +1180,10 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
     // 3) Update local state
     if (sourceKey === UNSCHEDULED_KEY) {
       const nextUnscheduled = unscheduledItems
-        .filter((x) => String(x.job_number) !== sourceJobNumber)
+        .filter((x) => {
+          if (sourceItemId != null && x?.id != null) return x.id !== sourceItemId;
+          return String(x.job_number || "").trim() !== sourceJobNumber;
+        })
         .map((x, index) => ({
           ...x,
           sort_order: index,
@@ -929,7 +1212,10 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
       const sourceDayItems = plansByDate[sourceKey] || [];
 
       const nextSourceDayItems = sourceDayItems
-        .filter((x) => String(x.job_number) !== sourceJobNumber)
+        .filter((x) => {
+          if (sourceItemId != null && x?.id != null) return x.id !== sourceItemId;
+          return String(x.job_number || "").trim() !== sourceJobNumber;
+        })
         .map((x, index) => ({
           ...x,
           sort_order: index,
@@ -962,8 +1248,12 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
     }
 
     setMoveDatePickerKey(null);
+    setMoveDateDrafts((prev) => {
+      const next = { ...prev };
+      delete next[item.client_key];
+      return next;
+    });
 
-    // 4) Keep unscheduled modal open, but close scheduled-day modal if desired
     if (!keepModalOpen) {
       setEditorModalOpen(false);
       setSelectedDate(null);
@@ -977,20 +1267,292 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
   }
 };
 
-const triggerMoveDatePicker = (clientKey) => {
-  const input = document.getElementById(`move-date-input-${clientKey}`);
-  if (!input) return;
+const moveCalendarItemToDay = async (sourceDateISO, item, targetDateISO) => {
+  cancelAutosave();
 
-  setMoveDatePickerKey(clientKey);
+  try {
+    if (!sourceDateISO || !targetDateISO || !item) return;
+    if (sourceDateISO === targetDateISO) return;
 
-  if (typeof input.showPicker === "function") {
-    input.showPicker();
-  } else {
-    input.focus();
-    input.click();
+    const sourceItemId = item?.id ?? null;
+    const sourceJobNumber = String(item.job_number || "").trim();
+
+    setSaving(true);
+    setError("");
+
+    let deleteQuery = supabase
+      .from("job_planning_entries")
+      .delete()
+      .eq("date", sourceDateISO);
+
+    if (sourceItemId != null) {
+      deleteQuery = deleteQuery.eq("id", sourceItemId);
+    } else {
+      deleteQuery = deleteQuery
+        .eq("job_number", sourceJobNumber)
+        .eq("notes", String(item.notes || "").trim())
+        .eq("suburb", String(item.suburb || "").trim())
+        .eq("colour", String(item.colour || "").trim());
+    }
+
+    const { error: deleteError } = await deleteQuery;
+    if (deleteError) throw deleteError;
+
+    const currentTargetItems = plansByDate[targetDateISO] || [];
+
+    const insertPayload = {
+      date: targetDateISO,
+      job_number: sourceJobNumber,
+      suburb: String(item.suburb || "").trim(),
+      notes: String(item.notes || "").trim(),
+      colour: String(item.colour || "").trim(),
+      sort_order: currentTargetItems.length,
+      created_by: user?.id || null,
+      updated_by: user?.id || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: insertedRow, error: insertError } = await supabase
+      .from("job_planning_entries")
+      .insert(insertPayload)
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+
+    setPlansByDate((prev) => {
+      const next = { ...prev };
+
+      const sourceItems = (prev[sourceDateISO] || [])
+        .filter((x) => {
+          if (sourceItemId != null && x?.id != null) return x.id !== sourceItemId;
+          return String(x.job_number || "").trim() !== sourceJobNumber;
+        })
+        .map((x, index) => ({
+          ...x,
+          sort_order: index,
+        }));
+
+      const targetItems = [...(prev[targetDateISO] || []), insertedRow].map((x, index) => ({
+        ...x,
+        sort_order: index,
+      }));
+
+      if (sourceItems.length > 0) {
+        next[sourceDateISO] = sourceItems;
+      } else {
+        delete next[sourceDateISO];
+      }
+
+      next[targetDateISO] = targetItems;
+
+      return next;
+    });
+
+    showToast(`Moved job ${item.job_number} to ${longDateLabel(targetDateISO)}.`);
+  } catch (err) {
+    console.error("Error moving calendar item to another day:", err);
+    const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+    setError(`Could not move job to another day. (${msg})`);
+  } finally {
+    setSaving(false);
+    setCalendarDraggedKey(null);
+setCalendarDragOverKey(null);
+stopDragAutoScroll();
   }
 };
 
+const moveUnscheduledItemToDay = async (item, targetDateISO) => {
+  cancelAutosave();
+
+  try {
+    if (!targetDateISO || !item) return;
+
+    const sourceItemId = item?.id ?? null;
+    const sourceJobNumber = String(item.job_number || "").trim();
+
+    setSaving(true);
+    setError("");
+
+    // 1) Remove from unscheduled
+    let deleteQuery = supabase.from("job_planning_unscheduled").delete();
+
+    if (sourceItemId != null) {
+      deleteQuery = deleteQuery.eq("id", sourceItemId);
+    } else {
+      deleteQuery = deleteQuery.eq("job_number", sourceJobNumber);
+    }
+
+    const { error: deleteError } = await deleteQuery;
+    if (deleteError) throw deleteError;
+
+    // 2) Insert into target day
+    const currentTargetItems = plansByDate[targetDateISO] || [];
+
+    const insertPayload = {
+      date: targetDateISO,
+      job_number: sourceJobNumber,
+      suburb: String(item.suburb || "").trim(),
+      notes: String(item.notes || "").trim(),
+      colour: String(item.colour || "").trim(),
+      sort_order: currentTargetItems.length,
+      created_by: user?.id || null,
+      updated_by: user?.id || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: insertedRow, error: insertError } = await supabase
+      .from("job_planning_entries")
+      .insert(insertPayload)
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+
+ let nextUnscheduledRows = [];
+
+setUnscheduledItems((prev) => {
+  nextUnscheduledRows = prev
+    .filter((x) => {
+      if (sourceItemId != null && x?.id != null) return x.id !== sourceItemId;
+      return String(x.job_number || "").trim() !== sourceJobNumber;
+    })
+    .map((x, index) => ({
+      ...x,
+      sort_order: index,
+    }));
+
+  return nextUnscheduledRows;
+});
+
+setPlansByDate((prev) => {
+  const existingTarget = prev[targetDateISO] || [];
+  return {
+    ...prev,
+    [targetDateISO]: [...existingTarget, insertedRow].map((x, index) => ({
+      ...x,
+      sort_order: index,
+    })),
+  };
+});
+
+if (selectedDate === UNSCHEDULED_KEY) {
+  setEditItems(
+    nextUnscheduledRows.map((x, index) => ({
+      ...x,
+      client_key: x.id || `${x.job_number}-${UNSCHEDULED_KEY}-${index}`,
+    }))
+  );
+}
+
+    showToast(`Moved job ${item.job_number} to ${longDateLabel(targetDateISO)}.`);
+  } catch (err) {
+    console.error("Error moving unscheduled item to day:", err);
+    const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+    setError(`Could not move unscheduled job to day. (${msg})`);
+  } finally {
+    setSaving(false);
+    setCalendarDraggedKey(null);
+setCalendarDragOverKey(null);
+stopDragAutoScroll();
+  }
+};
+
+const moveCalendarItemToUnscheduled = async (sourceDateISO, item) => {
+  cancelAutosave();
+
+  try {
+    if (!sourceDateISO || sourceDateISO === UNSCHEDULED_KEY || !item) return;
+
+    const sourceItemId = item?.id ?? null;
+    const sourceJobNumber = String(item.job_number || "").trim();
+
+    setSaving(true);
+    setError("");
+
+    let deleteQuery = supabase
+      .from("job_planning_entries")
+      .delete()
+      .eq("date", sourceDateISO);
+
+    if (sourceItemId != null) {
+      deleteQuery = deleteQuery.eq("id", sourceItemId);
+    } else {
+      deleteQuery = deleteQuery
+        .eq("job_number", sourceJobNumber)
+        .eq("notes", String(item.notes || "").trim())
+        .eq("suburb", String(item.suburb || "").trim())
+        .eq("colour", String(item.colour || "").trim());
+    }
+
+    const { error: deleteError } = await deleteQuery;
+    if (deleteError) throw deleteError;
+
+    const insertPayload = {
+      job_number: sourceJobNumber,
+      suburb: String(item.suburb || "").trim(),
+      notes: String(item.notes || "").trim(),
+      colour: String(item.colour || "").trim(),
+      sort_order: unscheduledItems.length,
+      created_by: user?.id || null,
+      updated_by: user?.id || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: insertedRow, error: insertError } = await supabase
+      .from("job_planning_unscheduled")
+      .insert(insertPayload)
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+
+    setPlansByDate((prev) => {
+      const next = { ...prev };
+
+      const nextDayItems = (prev[sourceDateISO] || [])
+        .filter((x) => {
+          if (sourceItemId != null && x?.id != null) return x.id !== sourceItemId;
+          return (
+            String(x.job_number || "").trim() !== sourceJobNumber ||
+            String(x.notes || "").trim() !== String(item.notes || "").trim() ||
+            String(x.suburb || "").trim() !== String(item.suburb || "").trim() ||
+            String(x.colour || "").trim() !== String(item.colour || "").trim()
+          );
+        })
+        .map((x, index) => ({
+          ...x,
+          sort_order: index,
+        }));
+
+      if (nextDayItems.length > 0) {
+        next[sourceDateISO] = nextDayItems;
+      } else {
+        delete next[sourceDateISO];
+      }
+
+      return next;
+    });
+
+    setUnscheduledItems((prev) =>
+      [...prev, insertedRow].map((x, index) => ({
+        ...x,
+        sort_order: index,
+      }))
+    );
+
+    showToast(`Moved job ${item.job_number} to unscheduled.`);
+  } catch (err) {
+    console.error("Error moving calendar item to unscheduled:", err);
+    const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+    setError(`Could not move job to unscheduled. (${msg})`);
+  } finally {
+    setSaving(false);
+    setCalendarDraggedKey(null);
+setCalendarDragOverKey(null);
+stopDragAutoScroll();
+  }
+};
   const moveEditItem = (fromKey, toKey) => {
   if (!fromKey || !toKey || fromKey === toKey) return;
 
@@ -1027,6 +1589,18 @@ const handleDragEnd = () => {
 
 const makeCalendarDragKey = (bucketKey, item, index) =>
   `${bucketKey}::${item.id ?? item.client_key ?? item.job_number ?? index}`;
+
+const parseCalendarDragKey = (dragKey) => {
+  if (!dragKey) return null;
+
+  const parts = String(dragKey).split("::");
+  if (parts.length < 2) return null;
+
+  return {
+    bucketKey: parts[0],
+    itemKey: parts.slice(1).join("::"),
+  };
+};
 
 const persistCalendarOrder = async (bucketKey, rows) => {
   cancelAutosave();
@@ -1206,7 +1780,7 @@ const handleSave = async () => {
   setSaving(true);
   setError("");
 
- if (autosaveTimerRef.current) {
+  if (autosaveTimerRef.current) {
     clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = null;
   }
@@ -1246,6 +1820,7 @@ const handleSave = async () => {
       }
 
       setUnscheduledItems(insertedRows);
+      showToast("Jobs saved.");
     } else {
       const { error: deleteError } = await supabase
         .from("job_planning_entries")
@@ -1288,6 +1863,8 @@ const handleSave = async () => {
         }
         return next;
       });
+
+      showToast("Day saved.");
     }
   } catch (err) {
     console.error("Error saving plan:", err);
@@ -1295,6 +1872,7 @@ const handleSave = async () => {
     setError(`Could not save this plan. (${msg})`);
 } finally {
   setSaving(false);
+  setMoveDatePickerKey(null);
   setEditorModalOpen(false);
   setSelectedDate(null);
 }
@@ -1337,9 +1915,17 @@ editorLoadedRef.current = false;
       });
     }
 
-    setEditItems([]);
+       setEditItems([]);
     setJobQuery("");
     setJobSuggestions([]);
+    setJobActiveIdx(-1);
+setSelectedJobSuggestion(null);
+
+    showToast(
+      selectedDate === UNSCHEDULED_KEY
+        ? "All unscheduled jobs cleared."
+        : "All jobs cleared for this day."
+    );
   } catch (err) {
     console.error("Error clearing plan:", err);
     const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
@@ -1369,6 +1955,36 @@ editorLoadedRef.current = false;
 
     return lines.join("\n");
   };
+
+const getDragItemLabel = (item) => {
+  const jobNo = String(item?.job_number || "").trim();
+  if (!jobNo) return "this job";
+  if (jobNo.toLowerCase() === "notes") return "this note";
+  return `job ${jobNo}`;
+};
+
+const confirmCalendarMove = ({ item, fromKey, toKey }) => {
+  const label = getDragItemLabel(item);
+
+  if (!fromKey || !toKey || fromKey === toKey) return true;
+
+  if (toKey === UNSCHEDULED_KEY) {
+    const fromLabel =
+      fromKey === UNSCHEDULED_KEY ? "Unscheduled" : longDateLabel(fromKey);
+
+    return window.confirm(`Move ${label} from ${fromLabel} to Unscheduled?`);
+  }
+
+  if (fromKey === UNSCHEDULED_KEY) {
+    return window.confirm(
+      `Move ${label} from Unscheduled to ${longDateLabel(toKey)}?`
+    );
+  }
+
+  return window.confirm(
+    `Move ${label} from ${longDateLabel(fromKey)} to ${longDateLabel(toKey)}?`
+  );
+};
 
  // ---------- Access guard ----------
   if (!isAdmin) {
@@ -1446,13 +2062,84 @@ editorLoadedRef.current = false;
           </div>
         )}
 
-<div className="job-planning-main-layout">
-  <div
-    className={
-      "job-planning-unscheduled-panel" +
-      (selectedDate === UNSCHEDULED_KEY ? " job-planning-selected-cell" : "")
+<div className="job-planning-vertical-scroll" ref={verticalScrollRef}>
+  <div className="job-planning-main-layout">
+ <div
+className={
+  "job-planning-unscheduled-panel" +
+  (selectedDate === UNSCHEDULED_KEY ? " job-planning-selected-cell" : "") +
+  (calendarDragOverKey === UNSCHEDULED_KEY ? " job-planning-drop-target" : "")
+}
+onDragEnter={(e) => {
+  e.preventDefault();
+  if (!calendarDraggedKey) return;
+  setCalendarDragOverKey(UNSCHEDULED_KEY);
+}}
+onDragOver={(e) => {
+  e.preventDefault();
+  if (!calendarDraggedKey) return;
+  setCalendarDragOverKey(UNSCHEDULED_KEY);
+  handleCalendarDragAutoScroll(e);
+}}
+onDragLeave={(e) => {
+  if (!e.currentTarget.contains(e.relatedTarget)) {
+    if (calendarDragOverKey === UNSCHEDULED_KEY) {
+      setCalendarDragOverKey(null);
     }
-  >
+    stopDragAutoScroll();
+  }
+}}
+onDrop={(e) => {
+  e.preventDefault();
+  setCalendarDragOverKey(null);
+  stopDragAutoScroll();
+
+  if (!calendarDraggedKey) return;
+
+  const parsed = parseCalendarDragKey(calendarDraggedKey);
+  if (!parsed) {
+    setCalendarDraggedKey(null);
+    return;
+  }
+
+  const sourceBucketKey = parsed.bucketKey;
+
+  if (sourceBucketKey === UNSCHEDULED_KEY) {
+    setCalendarDraggedKey(null);
+    return;
+  }
+
+  const sourceItems =
+    sourceBucketKey === UNSCHEDULED_KEY
+      ? unscheduledItems
+      : (plansByDate[sourceBucketKey] || []);
+
+const draggedItem = sourceItems.find(
+  (x, index) =>
+    makeCalendarDragKey(sourceBucketKey, x, index) === calendarDraggedKey
+);
+
+if (!draggedItem) {
+  setCalendarDraggedKey(null);
+  return;
+}
+
+const confirmed = confirmCalendarMove({
+  item: draggedItem,
+  fromKey: sourceBucketKey,
+  toKey: UNSCHEDULED_KEY,
+});
+
+if (!confirmed) {
+  setCalendarDraggedKey(null);
+  setCalendarDragOverKey(null);
+  stopDragAutoScroll();
+  return;
+}
+
+void moveCalendarItemToUnscheduled(sourceBucketKey, draggedItem);
+}}
+>
     <button
   type="button"
   className="job-planning-add-btn"
@@ -1497,18 +2184,36 @@ editorLoadedRef.current = false;
     e.stopPropagation();
     setCalendarDraggedKey(makeCalendarDragKey(UNSCHEDULED_KEY, item, index));
   }}
-  onDragOver={(e) => {
-    e.preventDefault();
-    e.stopPropagation();
-  }}
-  onDrop={(e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const targetKey = makeCalendarDragKey(UNSCHEDULED_KEY, item, index);
-    reorderCalendarItems(UNSCHEDULED_KEY, calendarDraggedKey, targetKey);
+onDragOver={(e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  handleCalendarDragAutoScroll(e);
+}}
+ onDrop={(e) => {
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (!calendarDraggedKey) return;
+
+  const parsed = parseCalendarDragKey(calendarDraggedKey);
+  if (!parsed) {
     setCalendarDraggedKey(null);
-  }}
-  onDragEnd={() => setCalendarDraggedKey(null)}
+    return;
+  }
+
+  if (parsed.bucketKey !== UNSCHEDULED_KEY) {
+    return;
+  }
+
+  const targetKey = makeCalendarDragKey(UNSCHEDULED_KEY, item, index);
+  reorderCalendarItems(UNSCHEDULED_KEY, calendarDraggedKey, targetKey);
+  setCalendarDraggedKey(null);
+}}
+ onDragEnd={() => {
+  setCalendarDraggedKey(null);
+  setCalendarDragOverKey(null);
+  stopDragAutoScroll();
+}}
 >
               <div className="job-planning-day-job-top">
                 <span className="job-planning-day-job-number">{item.job_number}</span>
@@ -1560,16 +2265,91 @@ editorLoadedRef.current = false;
 
                 return (
                   
-                  <td
-                    key={iso}
-                    className={
-                      "job-planning-day-cell" +
-                      (isToday ? " job-planning-today-cell" : "") +
-                      (isSelected ? " job-planning-selected-cell" : "") +
-                      (!inCurrentMonth ? " job-planning-outside-month" : "")
-                    }
-                    title={buildTooltip(iso, items)}
-                  >
+                 <td
+  key={iso}
+className={
+  "job-planning-day-cell" +
+  (isToday ? " job-planning-today-cell" : "") +
+  (isSelected ? " job-planning-selected-cell" : "") +
+  (!inCurrentMonth ? " job-planning-outside-month" : "") +
+  (calendarDragOverKey === iso ? " job-planning-drop-target" : "")
+}
+  title={buildTooltip(iso, items)}
+ onDragEnter={(e) => {
+  e.preventDefault();
+  if (!calendarDraggedKey) return;
+  setCalendarDragOverKey(iso);
+}}
+
+onDragOver={(e) => {
+  e.preventDefault();
+  if (!calendarDraggedKey) return;
+  setCalendarDragOverKey(iso);
+  handleCalendarDragAutoScroll(e);
+}}
+onDragLeave={(e) => {
+  if (!e.currentTarget.contains(e.relatedTarget)) {
+    if (calendarDragOverKey === iso) {
+      setCalendarDragOverKey(null);
+    }
+    stopDragAutoScroll();
+  }
+}}
+onDrop={(e) => {
+  e.preventDefault();
+  setCalendarDragOverKey(null);
+  stopDragAutoScroll();
+
+  if (!calendarDraggedKey) return;
+
+  const parsed = parseCalendarDragKey(calendarDraggedKey);
+  if (!parsed) {
+    setCalendarDraggedKey(null);
+    return;
+  }
+
+  const sourceBucketKey = parsed.bucketKey;
+
+  if (sourceBucketKey === iso) {
+    setCalendarDraggedKey(null);
+    return;
+  }
+
+  const sourceItems =
+    sourceBucketKey === UNSCHEDULED_KEY
+      ? unscheduledItems
+      : (plansByDate[sourceBucketKey] || []);
+
+const draggedItem = sourceItems.find(
+  (x, index) =>
+    makeCalendarDragKey(sourceBucketKey, x, index) === calendarDraggedKey
+);
+
+if (!draggedItem) {
+  setCalendarDraggedKey(null);
+  return;
+}
+
+const confirmed = confirmCalendarMove({
+  item: draggedItem,
+  fromKey: sourceBucketKey,
+  toKey: iso,
+});
+
+if (!confirmed) {
+  setCalendarDraggedKey(null);
+  setCalendarDragOverKey(null);
+  stopDragAutoScroll();
+  return;
+}
+
+if (sourceBucketKey === UNSCHEDULED_KEY) {
+  void moveUnscheduledItemToDay(draggedItem, iso);
+} else {
+  void moveCalendarItemToDay(sourceBucketKey, draggedItem, iso);
+}
+}}
+>
                     <button
   type="button"
   className="job-planning-add-btn"
@@ -1584,13 +2364,11 @@ editorLoadedRef.current = false;
                     <div className="job-planning-day-cell-inner">
                       <div className="job-planning-day-header">
                         <div className="job-planning-day-date-wrap">
-                          <div className="job-planning-day-number">{day.getDate()}</div>
-                          {!inCurrentMonth && (
-                            <div className="job-planning-day-mini-month">
-                              {day.toLocaleDateString("en-AU", { month: "short" })}
-                            </div>
-                          )}
-                        </div>
+  <div className="job-planning-day-number">{day.getDate()}</div>
+  <div className="job-planning-day-mini-month">
+    {day.toLocaleDateString("en-AU", { month: "short" })}
+  </div>
+</div>
 
                         {items.length > 0 && (
                           <div className="job-planning-day-count">
@@ -1619,18 +2397,37 @@ editorLoadedRef.current = false;
     e.stopPropagation();
     setCalendarDraggedKey(makeCalendarDragKey(iso, item, index));
   }}
-  onDragOver={(e) => {
-    e.preventDefault();
-    e.stopPropagation();
-  }}
-  onDrop={(e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const targetKey = makeCalendarDragKey(iso, item, index);
-    reorderCalendarItems(iso, calendarDraggedKey, targetKey);
+ onDragOver={(e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  handleCalendarDragAutoScroll(e);
+}}
+ onDrop={(e) => {
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (!calendarDraggedKey) return;
+
+  const parsed = parseCalendarDragKey(calendarDraggedKey);
+  if (!parsed) {
     setCalendarDraggedKey(null);
-  }}
-  onDragEnd={() => setCalendarDraggedKey(null)}
+    return;
+  }
+
+  // only reorder when dragging within the same bucket/day
+  if (parsed.bucketKey !== iso) {
+    return;
+  }
+
+  const targetKey = makeCalendarDragKey(iso, item, index);
+  reorderCalendarItems(iso, calendarDraggedKey, targetKey);
+  setCalendarDraggedKey(null);
+}}
+  onDragEnd={() => {
+  setCalendarDraggedKey(null);
+  setCalendarDragOverKey(null);
+  stopDragAutoScroll();
+}}
 >
                               <div className="job-planning-day-job-top">
                                 <span className="job-planning-day-job-number">
@@ -1660,12 +2457,22 @@ editorLoadedRef.current = false;
       </table>
     </div>
   </div>
+  </div>
 </div>
-
-        <p className="schedule-footer-note">
-          Logged in as <strong>{user?.email}</strong>. You have admin editing rights.
-        </p>
-      </div>
+</div>
+<div className="schedule-legend">
+  {JOB_PLANNING_LEGEND.map((item) => (
+    <div key={item.label} className="schedule-legend-item">
+      <span
+        className={
+          "schedule-legend-swatch job-planning-legend-swatch" +
+          (item.colour ? ` job-planning-day-job--${item.colour}` : "")
+        }
+      />
+      <span>{item.label}</span>
+    </div>
+  ))}
+</div>
 
    {editorModalOpen && selectedDate && (
   <div className="job-planning-modal-overlay">
@@ -1736,8 +2543,10 @@ editorLoadedRef.current = false;
   <div className="job-planning-edit-item-header-left">
     <div>
       <div className="job-planning-edit-item-title">
-        Job {item.job_number}
-      </div>
+  {String(item.job_number).toLowerCase() === "notes"
+    ? "Notes"
+    : `Job ${item.job_number}`}
+</div>
       <div className="job-planning-drag-hint">Use dots to drag</div>
     </div>
 
@@ -1790,59 +2599,109 @@ editorLoadedRef.current = false;
     </button>
   )}
 
-  <button
-    type="button"
-    className="btn-pill"
-    draggable={false}
-    onMouseDown={(e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    }}
-    onClick={(e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      triggerMoveDatePicker(item.client_key);
-    }}
-  >
-    Move to Date
-  </button>
 
-  <input
-  id={`move-date-input-${item.client_key}`}
-  type="date"
-  defaultValue={
-    selectedDate && selectedDate !== UNSCHEDULED_KEY ? selectedDate : todayISO
-  }
-  style={{
-    position: "absolute",
-    opacity: 0,
-    pointerEvents: "none",
-    width: 1,
-    height: 1,
+ <button
+  type="button"
+  className="btn-pill"
+  draggable={false}
+  onMouseDown={(e) => {
+    e.preventDefault();
+    e.stopPropagation();
   }}
-  onChange={async (e) => {
-    const picked = e.target.value;
-    if (!picked) return;
-    await moveItemToSelectedDay(item, picked);
-  }}
-/>
+  onClick={(e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    cancelAutosave();
 
-  <button
-    type="button"
-    className="btn-pill"
-    draggable={false}
-    onMouseDown={(e) => {
-      e.preventDefault();
-      e.stopPropagation();
+    setMoveDatePickerKey((current) =>
+      current === item.client_key ? null : item.client_key
+    );
+
+    setMoveDateDrafts((prev) => ({
+      ...prev,
+      [item.client_key]:
+        prev[item.client_key] ||
+        (selectedDate && selectedDate !== UNSCHEDULED_KEY ? selectedDate : todayISO),
+    }));
+  }}
+>
+  Move to Date
+</button>
+
+{moveDatePickerKey === item.client_key && (
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: "0.5rem",
+      marginTop: "0.35rem",
+      flexWrap: "wrap",
     }}
-    onClick={(e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      void removeEditItem(item);
-    }}
+    onMouseDown={(e) => e.stopPropagation()}
+    onClick={(e) => e.stopPropagation()}
   >
-    Remove
-  </button>
+    <input
+      type="date"
+      className="maps-search-input"
+      value={
+        moveDateDrafts[item.client_key] ||
+        (selectedDate && selectedDate !== UNSCHEDULED_KEY ? selectedDate : todayISO)
+      }
+      onChange={(e) => {
+        const picked = e.target.value;
+        setMoveDateDrafts((prev) => ({
+          ...prev,
+          [item.client_key]: picked,
+        }));
+      }}
+      style={{ minWidth: "160px" }}
+    />
+
+    <button
+      type="button"
+      className="btn-pill primary"
+      onClick={() => {
+        const picked = moveDateDrafts[item.client_key];
+        if (!picked) return;
+        void moveItemToSelectedDay(item, picked);
+      }}
+      disabled={!moveDateDrafts[item.client_key] || saving}
+    >
+      Move
+    </button>
+
+    <button
+      type="button"
+      className="btn-pill"
+      onClick={() => {
+        setMoveDatePickerKey(null);
+        setMoveDateDrafts((prev) => {
+          const next = { ...prev };
+          delete next[item.client_key];
+          return next;
+        });
+      }}
+      disabled={saving}
+    >
+      Cancel
+    </button>
+  </div>
+)}
+
+<button
+  type="button"
+  className="btn-pill danger"
+  onClick={() => {
+    const confirmDelete = window.confirm(
+      `Remove job ${item.job_number}?`
+    );
+    if (!confirmDelete) return;
+
+    removeEditItem(item);
+  }}
+>
+  Remove
+</button>
 </div>
   </div>
 </div>
@@ -1850,14 +2709,18 @@ editorLoadedRef.current = false;
                   <div className="schedule-editor-grid">
                     <div className="schedule-editor-row">
                       <label className="schedule-editor-label">Suburb</label>
- <input
+<input
   className="maps-search-input"
   type="text"
   value={item.suburb || ""}
   onChange={(e) =>
     updateEditItem(item.client_key, "suburb", e.target.value)
   }
-  placeholder="Auto-filled from job address"
+  placeholder={
+    String(item.job_number).toLowerCase() === "notes"
+      ? "Notes Only"
+      : "Auto-filled from job address"
+  }
 />
                     </div>
 
@@ -1889,13 +2752,21 @@ editorLoadedRef.current = false;
               {saving ? "Saving…" : "Save"}
             </button>
 
-           <button
+    <button
   type="button"
-  className="btn-pill"
-  onClick={handleClearDay}
-  disabled={saving}
+  className="btn-pill danger"
+  onClick={() => {
+    const confirmClear = window.confirm(
+      selectedDate === UNSCHEDULED_KEY
+        ? "Clear all unscheduled jobs?"
+        : "Clear all jobs for this day?"
+    );
+    if (!confirmClear) return;
+
+    handleClearDay();
+  }}
 >
-  {selectedDate === UNSCHEDULED_KEY ? "Clear Jobs" : "Clear day"}
+  {selectedDate === UNSCHEDULED_KEY ? "Clear Jobs" : "Clear Day"}
 </button>
 
            <button
@@ -1927,78 +2798,107 @@ editorLoadedRef.current = false;
       </p>
 
       <div className="schedule-editor-row">
-        <label className="schedule-editor-label">Job ref</label>
+        
+      <label className="schedule-editor-label">Job search</label>
 
-        <div style={{ position: "relative" }}>
-          <input
-            className="maps-search-input"
-            type="text"
-            value={jobQuery}
-            onChange={(e) => setJobQuery(e.target.value)}
-            onKeyDown={handleJobKeyDown}
-            placeholder="Type job number (exact)…"
-            autoFocus
-          />
+<div style={{ position: "relative" }}>
+  <input
+  className="maps-search-input"
+  type="text"
+  value={jobQuery}
+  onChange={(e) => {
+    setJobQuery(e.target.value);
+    setSelectedJobSuggestion(null);
+  }}
+  onKeyDown={handleJobKeyDown}
+  placeholder="Start typing… (job #, client, suburb, lot/plan, address, notes, etc.) or type !!! for a note"
+  autoFocus
+/>
 
-          {(jobLoading || jobSuggestions.length > 0) && (
-            <div
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                top: "100%",
-                marginTop: "4px",
-                background: "#fff",
-                border: "1px solid #ddd",
-                borderRadius: "8px",
-                zIndex: 50,
-                maxHeight: "220px",
-                overflowY: "auto",
-              }}
-            >
-              {jobLoading && (
-                <div style={{ padding: "8px", fontSize: "0.8rem", opacity: 0.7 }}>
-                  Searching…
-                </div>
-              )}
-
-              {!jobLoading &&
-                jobSuggestions.map((job) => (
-                  <button
-                    key={job.job_number}
-                    type="button"
-                    onClick={() => {
-                      setSelectedJobSuggestion(job);
-                      setJobQuery(String(job.job_number));
-                      setJobSuggestions([]);
-                    }}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      textAlign: "left",
-                      padding: "8px",
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <div style={{ fontWeight: 600 }}>{job.job_number}</div>
-                    {job.full_address && (
-                      <div style={{ fontSize: "0.75rem", opacity: 0.75 }}>
-                        {job.full_address}
-                      </div>
-                    )}
-                  </button>
-                ))}
-            </div>
-          )}
+  {(jobLoading || jobSuggestions.length > 0) && (
+    <div
+      className="contacts-suggestions"
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        top: "100%",
+        marginTop: "4px",
+        zIndex: 50,
+        maxHeight: "220px",
+        overflowY: "auto",
+        WebkitOverflowScrolling: "touch",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.35rem",
+        background: "#fff",
+        border: "1px solid #ddd",
+        borderRadius: "8px",
+        padding: "0.35rem",
+      }}
+    >
+      {jobLoading && (
+        <div style={{ padding: "8px", fontSize: "0.8rem", opacity: 0.7 }}>
+          Searching…
         </div>
+      )}
 
-        {selectedJobSuggestion && (
-          <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#555" }}>
-            Selected job: <strong>{selectedJobSuggestion.job_number}</strong>
-          </div>
-        )}
+      {!jobLoading &&
+        jobSuggestions.map((job, idx) => (
+          <button
+            key={`${job.id ?? job.job_number}-${job.isNotesOnly ? "notes" : "real"}`}
+            type="button"
+            className={`contacts-suggestion ${idx === jobActiveIdx ? "is-active" : ""}`}
+            onMouseEnter={() => setJobActiveIdx(idx)}
+            onClick={() => {
+              setSelectedJobSuggestion(job);
+              setJobQuery(String(job.job_number));
+              setJobSuggestions([]);
+              setJobActiveIdx(-1);
+            }}
+          >
+            <div className="contacts-suggestion-header">
+              <div className="contacts-avatar">
+                {job.isNotesOnly ? "N" : getJobBadge(job.job_number)}
+              </div>
+
+              <div>
+                <div className="contacts-suggestion-name">
+                  {job.isNotesOnly
+                    ? "Notes"
+                    : `Job #${job.job_number}${job.job_type_legacy ? ` · ${job.job_type_legacy}` : ""}`}
+                </div>
+
+       <div>
+  <div className="contacts-suggestion-role">
+    {job.isNotesOnly
+      ? "Notes Only"
+      : `${safeText(job.address || job.full_address)}${jobLotPlanText(job) ? ` ${jobLotPlanText(job)}` : ""}`}
+  </div>
+
+  {!job.isNotesOnly && jobClientText(job) && (
+    <div className="contacts-suggestion-role" style={{ fontSize: "0.72rem", opacity: 0.8 }}>
+      {jobClientText(job)}
+    </div>
+  )}
+</div>
+              </div>
+            </div>
+          </button>
+        ))}
+    </div>
+  )}
+</div>
+
+   {selectedJobSuggestion && (
+  <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#555" }}>
+    {selectedJobSuggestion.isNotesOnly ? (
+      <>Selected item: <strong>Notes Only</strong></>
+    ) : (
+      <>Selected job: <strong>{selectedJobSuggestion.job_number}</strong></>
+    )}
+  </div>
+)}
       </div>
 
       <div className="schedule-editor-row" style={{ marginTop: "0.75rem" }}>
@@ -2066,6 +2966,31 @@ editorLoadedRef.current = false;
     </div>
   </div>
 )}
+
+{toast && (
+  <div
+    style={{
+      position: "fixed",
+      bottom: "24px",
+      left: "50%",
+      transform: "translateX(-50%)",
+      zIndex: 5000,
+      background: "rgba(33, 33, 33, 0.95)",
+      color: "#fff",
+      padding: "10px 14px",
+      borderRadius: "10px",
+      fontSize: "0.9rem",
+      boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+      width: "max-content",
+      maxWidth: "calc(100vw - 32px)",
+      textAlign: "center",
+      pointerEvents: "none",
+    }}
+  >
+    {toast}
+  </div>
+)}
+
     </PageLayout>
   );
 }

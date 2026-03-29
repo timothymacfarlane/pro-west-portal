@@ -180,6 +180,18 @@ function addressSummaryFromRow(r) {
   return a;
 }
 
+function jobClientText(row) {
+  const company = String(row?.client_company || "").trim();
+  const first = String(row?.client_first_name || "").trim();
+  const surname = String(row?.client_surname || "").trim();
+  const person = [first, surname].filter(Boolean).join(" ").trim();
+
+  if (company && person) return `${company} · ${person}`;
+  if (company) return company;
+  if (person) return person;
+  return "";
+}
+
 function norm(s) {
   return (s || "").toString().trim().replace(/\s+/g, " ");
 }
@@ -2836,14 +2848,14 @@ q = q.range(from, to);
     try {
       const { data, error } = await supabase
         .from("jobs")
-        .select("id, job_number, full_address, street_number, street_name, suburb, job_type_legacy, lot_number, plan_number")
+        .select("id, job_number, full_address, street_number, street_name, suburb, job_type_legacy, lot_number, plan_number, client_company, client_first_name, client_surname")
         .like("job_number_text", `${q}%`)
         .order("job_number", { ascending: false })
         .limit(20);
 
       if (error) throw error;
 
-      setJobNoSuggestions(
+setJobNoSuggestions(
   (data || []).map((r) => ({
     id: r.id,
     job_number: r.job_number,
@@ -2851,6 +2863,9 @@ q = q.range(from, to);
     address: addressSummaryFromRow(r),
     lot_number: r.lot_number || "",
     plan_number: r.plan_number || "",
+    client_company: r.client_company || "",
+    client_first_name: r.client_first_name || "",
+    client_surname: r.client_surname || "",
   }))
 );
     } catch {
@@ -2904,13 +2919,16 @@ async function runGlobalSuggest(query) {
     const { data, error } = await queryBuilder;
     if (error) throw error;
 
-    const results = (data || []).map((r) => ({
+ const results = (data || []).map((r) => ({
   id: r.id,
   job_number: r.job_number,
   job_type_legacy: r.job_type_legacy || "",
   address: addressSummaryFromRow(r),
   lot_number: r.lot_number || "",
   plan_number: r.plan_number || "",
+  client_company: r.client_company || "",
+  client_first_name: r.client_first_name || "",
+  client_surname: r.client_surname || "",
 }));
 
     setGlobalSuggestions(results);
@@ -3407,15 +3425,24 @@ useEffect(() => {
       >
         <div className="contacts-suggestion-header">
           <div className="contacts-avatar">{getJobBadge(j.job_number)}</div>
-          <div>
+  <div>
   <div className="contacts-suggestion-name">
     {`Job #${j.job_number}`}
     {j.job_type_legacy ? ` · ${j.job_type_legacy}` : ""}
   </div>
+
   <div className="contacts-suggestion-role">
-    {safeText(j.address)}
-    {jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}
+    {`${safeText(j.address)}${jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}`}
   </div>
+
+  {jobClientText(j) && (
+    <div
+      className="contacts-suggestion-role"
+      style={{ fontSize: "0.72rem", opacity: 0.8 }}
+    >
+      {jobClientText(j)}
+    </div>
+  )}
 </div>
         </div>
 
@@ -3534,15 +3561,24 @@ onClick={() => {
       >
         <div className="contacts-suggestion-header">
           <div className="contacts-avatar">{getJobBadge(j.job_number)}</div>
-         <div>
+<div>
   <div className="contacts-suggestion-name">
-    {j.job_number ? `Job #${j.job_number}` : "Job"}
+    {`Job #${j.job_number}`}
     {j.job_type_legacy ? ` · ${j.job_type_legacy}` : ""}
   </div>
+
   <div className="contacts-suggestion-role">
-    {safeText(j.address)}
-    {jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}
+    {`${safeText(j.address)}${jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}`}
   </div>
+
+  {jobClientText(j) && (
+    <div
+      className="contacts-suggestion-role"
+      style={{ fontSize: "0.72rem", opacity: 0.8 }}
+    >
+      {jobClientText(j)}
+    </div>
+  )}
 </div>
         </div>
       </button>

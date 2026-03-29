@@ -2785,9 +2785,43 @@ body,
   line-height: 1;
 }
 
+.job-planning-legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  border-radius: 4px;
+  border: 1px solid #bdbdbd;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+
+.job-planning-drop-target {
+  box-shadow: inset 0 0 0 3px rgba(30, 136, 229, 0.9);
+  background: rgba(30, 136, 229, 0.08);
+  transition: box-shadow 0.12s ease, background 0.12s ease;
+}
+
+.job-planning-day-cell.job-planning-drop-target {
+  box-shadow: inset 0 0 0 3px rgba(30, 136, 229, 0.9);
+  background: rgba(30, 136, 229, 0.08);
+}
+
+.job-planning-unscheduled-panel.job-planning-drop-target {
+  box-shadow: inset 0 0 0 3px rgba(30, 136, 229, 0.9);
+  background: rgba(30, 136, 229, 0.08);
+}
+
 .job-planning-drag-handle:hover {
   background: #f3f3f3;
   border-color: #d6d6d6;
+}
+
+.job-planning-vertical-scroll {
+  max-height: 72vh;
+  overflow-y: auto;
+  overflow-x: visible;
+  padding-right: 6px;
 }
 
 .job-planning-drag-handle:active {
