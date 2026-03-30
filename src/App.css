@@ -2768,6 +2768,28 @@ body,
    JOB PLANNING (NEW CLEAN UI)
    ========================= */
 
+.job-planning-day-mini-month-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.job-planning-day-weather {
+  font-size: 0.68rem;
+  line-height: 1.1;
+  color: #666;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.job-planning-today-cell .job-planning-day-weather {
+  color: #444;
+}
+
    .job-planning-drag-handle {
   width: 32px;
   height: 32px;
@@ -2892,7 +2914,7 @@ body,
   justify-content: space-between;
   align-items: flex-start;
   gap: 6px;
-  padding-right: 26px; /* 👈 THIS is the key */
+  padding-right: 17px; /* 👈 THIS is the key */
 }
 
 .job-planning-day-number {
@@ -2902,8 +2924,8 @@ body,
 }
 
 .job-planning-day-count {
-  font-size: 0.68rem;
-  padding: 0.22rem 0.5rem;
+  font-size: 0.60rem;
+  padding: 0.15rem 0.35rem;
   border-radius: 999px;
   background: #f6f6f6;
   color: #555;
@@ -2989,6 +3011,67 @@ body,
   padding: 0.85rem;
   background: #fff;
   transition: box-shadow 0.15s ease, border-color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
+}
+
+.job-planning-edit-item {
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  .job-planning-edit-item {
+    padding: 0.7rem;
+    border-radius: 14px;
+  }
+
+  .job-planning-edit-item-header {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+  }
+
+  .job-planning-edit-item-header-left {
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .job-planning-job-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.45rem;
+    align-items: stretch;
+  }
+
+  .job-planning-job-actions .btn-pill,
+  .job-planning-job-actions .maps-search-input,
+  .job-planning-job-actions select {
+    width: 100%;
+    min-height: 42px;
+  }
+
+  .job-planning-drag-handle {
+    align-self: flex-start;
+    touch-action: none;
+  }
+
+  .schedule-editor-grid {
+    gap: 0.65rem;
+  }
+
+  .schedule-editor-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .maps-search-input,
+  .schedule-editor-row textarea,
+  .schedule-editor-row input,
+  .schedule-editor-row select {
+    font-size: 16px;
+  }
 }
 
 .job-planning-edit-item:hover {
@@ -3233,16 +3316,16 @@ body,
   position: absolute;
   top: 6px;
   right: 6px;
-  width: 26px;
-  height: 26px;
-  min-width: 26px;
-  min-height: 26px;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
   padding: 0;
   border: none;
   border-radius: 50%;
   background: var(--pw-primary);
   color: #fff;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   line-height: 1;
   display: flex;
@@ -3284,14 +3367,6 @@ body,
 }
 
 @media (max-width: 768px) {
-  .job-planning-add-btn {
-    width: 22px;
-    height: 22px;
-    top: 6px;
-    right: 6px;
-    font-size: 14px;
-  }
-
   .job-planning-modal-card {
     max-width: 100%;
   }
@@ -3317,16 +3392,53 @@ body,
     gap: 0.6rem;
   }
 
-@media (max-width: 768px) {
-  .job-planning-add-btn {
-    width: 24px;
-    height: 24px;
-    min-width: 24px;
-    min-height: 24px;
-    font-size: 16px;
+
+   .job-planning-add-btn {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    min-height: 20px;
+    top: 5px;
+    right: 5px;
+    font-size: 13px;
   }
-}
+
+  .job-planning-day-header {
+    padding-right: 34px;
+  }
+
+  .job-planning-day-count {
+    font-size: 0.5rem;
+    padding: 0.1rem 0.1rem;
+    margin-right: 0;
+  }
   
+  .job-planning-day-mini-month-wrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.job-planning-day-date-wrap {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.job-planning-day-weather {
+  font-size: 0.56rem;
+  max-width: 70px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.job-planning-day-header {
+  padding-right: 34px;
+}
+
+.job-planning-day-count {
+  flex-shrink: 0;
+}
+
   .job-planning-unscheduled-panel {
     flex: none;
     min-width: 100%;
@@ -3353,11 +3465,6 @@ body,
 
   .job-planning-day-number {
     font-size: 0.95rem;
-  }
-
-  .job-planning-day-count {
-    font-size: 0.62rem;
-    padding: 0.18rem 0.42rem;
   }
 
   .job-planning-day-job {

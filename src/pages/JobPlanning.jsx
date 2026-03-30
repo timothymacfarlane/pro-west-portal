@@ -47,6 +47,78 @@ function formatMonthInput(date) {
   return `${y}-${m}`;
 }
 
+// --- Weather helpers (same pattern as schedule.jsx) ---
+function weatherIcon(code) {
+  if (code === 0) return "☀";
+  if (code === 1 || code === 2) return "⛅";
+  if (code === 3) return "☁";
+  if (code >= 45 && code <= 48) return "🌫";
+  if (code >= 51 && code <= 57) return "🌦";
+  if (code >= 61 && code <= 67) return "🌧";
+  if (code >= 71 && code <= 77) return "🌨";
+  if (code >= 80 && code <= 82) return "🌦";
+  if (code >= 95) return "⛈";
+  return "·";
+}
+
+const WEATHER_CACHE_KEY = "jobplanning_weather_cache_v1";
+const WEATHER_CACHE_RETENTION_DAYS = 30;
+
+function loadWeatherCache() {
+  try {
+    const raw = localStorage.getItem(WEATHER_CACHE_KEY);
+    if (!raw) return {};
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    const cleaned = {};
+
+    for (const [dateISO, value] of Object.entries(parsed)) {
+      if (!value || typeof value !== "object") continue;
+
+      const savedAt = value.savedAt ? new Date(value.savedAt) : null;
+      if (!savedAt || Number.isNaN(savedAt.getTime())) continue;
+
+      const ageMs = now.getTime() - savedAt.getTime();
+      const maxAgeMs = WEATHER_CACHE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+      if (ageMs <= maxAgeMs) {
+        cleaned[dateISO] = value;
+      }
+    }
+
+    return cleaned;
+  } catch (err) {
+    console.error("Failed to load weather cache", err);
+    return {};
+  }
+}
+
+function saveWeatherCache(map) {
+  try {
+    localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify(map));
+  } catch (err) {
+    console.error("Failed to save weather cache", err);
+  }
+}
+
+function weatherPhrase(code) {
+  if (code === 0) return "Sunny";
+  if (code === 1 || code === 2) return "Partly cloudy";
+  if (code === 3) return "Cloudy";
+  if (code >= 45 && code <= 48) return "Fog/mist";
+  if (code >= 51 && code <= 57) return "Drizzle";
+  if (code >= 61 && code <= 67) return "Rain";
+  if (code >= 71 && code <= 77) return "Snow";
+  if (code >= 80 && code <= 82) return "Showers";
+  if (code >= 95) return "Thunderstorms";
+  return "";
+}
+
 function longDateLabel(dateISO) {
   return new Date(`${dateISO}T00:00:00`).toLocaleDateString("en-AU", {
     weekday: "long",
@@ -131,13 +203,29 @@ function JobPlanning() {
 
   const [currentMonth, setCurrentMonth] = useState(() => getMonthStart(new Date()));
   const [plansByDate, setPlansByDate] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [calendarDraggedKey, setCalendarDraggedKey] = useState(null);
-  const [calendarDragOverKey, setCalendarDragOverKey] = useState(null);
 
-  const UNSCHEDULED_KEY = "__UNSCHEDULED__";
+const [loading, setLoading] = useState(false);
+const [saving, setSaving] = useState(false);
+const [error, setError] = useState("");
+const [weatherByDate, setWeatherByDate] = useState(() => {
+  const cached = loadWeatherCache();
+  const map = {};
+
+  for (const [dateISO, value] of Object.entries(cached)) {
+    map[dateISO] = {
+      line1: value.line1,
+      line2: value.line2,
+    };
+  }
+
+  return map;
+});
+const [weatherLoading, setWeatherLoading] = useState(false);
+const [weatherError, setWeatherError] = useState("");
+const [calendarDraggedKey, setCalendarDraggedKey] = useState(null);
+const [calendarDragOverKey, setCalendarDragOverKey] = useState(null);
+
+const UNSCHEDULED_KEY = "__UNSCHEDULED__";
 
 const [selectedDate, setSelectedDate] = useState(null);
 const [editItems, setEditItems] = useState([]);
@@ -250,6 +338,114 @@ useEffect(() => {
   };
 }, [calendarDays, isAppVisible]);
 
+// ---------- Load weather for visible calendar range ----------
+useEffect(() => {
+  let cancelled = false;
+  if (!isAppVisible) return;
+
+  const fetchWeather = async () => {
+    setWeatherLoading(true);
+    setWeatherError("");
+
+    try {
+      const today = new Date();
+today.setHours(0, 0, 0, 0);
+
+const startDate = new Date(calendarDays[0]);
+const maxForecastEnd = new Date(today);
+maxForecastEnd.setDate(maxForecastEnd.getDate() + 15); // today + 15 = 16 days total
+
+const effectiveStart = startDate < today ? today : startDate;
+const effectiveEnd =
+  calendarDays[41] < maxForecastEnd ? calendarDays[41] : maxForecastEnd;
+
+const start = formatISO(effectiveStart);
+const end = formatISO(effectiveEnd);
+
+const url =
+  "https://api.open-meteo.com/v1/forecast" +
+  "?latitude=-31.95&longitude=115.86" +
+  "&daily=weathercode,temperature_2m_min,temperature_2m_max,precipitation_sum" +
+  "&timezone=Australia%2FPerth" +
+  `&start_date=${start}&end_date=${end}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Weather API error");
+
+      const d = await res.json();
+      const daily = d.daily || {};
+      const times = daily.time || [];
+      const tmin = daily.temperature_2m_min || [];
+      const tmax = daily.temperature_2m_max || [];
+      const codes = daily.weathercode || [];
+      const psum = daily.precipitation_sum || [];
+
+      const n = Math.min(times.length, tmin.length, tmax.length, codes.length);
+
+      const map = {};
+      for (let i = 0; i < n; i++) {
+        const code = Number(codes[i]);
+        const icon = weatherIcon(code);
+        const phrase = weatherPhrase(code);
+
+        const line1 = `${Math.round(tmin[i])}°C–${Math.round(tmax[i])}°C ${icon}`;
+
+        const parts2 = [];
+        if (phrase) parts2.push(phrase);
+        if (i < psum.length && psum[i] != null) {
+          const mm = Number(psum[i]);
+          if (!Number.isNaN(mm)) {
+            const mmStr = mm >= 1 ? String(Math.round(mm)) : mm.toFixed(1);
+            parts2.push(`${mmStr} mm`);
+          }
+        }
+
+        const line2 = parts2.join(" • ");
+        map[times[i]] = { line1, line2, icon };
+      }
+
+      if (!cancelled) {
+  const cached = loadWeatherCache();
+  const nowISO = new Date().toISOString();
+
+  const mergedCache = { ...cached };
+
+  for (const [dateISO, value] of Object.entries(map)) {
+    mergedCache[dateISO] = {
+      line1: value.line1,
+      line2: value.line2,
+      savedAt: nowISO,
+    };
+  }
+
+  saveWeatherCache(mergedCache);
+
+  const uiMap = {};
+  for (const [dateISO, value] of Object.entries(mergedCache)) {
+    uiMap[dateISO] = {
+      line1: value.line1,
+      line2: value.line2,
+    };
+  }
+
+  setWeatherByDate(uiMap);
+}
+    } catch (err) {
+      console.error("Weather fetch failed", err);
+     if (!cancelled) {
+  setWeatherError("Weather data unavailable.");
+}
+    } finally {
+      if (!cancelled) setWeatherLoading(false);
+    }
+  };
+
+  fetchWeather();
+
+  return () => {
+    cancelled = true;
+  };
+}, [calendarDays, isAppVisible]);
+
   useEffect(() => {
   const top = topScrollRef.current;
   const bottom = bottomScrollRef.current;
@@ -319,6 +515,23 @@ useEffect(() => {
     stopDragAutoScroll();
   };
 }, []);
+
+useEffect(() => {
+  const modalOpen = editorModalOpen || !!modalTarget;
+
+  if (!modalOpen) return;
+
+  const previousOverflow = document.body.style.overflow;
+  const previousTouchAction = document.body.style.touchAction;
+
+  document.body.style.overflow = "hidden";
+  document.body.style.touchAction = "none";
+
+  return () => {
+    document.body.style.overflow = previousOverflow;
+    document.body.style.touchAction = previousTouchAction;
+  };
+}, [editorModalOpen, modalTarget]);
   // ---------- Month nav ----------
   const handlePrevMonth = () => {
     setCurrentMonth((prev) => addMonths(prev, -1));
@@ -2006,10 +2219,16 @@ const confirmCalendarMove = ({ item, fromKey, toKey }) => {
     >
       <div className="card schedule-card">
         <div className="schedule-header">
-          <div className="schedule-week-label">
-            Month of&nbsp;<strong>{monthLabel}</strong>
-            {loading && <span style={{ marginLeft: "0.5rem", fontSize: "0.75rem" }}>Loading…</span>}
-          </div>
+         <div className="schedule-week-label">
+  Month of&nbsp;<strong>{monthLabel}</strong>
+  {loading && <span style={{ marginLeft: "0.5rem", fontSize: "0.75rem" }}>Loading…</span>}
+  {weatherLoading && (
+    <span style={{ marginLeft: "0.5rem", fontSize: "0.7rem" }}>(weather updating…)</span>
+  )}
+  {weatherError && !weatherLoading && (
+    <span style={{ marginLeft: "0.5rem", fontSize: "0.7rem" }}>(weather unavailable)</span>
+  )}
+</div>
 
           <div className="schedule-week-buttons">
             <button type="button" className="btn-pill job-planning-month-btn" onClick={handlePrevMonth}>
@@ -2257,13 +2476,14 @@ onDragOver={(e) => {
           {calendarRows.map((row, rowIndex) => (
             <tr key={`row-${rowIndex}`}>
               {row.map((day) => {
-                const iso = formatISO(day);
-                const items = plansByDate[iso] || [];
-                const isToday = iso === todayISO;
-                const isSelected = selectedDate === iso;
-                const inCurrentMonth = day.getMonth() === currentMonth.getMonth();
+  const iso = formatISO(day);
+  const items = plansByDate[iso] || [];
+  const wx = weatherByDate[iso];
+  const isToday = iso === todayISO;
+  const isSelected = selectedDate === iso;
+  const inCurrentMonth = day.getMonth() === currentMonth.getMonth();
 
-                return (
+  return (
                   
                  <td
   key={iso}
@@ -2363,19 +2583,31 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
 </button>
                     <div className="job-planning-day-cell-inner">
                       <div className="job-planning-day-header">
-                        <div className="job-planning-day-date-wrap">
-  <div className="job-planning-day-number">{day.getDate()}</div>
-  <div className="job-planning-day-mini-month">
-    {day.toLocaleDateString("en-AU", { month: "short" })}
-  </div>
-</div>
+  <div className="job-planning-day-date-wrap">
+    <div className="job-planning-day-number">{day.getDate()}</div>
 
-                        {items.length > 0 && (
-                          <div className="job-planning-day-count">
-                            {items.length} job{items.length === 1 ? "" : "s"}
-                          </div>
-                        )}
-                      </div>
+    <div className="job-planning-day-mini-month-wrap">
+      <div className="job-planning-day-mini-month">
+        {day.toLocaleDateString("en-AU", { month: "short" })}
+      </div>
+
+      {wx && (
+        <div
+          className="job-planning-day-weather"
+          title={wx.line2 ? `${wx.line1} • ${wx.line2}` : wx.line1}
+        >
+          {wx.line1}
+        </div>
+      )}
+    </div>
+  </div>
+
+  {items.length > 0 && (
+    <div className="job-planning-day-count">
+      {items.length} job{items.length === 1 ? "" : "s"}
+    </div>
+  )}
+</div>
 
                       <div className="job-planning-day-jobs">
                         {items.length === 0 ? (
