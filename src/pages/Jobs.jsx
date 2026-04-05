@@ -71,7 +71,7 @@ const LOCAL_AUTHORITIES = [
   "Shire of Dumbleyung","Shire of Dundas","Town of East Fremantle","Shire of East Pilbara",
   "Shire of Esperance","Shire of Exmouth","City of Fremantle","Shire of Gingin","Shire of Gnowangerup",
   "Shire of Goomalling","City of Gosnells","City of Greater Geraldton","Shire of Halls Creek","Shire of Harvey",
-  "Shire of Irwin","Shire of Jerramungup","City of Joondalup","Shire of Kalamunda","City of Kalgoorlie-Boulder",
+  "Shire of Irwin","Shire of Jerramungup","City of Joondalup","City of Kalamunda","City of Kalgoorlie-Boulder",
   "City of Karratha","Shire of Katanning","Shire of Kellerberrin","Shire of Kent","Shire of Kojonup",
   "Shire of Kondinin","Shire of Koorda","Shire of Kulin","City of Kwinana","Shire of Lake Grace",
   "Shire of Laverton","Shire of Leonora","City of Mandurah","Shire of Manjimup","Shire of Meekatharra",
@@ -757,9 +757,16 @@ const [notes, setNotes] = useState(initial?.notes ?? "");
 
   const canEdit = isAdmin && (mode === "new" || mode === "edit");
 
+function handleJobCategoryChange(nextCategory) {
+  setJobCategory(nextCategory);
+  setJobTypeLegacy(nextCategory || "");
+}
+
   const modalMapsHref = useMemo(() => {
   const source = initial || {};
 
+
+  
   if (!source?.job_number && !source?.place_id && !source?.full_address) return "";
 
   const params = new URLSearchParams();
@@ -2057,12 +2064,12 @@ onChange={(e) => setFullAddress(e.target.value)}
           </div>
 
           <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
-  <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Job category / type / date</div>
+  <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Job Category / Type / Date</div>
   <div style={{ display: "grid", gap: 8 }}>
     <select
       className="input"
       value={jobCategory}
-      onChange={(e) => setJobCategory(e.target.value)}
+      onChange={(e) => handleJobCategoryChange(e.target.value)}
       disabled={!canEdit}
     >
       <option value="">—</option>
@@ -2424,23 +2431,42 @@ onChange={(e) => {
     </select>
 
     <div className="jobmodal-footer-actions">
-      <button className="btn-pill" onClick={handlePrintSticker} type="button" disabled={saving}>
-        Print Sticker
-      </button>
+  <button
+    className="btn-pill"
+    onClick={handlePrintSticker}
+    type="button"
+    disabled={saving}
+  >
+    Print Sticker
+  </button>
 
-      <button className="btn-pill" onClick={onClose} type="button">
-        Cancel
-      </button>
+  <button
+    className="btn-pill"
+    onClick={onClose}
+    type="button"
+    disabled={saving}
+  >
+    Cancel
+  </button>
 
-      <button
-        className="btn-pill primary"
-        onClick={() => (mode === "new" ? handleSave({ closeAfter: false }) : handleSave())}
-        type="button"
-        disabled={saving}
-      >
-        {saving ? "Saving…" : "Save & Close"}
-      </button>
-    </div>
+  <button
+    className="btn-pill"
+    onClick={() => handleSave({ closeAfter: false })}
+    type="button"
+    disabled={saving}
+  >
+    {saving ? "Saving…" : "Save"}
+  </button>
+
+  <button
+    className="btn-pill primary"
+    onClick={() => handleSave({ closeAfter: true })}
+    type="button"
+    disabled={saving}
+  >
+    {saving ? "Saving…" : "Save & Close"}
+  </button>
+</div>
   </>
 )}
 

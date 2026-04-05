@@ -2959,6 +2959,14 @@ body,
   opacity: 0.9;
 }
 
+.job-planning-day-job-category {
+  font-size: 0.68rem;
+  line-height: 1.2;
+  font-weight: 600;
+  color: #555;
+  margin-top: 0.12rem;
+}
+
 .job-planning-day-job-notes {
   font-size: 0.68rem;
   color: #777;

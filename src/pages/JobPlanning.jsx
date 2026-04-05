@@ -161,11 +161,11 @@ const DAY_HEADERS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Sa
 
 const JOB_COLOURS = [
   { value: "", label: "White – Miscellaneous Note" },
-  { value: "red", label: "Red – Job to be calculated" },
-  { value: "yellow", label: "Yellow – Job ready - Date Fixed" },
-  { value: "green", label: "Green – Job checked (Field Ready) - Date Fixed" },
-  { value: "blue", label: "Blue – Job ready - Date Flexible" },
-  { value: "purple", label: "Purple – Cadastral Job" },
+  { value: "red", label: "Red – To be Calculated" },
+  { value: "yellow", label: "Yellow – To be Checked - Date Fixed" },
+  { value: "green", label: "Green – Checked (Field Ready) - Date Fixed" },
+  { value: "blue", label: "Blue – Date Flexible" },
+  { value: "purple", label: "Purple – Cadastral" },
 ];
 
 const COLOUR_HEX = {
@@ -177,11 +177,11 @@ const COLOUR_HEX = {
 };
 
 const JOB_PLANNING_LEGEND = [
-  { label: "Job to be calculated", colour: "red" },
-  { label: "Job ready - Date Fixed", colour: "yellow" },
-  { label: "Job checked (Field Ready) - Date Fixed", colour: "green" },
-  { label: "Job ready - Date Flexible", colour: "blue" },
-  { label: "Cadastral Job", colour: "purple" },
+  { label: "To be Calculated", colour: "red" },
+  { label: "To be Checked - Date Fixed", colour: "yellow" },
+  { label: "Checked (Field Ready) - Date Fixed", colour: "green" },
+  { label: "Date Flexible", colour: "blue" },
+  { label: "Cadastral", colour: "purple" },
   { label: "Miscellaneous Note", colour: "" },
 ];
 
@@ -230,6 +230,7 @@ const UNSCHEDULED_KEY = "__UNSCHEDULED__";
 const [selectedDate, setSelectedDate] = useState(null);
 const [editItems, setEditItems] = useState([]);
 const [unscheduledItems, setUnscheduledItems] = useState([]);
+const [jobMetaByNumber, setJobMetaByNumber] = useState({});
 const [highlightedJobKey, setHighlightedJobKey] = useState(null);
 const [draggedJobKey, setDraggedJobKey] = useState(null);
 const [dragOverJobKey, setDragOverJobKey] = useState(null);
@@ -277,59 +278,118 @@ useEffect(() => {
   let cancelled = false;
   if (!isAppVisible) return;
 
-  const loadPlans = async () => {
-    setLoading(true);
-    setError("");
+const loadPlans = async () => {
+  setLoading(true);
+  setError("");
 
-    try {
-      const from = formatISO(calendarDays[0]);
-      const to = formatISO(calendarDays[41]);
+  try {
+    const from = formatISO(calendarDays[0]);
+    const to = formatISO(calendarDays[41]);
 
-      const [
-        scheduledResult,
-        unscheduledResult,
-      ] = await Promise.all([
-        supabase
-          .from("job_planning_entries")
-          .select("*")
-          .gte("date", from)
-          .lte("date", to)
-          .order("date", { ascending: true })
-          .order("sort_order", { ascending: true })
-          .order("created_at", { ascending: true }),
+    const [scheduledResult, unscheduledResult] = await Promise.all([
+      supabase
+        .from("job_planning_entries")
+        .select("*")
+        .gte("date", from)
+        .lte("date", to)
+        .order("date", { ascending: true })
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true }),
 
-        supabase
-          .from("job_planning_unscheduled")
-          .select("*")
-          .order("sort_order", { ascending: true })
-          .order("created_at", { ascending: true }),
-      ]);
+      supabase
+        .from("job_planning_unscheduled")
+        .select("*")
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true }),
+    ]);
 
-      if (scheduledResult.error) throw scheduledResult.error;
-      if (unscheduledResult.error) throw unscheduledResult.error;
-      if (cancelled) return;
+    if (scheduledResult.error) throw scheduledResult.error;
+    if (unscheduledResult.error) throw unscheduledResult.error;
+    if (cancelled) return;
 
-      const grouped = {};
+    const grouped = {};
 
-      for (const row of scheduledResult.data || []) {
-        if (!grouped[row.date]) grouped[row.date] = [];
-        grouped[row.date].push(row);
-      }
-
-      setPlansByDate(grouped);
-      setUnscheduledItems(unscheduledResult.data || []);
-    } catch (err) {
-      console.error("Error loading job planning entries:", err);
-      if (!cancelled) {
-        const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
-        setError(`Could not load job planning calendar. (${msg})`);
-        setPlansByDate({});
-        setUnscheduledItems([]);
-      }
-    } finally {
-      if (!cancelled) setLoading(false);
+    for (const row of scheduledResult.data || []) {
+      if (!grouped[row.date]) grouped[row.date] = [];
+      grouped[row.date].push(row);
     }
-  };
+
+  // Build unique job numbers from both visible scheduled rows
+// and unscheduled rows, so edit modals can show full job summaries in both places
+const visibleJobNumbers = [
+  ...new Set(
+    [...(scheduledResult.data || []), ...(unscheduledResult.data || [])]
+      .map((row) => String(row.job_number || "").trim())
+      .filter(Boolean)
+      .filter((jobNo) => jobNo.toLowerCase() !== "notes")
+  ),
+];
+
+    let metaMap = {};
+
+    if (visibleJobNumbers.length > 0) {
+      const numericJobNumbers = visibleJobNumbers
+        .filter((jobNo) => /^\d+$/.test(jobNo))
+        .map((jobNo) => Number(jobNo));
+
+      if (numericJobNumbers.length > 0) {
+       const { data: jobsMeta, error: jobsMetaError } = await supabase
+  .from("jobs")
+  .select(`
+    job_number,
+    job_category,
+    full_address,
+    street_number,
+    street_name,
+    suburb,
+    client_company,
+    client_first_name,
+    client_surname,
+    lot_number,
+    plan_number,
+    job_type_legacy
+  `)
+  .in("job_number", numericJobNumbers);
+
+        if (jobsMetaError) throw jobsMetaError;
+
+       metaMap = Object.fromEntries(
+  (jobsMeta || []).map((row) => [
+    String(row.job_number).trim(),
+    {
+      job_category: row.job_category || "",
+      full_address: row.full_address || "",
+      street_number: row.street_number || "",
+      street_name: row.street_name || "",
+      suburb: row.suburb || "",
+      client_company: row.client_company || "",
+      client_first_name: row.client_first_name || "",
+      client_surname: row.client_surname || "",
+      lot_number: row.lot_number || "",
+      plan_number: row.plan_number || "",
+      job_type_legacy: row.job_type_legacy || "",
+    },
+  ])
+);
+      }
+    }
+
+    setPlansByDate(grouped);
+    setUnscheduledItems(unscheduledResult.data || []);
+    setJobMetaByNumber(metaMap);
+  } catch (err) {
+    console.error("Error loading job planning entries:", err);
+    if (!cancelled) {
+      const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
+      setError(`Could not load job planning calendar. (${msg})`);
+      setPlansByDate({});
+      setUnscheduledItems([]);
+      setJobMetaByNumber({});
+    }
+  } finally {
+    if (!cancelled) setLoading(false);
+  }
+};
 
   loadPlans();
 
@@ -2661,20 +2721,26 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
   stopDragAutoScroll();
 }}
 >
-                              <div className="job-planning-day-job-top">
-                                <span className="job-planning-day-job-number">
-                                  {item.job_number}
-                                </span>
-                                {item.suburb && (
-                                  <span className="job-planning-day-job-suburb">
-                                    {item.suburb}
-                                  </span>
-                                )}
-                              </div>
+                             <div className="job-planning-day-job-top">
+  <span className="job-planning-day-job-number">
+    {item.job_number}
+  </span>
+  {item.suburb && (
+    <span className="job-planning-day-job-suburb">
+      {item.suburb}
+    </span>
+  )}
+</div>
 
-                              {item.notes && (
-                                <div className="job-planning-day-job-notes">{item.notes}</div>
-                              )}
+{jobMetaByNumber[String(item.job_number || "").trim()]?.job_category && (
+  <div className="job-planning-day-job-category">
+    {jobMetaByNumber[String(item.job_number || "").trim()].job_category}
+  </div>
+)}
+
+{item.notes && (
+  <div className="job-planning-day-job-notes">{item.notes}</div>
+)}
                             </div>
                           ))
                         )}
@@ -2735,9 +2801,13 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
               <p style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "#777" }}>
   Drag jobs up or down to set the order for this day.
 </p>
-              {editItems.map((item) => (
-              <div
-  key={item.client_key}
+              {editItems.map((item) => {
+  const jobMeta = jobMetaByNumber[String(item.job_number || "").trim()] || null;
+  const isNotesOnly = String(item.job_number || "").toLowerCase() === "notes";
+
+  return (
+    <div
+      key={item.client_key}
   className={
     "job-planning-edit-item" +
     (item.colour ? ` job-planning-edit-item--${item.colour}` : "") +
@@ -2937,7 +3007,39 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
 </div>
   </div>
 </div>
+{!isNotesOnly && jobMeta && (
+  <div
+    style={{
+      marginTop: "0.6rem",
+      marginBottom: "0.75rem",
+      padding: "0.7rem 0.85rem",
+      background: "#f8f8f8",
+      border: "1px solid #e3e3e3",
+      borderRadius: "10px",
+      fontSize: "0.78rem",
+      color: "#555",
+      lineHeight: 1.35,
+    }}
+  >
+    <div style={{ fontWeight: 700, color: "#333", marginBottom: "0.2rem" }}>
+      {jobMeta.job_type_legacy && (
+  <div style={{ fontWeight: 700, color: "#333", marginBottom: "0.2rem" }}>
+    {jobMeta.job_type_legacy}
+  </div>
+)}
+    </div>
 
+    <div style={{ marginBottom: "0.2rem" }}>
+      {`${safeText(addressSummaryFromRow(jobMeta))}${jobLotPlanText(jobMeta) ? ` ${jobLotPlanText(jobMeta)}` : ""}`}
+    </div>
+
+    {jobClientText(jobMeta) && (
+      <div style={{ marginBottom: "0.2rem", opacity: 0.9 }}>
+        {jobClientText(jobMeta)}
+      </div>
+    )}
+  </div>
+)}
                   <div className="schedule-editor-grid">
                     <div className="schedule-editor-row">
                       <label className="schedule-editor-label">Suburb</label>
@@ -2969,8 +3071,9 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
 />
                     </div>
                   </div>
-                </div>
-              ))}
+                                </div>
+              );
+            })}
             </div>
           )}
 
