@@ -75,22 +75,55 @@ export function AuthProvider({ children }) {
         "profiles fetch"
       );
 
-      if (error) {
-        console.warn("Profile load error:", error.message);
-        return buildFallbackProfile(currentUser);
-      }
+     if (error) {
+  console.warn("Profile load error:", error.message);
 
-      if (!data) {
-        console.warn("No profile row found — using fallback profile");
-        return buildFallbackProfile(currentUser);
-      }
+  const fallback = buildFallbackProfile(currentUser);
 
-      // Normalise role value
-      return { ...data, role: normalizeRole(data.role) };
+  if (!fallback.is_active) {
+    await supabase.auth.signOut();
+    return null;
+  }
+
+  return fallback;
+}
+
+     if (!data) {
+  console.warn("No profile row found — using fallback profile");
+
+  const fallback = buildFallbackProfile(currentUser);
+
+  if (!fallback.is_active) {
+    await supabase.auth.signOut();
+    return null;
+  }
+
+  return fallback;
+}
+
+     // Normalise role value
+const profile = { ...data, role: normalizeRole(data.role) };
+
+// 🚨 If inactive → force logout
+if (!profile.is_active) {
+  console.warn("User is inactive — signing out");
+  await supabase.auth.signOut();
+  return null;
+}
+
+return profile;
     } catch (e) {
-      console.warn("Profile fetch exception:", e?.message || e);
-      return buildFallbackProfile(currentUser);
-    }
+  console.warn("Profile fetch exception:", e?.message || e);
+
+  const fallback = buildFallbackProfile(currentUser);
+
+  if (!fallback.is_active) {
+    await supabase.auth.signOut();
+    return null;
+  }
+
+  return fallback;
+}
   }
 
   useEffect(() => {
@@ -131,6 +164,13 @@ if (!sessionUser) {
 setProfileLoading(true);
 const p = await fetchProfile(sessionUser);
 if (!isMounted) return;
+
+if (!p) {
+  setUser(null);
+  setProfile(null);
+  return;
+}
+
 setProfile(p);
 setProfileLoading(false);
 
@@ -186,9 +226,16 @@ setProfileLoading(false);
         // Only refetch profile if user changed OR we don't have one yet
        if (userChanged || !hasProfileRef.current) {
   setProfileLoading(true);
-  const p = await fetchProfile(newUser);
-  if (!isMounted) return;
-  setProfile(p);
+const p = await fetchProfile(newUser);
+if (!isMounted) return;
+
+if (!p) {
+  setUser(null);
+  setProfile(null);
+  return;
+}
+
+setProfile(p);
   setProfileLoading(false);
         }
       } catch (e) {
@@ -210,6 +257,43 @@ setProfileLoading(false);
       sub?.subscription?.unsubscribe();
     };
   }, []);
+
+useEffect(() => {
+  if (!user?.id) return;
+
+  const channel = supabase
+    .channel(`profile-active-${user.id}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "profiles",
+        filter: `id=eq.${user.id}`,
+      },
+      async (payload) => {
+        const next = payload.new;
+
+        // 🚨 If admin unticks Active → instant logout
+        if (!next?.is_active) {
+          console.warn("User deactivated — logging out");
+          await supabase.auth.signOut();
+        } else {
+          // keep profile updated live
+          setProfile((prev) => ({
+  ...(prev || {}),
+  ...next,
+  role: normalizeRole(next.role),
+}));
+        }
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [user?.id]);
 
    const value = useMemo(() => {
     const role = normalizeRole(profile?.role);

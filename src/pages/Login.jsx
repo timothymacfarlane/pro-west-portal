@@ -20,25 +20,48 @@ function Login() {
     }
   }, [user, navigate]);
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setError("");
-    setSubmitting(true);
+const handleLogin = async (e) => {
+  e.preventDefault();
+  setError("");
+  setSubmitting(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password,
     });
-
-    setSubmitting(false);
 
     if (error) {
       setError(error.message || "Login failed");
       return;
     }
 
+    const user = data?.user;
+    if (!user?.id) {
+      setError("Login failed");
+      return;
+    }
+
+    // Step 4: check if the profile is active
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("is_active")
+      .eq("id", user.id)
+      .single();
+
+    if (profileError || !profile?.is_active) {
+      await supabase.auth.signOut();
+      setError("Your account is inactive. Please contact an administrator.");
+      return;
+    }
+
     navigate("/");
-  };
+  } catch (err) {
+    setError(err?.message || "Login failed");
+  } finally {
+    setSubmitting(false);
+  }
+};
 
   return (
     <PageLayout icon="🔐" title="Login" subtitle="Sign in to Pro West Portal">

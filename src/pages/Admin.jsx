@@ -9,7 +9,7 @@ function normalizeRole(role) {
 }
 
 function Admin() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
 
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -163,12 +163,28 @@ function Admin() {
                     </label>
                   </span>
 
-                  <span className="admin-active-cell">
+<span className="admin-active-cell">
   <label className="admin-active-toggle">
     <input
       type="checkbox"
       checked={!!p.is_active}
-      onChange={(e) => handleUpdate(p.id, { is_active: e.target.checked })}
+      onChange={(e) => {
+        const nextValue = e.target.checked;
+
+       if (!nextValue) {
+  if (p.id === user?.id) {
+    window.alert("You cannot deactivate your own account.");
+    return;
+  }
+
+  const ok = window.confirm(
+    `Deactivate ${p.display_name || p.email}?\n\nThey will lose access to the portal and will be logged out if currently signed in.`
+  );
+  if (!ok) return;
+}
+
+        handleUpdate(p.id, { is_active: nextValue });
+      }}
       disabled={savingId === p.id}
     />
     <span className="admin-active-label">Active</span>
