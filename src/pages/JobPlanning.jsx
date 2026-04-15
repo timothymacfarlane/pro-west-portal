@@ -161,7 +161,7 @@ const DAY_HEADERS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Sa
 
 const JOB_COLOURS = [
   { value: "", label: "White – Miscellaneous Note" },
-  { value: "red", label: "Red – To be Calculated" },
+  { value: "red", label: "Red – To be Calculated - Date Fixed" },
   { value: "yellow", label: "Yellow – To be Checked - Date Fixed" },
   { value: "green", label: "Green – Checked (Field Ready) - Date Fixed" },
   { value: "blue", label: "Blue – Date Flexible" },
@@ -177,7 +177,7 @@ const COLOUR_HEX = {
 };
 
 const JOB_PLANNING_LEGEND = [
-  { label: "To be Calculated", colour: "red" },
+  { label: "To be Calculated - Date Fixed", colour: "red" },
   { label: "To be Checked - Date Fixed", colour: "yellow" },
   { label: "Checked (Field Ready) - Date Fixed", colour: "green" },
   { label: "Date Flexible", colour: "blue" },
@@ -2322,9 +2322,24 @@ const confirmCalendarMove = ({ item, fromKey, toKey }) => {
               />
             </div>
 
-            <button type="button" className="btn-pill" onClick={() => window.print()}>
-              Print PDF
-            </button>
+  <button
+  type="button"
+  className="btn-pill"
+  onClick={() => {
+    const originalTitle = document.title;
+    document.title = `Job Planner - ${monthLabel}`;
+
+    setTimeout(() => {
+      window.print();
+
+      setTimeout(() => {
+        document.title = originalTitle;
+      }, 500);
+    }, 100);
+  }}
+>
+  Print PDF
+</button>
           </div>
         </div>
 
@@ -2340,6 +2355,11 @@ const confirmCalendarMove = ({ item, fromKey, toKey }) => {
             {error}
           </div>
         )}
+
+<div className="job-planning-print-header">
+  <h2>Job Planning Monthly Planner</h2>
+  <p>{monthLabel}</p>
+</div>
 
 <div className="job-planning-vertical-scroll" ref={verticalScrollRef}>
   <div className="job-planning-main-layout">
@@ -2494,16 +2514,22 @@ onDragOver={(e) => {
   stopDragAutoScroll();
 }}
 >
-              <div className="job-planning-day-job-top">
-                <span className="job-planning-day-job-number">{item.job_number}</span>
-                {item.suburb && (
-                  <span className="job-planning-day-job-suburb">{item.suburb}</span>
-                )}
-              </div>
+            <div className="job-planning-day-job-top">
+  <span className="job-planning-day-job-number">{item.job_number}</span>
+  {item.suburb && (
+    <span className="job-planning-day-job-suburb">{item.suburb}</span>
+  )}
+</div>
 
-              {item.notes && (
-                <div className="job-planning-day-job-notes">{item.notes}</div>
-              )}
+{jobMetaByNumber[String(item.job_number || "").trim()]?.job_category && (
+  <div className="job-planning-day-job-category">
+    {jobMetaByNumber[String(item.job_number || "").trim()].job_category}
+  </div>
+)}
+
+{item.notes && (
+  <div className="job-planning-day-job-notes">{item.notes}</div>
+)}
             </div>
           ))
         )}

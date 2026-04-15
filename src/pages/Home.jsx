@@ -7,6 +7,18 @@ function Home() {
       title="Home"
       subtitle="Welcome to Pro West Portal"
     >
+<div className="card" data-home-card>
+        <h3 className="card-title">Portal Updates</h3>
+        <p style={{ fontSize: "0.85rem", color: "#555", marginTop: "0.35rem" }}>
+          Portal fixes and updates will be listed here. The current version of the portal is shown in the footer of the of every page.
+        </p>
+        <ul style={{ fontSize: "0.85rem", marginTop: "0.3rem", paddingLeft: "1.1rem" }}>
+          <strong>vX.X.X-beta</strong>
+          <br />
+          Current beta testing versions.
+          </ul>
+      </div>
+
       <div className="card" data-home-card>
         <h3 className="card-title">Welcome to Pro West Portal</h3>
         <p style={{ fontSize: "0.85rem", color: "#555", marginTop: "0.35rem" }}>
@@ -37,27 +49,6 @@ If you have suggestions or ideas for improvements, or identity any bugs/issues p
           </ul>
       </div>
 
-      <div className="card">
-        <h3 className="card-title">Quick links</h3>
-        <div className="card-row">
-          <span className="card-row-label">View today&apos;s jobs on the map</span>
-          <a className="btn-pill" href="/maps">
-            Open Maps
-          </a>
-        </div>
-        <div className="card-row">
-          <span className="card-row-label">Open job register</span>
-          <a className="btn-pill" href="/jobs">
-            Jobs
-          </a>
-        </div>
-        <div className="card-row">
-          <span className="card-row-label">View crew schedule</span>
-          <a className="btn-pill" href="/schedule">
-            Schedule
-          </a>
-        </div>
-      </div>
     </PageLayout>
   );
 }
