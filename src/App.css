@@ -2991,7 +2991,7 @@ body,
   opacity: 0.9;
 }
 
-.job-planning-day-job-category {
+.job-planning-day-job-type {
   font-size: 0.68rem;
   line-height: 1.2;
   font-weight: 600;
@@ -3732,13 +3732,13 @@ body,
     color: #000 !important;
   }
 
-  .job-planning-day-job-suburb,
-  .job-planning-day-job-category,
-  .job-planning-day-job-notes {
-    font-size: 7pt !important;
-    line-height: 1.2 !important;
-    color: #333 !important;
-  }
+ .job-planning-day-job-suburb,
+.job-planning-day-job-type,
+.job-planning-day-job-notes {
+  font-size: 7pt !important;
+  line-height: 1.2 !important;
+  color: #333 !important;
+}
 
   .job-planning-empty-note {
     font-size: 7pt !important;
@@ -3805,7 +3805,7 @@ body,
 }
 
   /* Avoid clipping from generic containers */
-  * {
+  * {  
     overflow: visible !important;
   }
 }

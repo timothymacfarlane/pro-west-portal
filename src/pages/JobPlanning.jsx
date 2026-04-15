@@ -2521,9 +2521,9 @@ onDragOver={(e) => {
   )}
 </div>
 
-{jobMetaByNumber[String(item.job_number || "").trim()]?.job_category && (
-  <div className="job-planning-day-job-category">
-    {jobMetaByNumber[String(item.job_number || "").trim()].job_category}
+{jobMetaByNumber[String(item.job_number || "").trim()]?.job_type_legacy && (
+  <div className="job-planning-day-job-type">
+    {jobMetaByNumber[String(item.job_number || "").trim()].job_type_legacy}
   </div>
 )}
 
@@ -2758,9 +2758,9 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
   )}
 </div>
 
-{jobMetaByNumber[String(item.job_number || "").trim()]?.job_category && (
-  <div className="job-planning-day-job-category">
-    {jobMetaByNumber[String(item.job_number || "").trim()].job_category}
+{jobMetaByNumber[String(item.job_number || "").trim()]?.job_type_legacy && (
+  <div className="job-planning-day-job-type">
+    {jobMetaByNumber[String(item.job_number || "").trim()].job_type_legacy}
   </div>
 )}
 
