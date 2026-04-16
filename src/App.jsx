@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from "react";
-import { Routes, Route, NavLink, useLocation } from "react-router-dom";
+import { Routes, Route, NavLink, useLocation, useNavigate } from "react-router-dom";
 import "./App.css";
 
 import prowestLogo from "./assets/prowest-logo.png";
@@ -7,6 +7,7 @@ import { supabase } from "./lib/supabaseClient.js";
 
 import Login from "./pages/Login.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
+import ResetPassword from "./pages/ResetPassword.jsx";
 
 const Home = lazy(() => import("./pages/Home.jsx"));
 const Admin = lazy(() => import("./pages/Admin.jsx"));
@@ -37,11 +38,14 @@ function App() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const location = useLocation();
+  const navigate = useNavigate();
 
   // Updated: rely on AuthContext canonical flags rather than "ADMIN" string checks
-  const { isAdmin, authLoading, user } = useAuth();
+ const { isAdmin, authLoading, profileLoading, user } = useAuth();
 
-  const isAuthPage = location.pathname === "/login";
+  const isAuthPage =
+  location.pathname === "/login" ||
+  location.pathname === "/reset-password";
 
   const toggleSidebar = () => {
     // Desktop collapse toggle (existing behaviour)
@@ -60,9 +64,16 @@ function App() {
 
   const closeMobileSidebar = () => setMobileSidebarOpen(false);
 
-  const handleLogout = async () => {
-  await supabase.auth.signOut();
+const handleLogout = async () => {
+  const { error } = await supabase.auth.signOut();
+
+  if (error) {
+    console.error("Logout failed:", error.message);
+    return;
+  }
+
   closeMobileSidebar();
+  navigate("/login", { replace: true });
 };
 
   // Always close mobile drawer on route change (back/forward, programmatic nav, etc.)
@@ -177,7 +188,7 @@ function App() {
                 </li>
 
                 {/* Admin tab: only show once auth has resolved, and user is admin */}
-                {!authLoading && isAdmin && (
+                {!authLoading && !profileLoading && isAdmin && (
                   <li>
                     <NavLink
                       to="/admin"
@@ -245,7 +256,7 @@ function App() {
                     <span className="nav-label">Jobs</span>
                   </NavLink>
                 </li>
-{!authLoading && isAdmin && (
+{!authLoading && !profileLoading && isAdmin && (
   <li>
     <NavLink
       to="/job-planning"
@@ -370,6 +381,7 @@ function App() {
   <Suspense fallback={<div style={{ padding: 16 }}>Loading…</div>}>
     <Routes>
       <Route path="/login" element={<Login />} />
+<Route path="/reset-password" element={<ResetPassword />} />
 
       <Route
         path="/"
@@ -380,14 +392,14 @@ function App() {
         }
       />
 
-      <Route
-        path="/admin"
-        element={
-          <ProtectedRoute>
-            <Admin />
-          </ProtectedRoute>
-        }
-      />
+     <Route
+  path="/admin"
+  element={
+    <ProtectedRoute adminOnly>
+      <Admin />
+    </ProtectedRoute>
+  }
+/>
 
       <Route
         path="/contacts"

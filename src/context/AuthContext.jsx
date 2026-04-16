@@ -25,7 +25,7 @@ function buildFallbackProfile(user) {
     display_name: fallbackName,
     // ✅ keep for legacy code (safe to remove later once you’ve migrated everything)
     full_name: fallbackName,
-    role: "basic",
+    role: null,
     is_active: true,
     mobile: "",
     job_title: "",
@@ -77,28 +77,12 @@ export function AuthProvider({ children }) {
 
      if (error) {
   console.warn("Profile load error:", error.message);
-
-  const fallback = buildFallbackProfile(currentUser);
-
-  if (!fallback.is_active) {
-    await supabase.auth.signOut();
-    return null;
-  }
-
-  return fallback;
+  return null;
 }
 
-     if (!data) {
-  console.warn("No profile row found — using fallback profile");
-
-  const fallback = buildFallbackProfile(currentUser);
-
-  if (!fallback.is_active) {
-    await supabase.auth.signOut();
-    return null;
-  }
-
-  return fallback;
+if (!data) {
+  console.warn("No profile row found");
+  return null;
 }
 
      // Normalise role value
@@ -112,19 +96,23 @@ if (!profile.is_active) {
 }
 
 return profile;
-    } catch (e) {
+ } catch (e) {
   console.warn("Profile fetch exception:", e?.message || e);
-
-  const fallback = buildFallbackProfile(currentUser);
-
-  if (!fallback.is_active) {
-    await supabase.auth.signOut();
-    return null;
-  }
-
-  return fallback;
+  return null;
 }
+ }
+async function updateLastLogin(userId) {
+  if (!userId) return;
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ last_login_at: new Date().toISOString() })
+    .eq("id", userId);
+
+  if (error) {
+    console.warn("Could not update last login:", error.message);
   }
+}
 
   useEffect(() => {
     let isMounted = true;
@@ -166,10 +154,12 @@ const p = await fetchProfile(sessionUser);
 if (!isMounted) return;
 
 if (!p) {
-  setUser(null);
+  console.warn("Profile failed to load — keeping user session");
   setProfile(null);
   return;
 }
+
+await updateLastLogin(sessionUser.id);
 
 setProfile(p);
 setProfileLoading(false);
@@ -199,10 +189,15 @@ setProfileLoading(false);
       const currentUserId = userIdRef.current;
 
       // ✅ Token refresh happens in the background — never show "Checking login"
-   if (event === "TOKEN_REFRESHED") {
+if (event === "TOKEN_REFRESHED") {
   setUser(newUser);
+
+  if (newUser?.id) {
+    await updateLastLogin(newUser.id);
+  }
+
   if (isMounted) {
-    setProfileLoading(false); // ✅ add this
+    setProfileLoading(false);
     setAuthReady(true);
   }
   return;
@@ -215,41 +210,50 @@ setProfileLoading(false);
       const shouldShowLoading = event === "SIGNED_IN" || event === "SIGNED_OUT";
       if (shouldShowLoading) setAuthLoading(true);
 
-      try {
-        setUser(newUser);
+try {
+  setUser(newUser);
 
-        if (!newUser) {
-          setProfile(null);
-          return;
-        }
+  if (!newUser) {
+    setProfile(null);
+    return;
+  }
 
-        // Only refetch profile if user changed OR we don't have one yet
-       if (userChanged || !hasProfileRef.current) {
-  setProfileLoading(true);
-const p = await fetchProfile(newUser);
-if (!isMounted) return;
+  // Only refetch profile if user changed OR we don't have one yet
+  if (userChanged || !hasProfileRef.current) {
+    setProfileLoading(true);
+    const p = await fetchProfile(newUser);
+    if (!isMounted) return;
 
-if (!p) {
-  setUser(null);
-  setProfile(null);
-  return;
+    if (!p) {
+      console.warn("Profile failed to load — keeping user session");
+      setProfile(null);
+      return;
+    }
+
+    if (event === "SIGNED_IN" && newUser?.id) {
+      await updateLastLogin(newUser.id);
+    }
+
+    setProfile(p);
+    setProfileLoading(false);
+  }
+} catch (e) {
+  console.warn("Auth change handler exception:", e?.message || e);
+  if (!isMounted) return;
+
+  if (newUser) {
+    setProfile(null);
+  } else {
+    setUser(null);
+    setProfile(null);
+  }
+} finally {
+  if (isMounted) {
+    setAuthLoading(false);
+    setProfileLoading(false);
+    setAuthReady(true);
+  }
 }
-
-setProfile(p);
-  setProfileLoading(false);
-        }
-      } catch (e) {
-        console.warn("Auth change handler exception:", e?.message || e);
-        if (!isMounted) return;
-        // Keep user, but fall back profile so app isn't blocked
-        if (newUser) setProfile(buildFallbackProfile(newUser));
-      } finally {
-        if (isMounted) {
-          setAuthLoading(false);
-          setProfileLoading(false); 
-          setAuthReady(true);
-        }
-      }
     });
 
     return () => {
@@ -295,29 +299,30 @@ useEffect(() => {
   };
 }, [user?.id]);
 
-   const value = useMemo(() => {
-    const role = normalizeRole(profile?.role);
+const value = useMemo(() => {
+  const rawRole = profile?.role;
+  const role = rawRole ? normalizeRole(rawRole) : null;
 
-    // ✅ canonical display name for the whole app
-    const displayName =
-      profile?.display_name ||
-      profile?.full_name ||
-      user?.email ||
-      "";
+  // ✅ canonical display name for the whole app
+  const displayName =
+    profile?.display_name ||
+    profile?.full_name ||
+    user?.email ||
+    "";
 
-return {
-  user,
-  profile,
-  role,
-  displayName,
-  permissionLabel: role === "admin" ? "Admin" : "Basic",
-  authLoading,
-  authReady,
-  profileLoading,            // ✅ add this
-  isAdmin: role === "admin",
-};
-
-  }, [user, profile, authLoading, authReady, profileLoading]);
+  return {
+    user,
+    profile,
+    role,
+    displayName,
+    permissionLabel:
+      role === "admin" ? "Admin" : role === "basic" ? "Basic" : "Loading",
+    authLoading,
+    authReady,
+    profileLoading,
+    isAdmin: role === "admin",
+  };
+}, [user, profile, authLoading, authReady, profileLoading]);
 
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

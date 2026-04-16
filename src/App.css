@@ -1069,9 +1069,13 @@
 .admin-users-header,
 .admin-users-row {
   display: grid;
-  grid-template-columns: 1.3fr 1.6fr 1.4fr 2.2fr 0.6fr;
+  grid-template-columns: 1.3fr 1.6fr 1.4fr 2.2fr 1.2fr 0.6fr;
   align-items: center;
   gap: 0.5rem;
+}
+
+.admin-users-row {
+  white-space: nowrap;
 }
 
 .admin-users-header {

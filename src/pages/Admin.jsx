@@ -8,6 +8,29 @@ function normalizeRole(role) {
   return r === "admin" ? "admin" : "basic";
 }
 
+function formatTimeAgo(dateString) {
+  if (!dateString) return "—";
+
+  const now = new Date();
+  const past = new Date(dateString);
+  const diffMs = now - past;
+
+  const seconds = Math.floor(diffMs / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (seconds < 30) return "Just now";
+  if (minutes < 1) return `${seconds}s ago`;
+  if (minutes < 60) return `${minutes} min${minutes > 1 ? "s" : ""} ago`;
+  if (hours < 24) return `${hours} hr${hours > 1 ? "s" : ""} ago`;
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days} days ago`;
+
+  // fallback to readable date
+  return past.toLocaleDateString();
+}
+
 function Admin() {
   const { isAdmin, user } = useAuth();
 
@@ -26,8 +49,8 @@ function Admin() {
       const { data, error } = await supabase
         .from("profiles")
         .select(
-          "id, email, display_name, role, is_active, show_in_contacts, show_in_schedule, show_in_timesheets"
-        )
+  "id, email, display_name, role, is_active, last_login_at, show_in_contacts, show_in_schedule, show_in_timesheets"
+)
         .order("email", { ascending: true });
 
       if (error) {
@@ -89,13 +112,14 @@ function Admin() {
             {error && <p style={{ color: "#b71c1c", fontSize: "0.8rem" }}>{error}</p>}
 
             <div className="admin-users-table" role="table">
-              <div className="admin-users-header">
-                <span>Name</span>
-                <span>Email</span>
-                <span>Access</span>
-                <span>Visible in</span>
-                <span>Active</span>
-              </div>
+    <div className="admin-users-header">
+  <span>Name</span>
+  <span>Email</span>
+  <span>Access</span>
+  <span>Visible in</span>
+  <span>Last Login</span>
+  <span>Active</span>
+</div>
 
               {profiles.map((p) => (
                 <div key={p.id} className="admin-users-row">
@@ -162,6 +186,12 @@ function Admin() {
                       Timesheets
                     </label>
                   </span>
+<span
+  style={{ fontSize: "0.8rem" }}
+  title={p.last_login_at ? new Date(p.last_login_at).toLocaleString() : ""}
+>
+  {formatTimeAgo(p.last_login_at)}
+</span>
 
 <span className="admin-active-cell">
   <label className="admin-active-toggle">
