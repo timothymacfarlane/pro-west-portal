@@ -440,6 +440,21 @@
   filter: brightness(0.96);
 }
 
+.btn-pill:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-pill.danger {
+  border-color: #d32f2f;
+  color: #d32f2f;
+  background: #fff;
+}
+
+.btn-pill.danger:hover {
+  background: #ffebee;
+}
+
 /* --------- FULLSCREEN MAPS PAGE (UPDATED) --------- */
 
 .maps-fullscreen {

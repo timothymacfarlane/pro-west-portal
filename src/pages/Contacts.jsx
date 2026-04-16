@@ -45,8 +45,6 @@ function emptyClientForm() {
     phone: "",
     mobile: "",
     email: "",
-    is_active: true,
-    show_in_contacts: true,
   };
 }
 
@@ -178,10 +176,8 @@ useEffect(() => {
             supabase
               .from("profiles")
               .select(
-                "id, display_name, job_title, mobile, email, is_active, show_in_contacts"
+                "id, display_name, job_title, mobile, email"
               )
-              .eq("is_active", true)
-              .eq("show_in_contacts", true)
               .order("display_name", { ascending: true })
           );
         }
@@ -191,10 +187,8 @@ useEffect(() => {
             supabase
               .from("clients")
               .select(
-                "id, first_name, surname, company, phone, mobile, email, is_active, show_in_contacts"
+                "id, first_name, surname, company, phone, mobile, email"
               )
-              .eq("is_active", true)
-              .eq("show_in_contacts", true)
               .order("company", { ascending: true })
               .order("surname", { ascending: true })
               .order("first_name", { ascending: true })
@@ -308,6 +302,7 @@ useEffect(() => {
   }, [contacts, selectedId]);
 
   const selectedIsClient = selectedContact?.source === "client";
+  const canViewClient = !isAdmin && selectedIsClient;
 
   const handleSelect = (contact) => {
     setSelectedId(contact.id);
@@ -322,6 +317,13 @@ useEffect(() => {
       setSelectedId(null);
       setClientFormOpen(false);
     }
+  };
+
+    const handleRefreshSearch = () => {
+    setQuery("");
+    setSelectedId(null);
+    setClientFormOpen(false);
+    setError("");
   };
 
   // Admin actions
@@ -342,8 +344,21 @@ useEffect(() => {
       phone: selectedContact.phone || "",
       mobile: selectedContact.mobile || "",
       email: selectedContact.email || "",
-      is_active: true,
-      show_in_contacts: true,
+    });
+    setClientFormOpen(true);
+  };
+
+  const openViewClient = () => {
+    if (!selectedContact || selectedContact.source !== "client") return;
+
+    setClientFormMode("view");
+    setClientForm({
+      first_name: selectedContact.first_name || "",
+      surname: selectedContact.surname || "",
+      company: selectedContact.company || "",
+      phone: selectedContact.phone || "",
+      mobile: selectedContact.mobile || "",
+      email: selectedContact.email || "",
     });
     setClientFormOpen(true);
   };
@@ -355,16 +370,14 @@ useEffect(() => {
     setError("");
 
     try {
-      const payload = {
-        first_name: normalizeSpace(clientForm.first_name),
-        surname: normalizeSpace(clientForm.surname),
-        company: normalizeSpace(clientForm.company),
-        phone: normalizeSpace(clientForm.phone),
-        mobile: normalizeSpace(clientForm.mobile),
-        email: normalizeSpace(clientForm.email),
-        is_active: Boolean(clientForm.is_active),
-        show_in_contacts: Boolean(clientForm.show_in_contacts),
-      };
+     const payload = {
+  first_name: normalizeSpace(clientForm.first_name),
+  surname: normalizeSpace(clientForm.surname),
+  company: normalizeSpace(clientForm.company),
+  phone: normalizeSpace(clientForm.phone),
+  mobile: normalizeSpace(clientForm.mobile),
+  email: normalizeSpace(clientForm.email),
+};
 
    let savedRow = null;
 
@@ -372,7 +385,7 @@ if (clientFormMode === "add") {
   const { data, error: insErr } = await supabase
     .from("clients")
     .insert(payload)
-    .select("id, first_name, surname, company, phone, mobile, email, is_active, show_in_contacts")
+    .select("id, first_name, surname, company, phone, mobile, email")
     .single();
 
   if (insErr) throw insErr;
@@ -385,7 +398,7 @@ if (clientFormMode === "add") {
     .from("clients")
     .update(payload)
     .eq("id", clientId)
-    .select("id, first_name, surname, company, phone, mobile, email, is_active, show_in_contacts")
+    .select("id, first_name, surname, company, phone, mobile, email")
     .single();
 
   if (updErr) throw updErr;
@@ -443,14 +456,16 @@ if (savedRow) {
   };
 
   const deleteClient = async () => {
-    if (!isAdmin) return;
-    if (!selectedContact || selectedContact.source !== "client") return;
+  if (!isAdmin) return;
+  if (!selectedContact || selectedContact.source !== "client") return;
 
-    const ok = window.confirm("Delete this client contact?");
-    if (!ok) return;
+ const ok = window.confirm(
+  `Delete client "${selectedContact.name}"?\n\nThis will permanently remove the contact from the portal.`
+);
+  if (!ok) return;
 
-    setSavingClient(true);
-    setError("");
+  setSavingClient(true);
+  setError("");
 
     try {
       const clientId = selectedContact.source_id;
@@ -492,9 +507,26 @@ if (savedRow) {
             gap: "0.75rem",
           }}
         >
-          <h3 className="card-title" style={{ margin: 0 }}>
-            Search contacts
-          </h3>
+        <div
+  style={{
+    display: "flex",
+    alignItems: "center",
+    gap: "0.6rem",
+    flexWrap: "wrap",
+  }}
+>
+  <h3 className="card-title" style={{ margin: 0 }}>
+    Search contacts
+  </h3>
+
+ <button
+  type="button"
+  onClick={handleRefreshSearch}
+  className="btn-pill"
+>
+  Refresh
+</button>
+</div>
 
           <div
             style={{
@@ -542,20 +574,13 @@ if (savedRow) {
 
             {/* Admin-only: Add Client (only makes sense when Clients are enabled) */}
             {isAdmin && showClients && (
-              <button
-                type="button"
-                onClick={openAddClient}
-                style={{
-                  padding: "0.35rem 0.6rem",
-                  borderRadius: 10,
-                  border: "1px solid rgba(0,0,0,0.15)",
-                  background: "#fff",
-                  cursor: "pointer",
-                  fontSize: "0.92rem",
-                }}
-              >
-                + Add client
-              </button>
+             <button
+  type="button"
+  onClick={openAddClient}
+  className="btn-pill"
+>
+  + Add client
+</button>
             )}
           </div>
         </div>
@@ -632,14 +657,20 @@ if (savedRow) {
       </div>
 
       {/* Admin-only Client Add/Edit form (uses same "card" styling) */}
-      {isAdmin && clientFormOpen && showClients && (
+      {clientFormOpen && showClients && (
         <div className="card">
           <h3 className="card-title">
-            {clientFormMode === "add" ? "Add client" : "Edit client"}
-          </h3>
-          <p className="card-subtitle">
-            Admin only. Basic users can view clients, but can’t edit them.
-          </p>
+  {clientFormMode === "add"
+    ? "Add client"
+    : clientFormMode === "edit"
+    ? "Edit client"
+    : "View client"}
+</h3>
+         <p className="card-subtitle">
+  {clientFormMode === "view"
+    ? "Read-only client details."
+    : "Admin only. Basic users can view clients, but can’t edit them."}
+</p>
 
           <div style={{ display: "grid", gap: "0.5rem" }}>
             <input
@@ -647,6 +678,7 @@ if (savedRow) {
               className="maps-search-input"
               placeholder="First name"
               value={clientForm.first_name}
+              readOnly={clientFormMode === "view"}
               onChange={(e) =>
                 setClientForm((p) => ({ ...p, first_name: e.target.value }))
               }
@@ -656,6 +688,7 @@ if (savedRow) {
               className="maps-search-input"
               placeholder="Surname"
               value={clientForm.surname}
+              readOnly={clientFormMode === "view"}
               onChange={(e) =>
                 setClientForm((p) => ({ ...p, surname: e.target.value }))
               }
@@ -665,6 +698,7 @@ if (savedRow) {
               className="maps-search-input"
               placeholder="Company"
               value={clientForm.company}
+              readOnly={clientFormMode === "view"}
               onChange={(e) =>
                 setClientForm((p) => ({ ...p, company: e.target.value }))
               }
@@ -675,6 +709,7 @@ if (savedRow) {
               placeholder="Phone"
               inputMode="tel"
               value={clientForm.phone}
+              readOnly={clientFormMode === "view"}
               onChange={(e) =>
                 setClientForm((p) => ({ ...p, phone: e.target.value }))
               }
@@ -685,6 +720,7 @@ if (savedRow) {
               placeholder="Mobile"
               inputMode="tel"
               value={clientForm.mobile}
+              readOnly={clientFormMode === "view"}
               onChange={(e) =>
                 setClientForm((p) => ({ ...p, mobile: e.target.value }))
               }
@@ -694,77 +730,34 @@ if (savedRow) {
               className="maps-search-input"
               placeholder="Email"
               value={clientForm.email}
+              readOnly={clientFormMode === "view"}
               onChange={(e) =>
                 setClientForm((p) => ({ ...p, email: e.target.value }))
               }
             />
 
-            <div
-              style={{
-                display: "flex",
-                gap: "1rem",
-                alignItems: "center",
-                flexWrap: "wrap",
-                color: "#444",
-                fontSize: "0.95rem",
-              }}
-            >
-              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <input
-                  type="checkbox"
-                  checked={clientForm.is_active}
-                  onChange={(e) =>
-                    setClientForm((p) => ({ ...p, is_active: e.target.checked }))
-                  }
-                />
-                Active
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <input
-                  type="checkbox"
-                  checked={clientForm.show_in_contacts}
-                  onChange={(e) =>
-                    setClientForm((p) => ({
-                      ...p,
-                      show_in_contacts: e.target.checked,
-                    }))
-                  }
-                />
-                Show in contacts
-              </label>
-            </div>
 
             <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={saveClient}
-                disabled={savingClient}
-                style={{
-                  padding: "0.45rem 0.8rem",
-                  borderRadius: 10,
-                  border: "1px solid rgba(0,0,0,0.15)",
-                  background: "#fff",
-                  cursor: "pointer",
-                }}
-              >
-                {savingClient ? "Saving…" : "Save"}
-              </button>
+  {clientFormMode !== "view" && (
+    <button
+  type="button"
+  onClick={saveClient}
+  disabled={savingClient}
+  className="btn-pill primary"
+>
+  {savingClient ? "Saving…" : "Save"}
+</button>
+  )}
 
-              <button
-                type="button"
-                onClick={() => setClientFormOpen(false)}
-                disabled={savingClient}
-                style={{
-                  padding: "0.45rem 0.8rem",
-                  borderRadius: 10,
-                  border: "1px solid rgba(0,0,0,0.15)",
-                  background: "#fff",
-                  cursor: "pointer",
-                }}
-              >
-                Cancel
-              </button>
-            </div>
+  <button
+  type="button"
+  onClick={() => setClientFormOpen(false)}
+  disabled={savingClient}
+  className="btn-pill"
+>
+  {clientFormMode === "view" ? "Close" : "Cancel"}
+</button>
+</div>
           </div>
         </div>
       )}
@@ -818,36 +811,43 @@ if (savedRow) {
               {isAdmin && selectedIsClient && (
                 <div style={{ marginTop: "0.8rem", display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
                   <button
-                    type="button"
-                    onClick={openEditClient}
-                    style={{
-                      padding: "0.4rem 0.8rem",
-                      borderRadius: 10,
-                      border: "1px solid rgba(0,0,0,0.15)",
-                      background: "#fff",
-                      cursor: "pointer",
-                      fontSize: "0.92rem",
-                    }}
-                  >
-                    Edit client
-                  </button>
+  type="button"
+  onClick={openEditClient}
+  className="btn-pill"
+>
+  Edit client
+</button>
 
-                  <button
-                    type="button"
-                    onClick={deleteClient}
-                    style={{
-                      padding: "0.4rem 0.8rem",
-                      borderRadius: 10,
-                      border: "1px solid rgba(0,0,0,0.15)",
-                      background: "#fff",
-                      cursor: "pointer",
-                      fontSize: "0.92rem",
-                    }}
-                  >
-                    Delete client
-                  </button>
+   <button
+  type="button"
+  onClick={deleteClient}
+  className="btn-pill danger"
+>
+  Delete client
+</button>
                 </div>
               )}
+
+{/* Basic-user action for CLIENT contacts */}
+{canViewClient && (
+  <div
+    style={{
+      marginTop: "0.8rem",
+      display: "flex",
+      gap: "0.6rem",
+      flexWrap: "wrap",
+    }}
+  >
+   <button
+  type="button"
+  onClick={openViewClient}
+  className="btn-pill"
+>
+  View client
+</button>
+  </div>
+)}
+
             </div>
           </div>
         </div>
