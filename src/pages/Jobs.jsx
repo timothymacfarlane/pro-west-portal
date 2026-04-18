@@ -7,7 +7,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 
 import proj4 from "proj4";
 
-const STATUS_OPTIONS = ["Planned", "In progress", "On hold", "Complete", "Archived"];
+const STATUS_OPTIONS = ["In progress", "On hold", "Complete"];
 
 const PRIORITY_OPTIONS = ["", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
@@ -88,6 +88,22 @@ const LOCAL_AUTHORITIES = [
   "Shire of Westonia","Shire of Wickepin","Shire of Williams","Shire of Wiluna","Shire of Wongan-Ballidu",
   "Shire of Woodanilling","Shire of Wyalkatchem","Shire of Wyndham-East Kimberley","Shire of Yalgoo","Shire of Yilgarn","Shire of York",
 ];
+
+function stripLgaPrefix(name) {
+  return (name || "")
+    .replace(/^(City|Town|Shire)\s+of\s+/i, "")
+    .trim();
+}
+
+function matchesLocalAuthority(authority, search) {
+  const q = (search || "").trim().toLowerCase();
+  if (!q) return true;
+
+  const full = (authority || "").toLowerCase();
+  const stripped = stripLgaPrefix(authority).toLowerCase();
+
+  return full.includes(q) || stripped.includes(q);
+}
 
 // MGA2020 / GDA2020
 proj4.defs("EPSG:7849", "+proj=utm +zone=49 +south +ellps=GRS80 +units=m +no_defs");
@@ -634,8 +650,10 @@ useEffect(() => {
     setStreetName("");
     setSuburb("");
     setLocalAuthority("");
-    setMapRef("");
+    setLocalAuthoritySearch("");
     setCt("");
+    setShowLocalAuthoritySuggestions(false);
+    setLocalAuthorityActiveIdx(-1);
 
     setClientFirstName("");
     setClientSurname("");
@@ -645,7 +663,7 @@ useEffect(() => {
     setClientEmail("");
     setClientName("");
 
-    setStatus("Planned");
+    setStatus("In progress");
 setAssignedTo("");
 setPriority("");
 setNotes("");
@@ -672,8 +690,10 @@ setNotes("");
   setStreetName(i.street_name ?? "");
   setSuburb(i.suburb ?? "");
   setLocalAuthority(i.local_authority ?? "");
-  setMapRef(i.map_ref ?? "");
+  setLocalAuthoritySearch(i.local_authority ?? "");
   setCt(i.ct ?? "");
+  setShowLocalAuthoritySuggestions(false);
+  setLocalAuthorityActiveIdx(-1);
 
   setClientFirstName(i.client_first_name ?? "");
   setClientSurname(i.client_surname ?? "");
@@ -686,7 +706,7 @@ setNotes("");
    // ✅ default search box to blank (prevents auto-suggest dropdown on open)
   setClientSearch("");
 
-  setStatus(i.status ?? "Planned");
+  setStatus(i.status ?? "In progress");
 setAssignedTo(i.assigned_to ?? "");
 setPriority(i.priority != null ? String(i.priority) : "");
 setNotes(i.notes ?? "");
@@ -709,7 +729,10 @@ const [jobCategory, setJobCategory] = useState(initial?.job_category ?? "");
   const [streetName, setStreetName] = useState(initial?.street_name ?? "");
   const [suburb, setSuburb] = useState(initial?.suburb ?? "");
   const [localAuthority, setLocalAuthority] = useState(initial?.local_authority ?? "");
-  const [mapRef, setMapRef] = useState(initial?.map_ref ?? "");
+  const [localAuthoritySearch, setLocalAuthoritySearch] = useState(initial?.local_authority ?? "");
+  const [showLocalAuthoritySuggestions, setShowLocalAuthoritySuggestions] = useState(false);
+  const [localAuthorityActiveIdx, setLocalAuthorityActiveIdx] = useState(-1);
+  const localAuthorityWrapRef = useRef(null);
   const [ct, setCt] = useState(initial?.ct ?? "");
 
   // ✅ Client snapshot fields on jobs
@@ -730,7 +753,7 @@ const [deletingClient, setDeletingClient] = useState(false);
   // Keep legacy job columns (still used in your summaries / older data)
   const [clientName, setClientName] = useState(initial?.client_name ?? "");
 
-  const [status, setStatus] = useState(initial?.status ?? "Planned");
+const [status, setStatus] = useState(initial?.status ?? "In progress");
 const [assignedTo, setAssignedTo] = useState(initial?.assigned_to ?? "");
 const [priority, setPriority] = useState(initial?.priority != null ? String(initial.priority) : "");
 const [notes, setNotes] = useState(initial?.notes ?? "");
@@ -760,6 +783,19 @@ const [notes, setNotes] = useState(initial?.notes ?? "");
 function handleJobCategoryChange(nextCategory) {
   setJobCategory(nextCategory);
   setJobTypeLegacy(nextCategory || "");
+}
+
+const filteredLocalAuthorities = useMemo(() => {
+  return LOCAL_AUTHORITIES.filter((la) =>
+    matchesLocalAuthority(la, localAuthoritySearch)
+  ).slice(0, 150);
+}, [localAuthoritySearch]);
+
+function pickLocalAuthority(la) {
+  setLocalAuthority(la);
+  setLocalAuthoritySearch(la);
+  setShowLocalAuthoritySuggestions(false);
+  setLocalAuthorityActiveIdx(-1);
 }
 
   const modalMapsHref = useMemo(() => {
@@ -994,6 +1030,28 @@ useEffect(() => {
     document.removeEventListener("touchstart", handler);
   };
 }, [open, clientSuggestions]);
+
+useEffect(() => {
+  if (!open) return;
+
+  const handler = (e) => {
+    const wrap = localAuthorityWrapRef.current;
+    if (!wrap) return;
+
+    if (!wrap.contains(e.target)) {
+      setShowLocalAuthoritySuggestions(false);
+      setLocalAuthorityActiveIdx(-1);
+    }
+  };
+
+  document.addEventListener("mousedown", handler);
+  document.addEventListener("touchstart", handler, { passive: true });
+
+  return () => {
+    document.removeEventListener("mousedown", handler);
+    document.removeEventListener("touchstart", handler);
+  };
+}, [open]);
 
   function pickClient(c) {
     const fn = norm(c.first_name);
@@ -1547,8 +1605,9 @@ async function notifyJobAssignment({ jobId, jobNumber, prevAssigned, nextAssigne
         street_number: streetNumber?.trim() || null,
         street_name: streetName?.trim() || null,
         suburb: suburb?.trim() || null,
-        local_authority: localAuthority?.trim() || null,
-        map_ref: mapRef?.trim() || null,
+        local_authority: LOCAL_AUTHORITIES.includes(localAuthority?.trim())
+  ? localAuthority.trim()
+  : null,
         ct: ct?.trim() || null,
 
         client_first_name: clientFirstName?.trim() || null,
@@ -1586,7 +1645,6 @@ const nextAssigned = payload.assigned_to || null;
           p_street_name: payload.street_name,
           p_suburb: payload.suburb,
           p_local_authority: payload.local_authority,
-          p_map_ref: payload.map_ref,
           p_ct: payload.ct,
 
           // RPC compatibility: still send these
@@ -1788,7 +1846,14 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
   }}
 >
           {/* Client */}
-          <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
+         <div
+  style={{
+    gridRow: "span 2",
+    padding: "10px 12px",
+    borderRadius: 14,
+    background: "rgba(255,255,255,0.04)",
+  }}
+>
          <div
   className="jobmodal-client-header"
   style={{
@@ -2021,49 +2086,14 @@ onFocus={() => {
   </div>
 </div>
 
-          {/* Address */}
-          <div style={{ gridColumn: "1 / -1", padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
-            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Address (Google autocomplete)</div>
-
-            <div style={{ display: "grid", gap: 8 }}>
-              <input
-                ref={addressInputRef}
-                className="input"
-                placeholder="Start typing an address…"
-               value={fullAddress || ""}
-onChange={(e) => setFullAddress(e.target.value)}
-                disabled={!canEdit}
-              />
-
-             <div
-  className="jobmodal-three-col"
+{/* Job Category / Job type / Job date */}
+<div
   style={{
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)",
-    gap: 8,
+    padding: "10px 12px",
+    borderRadius: 14,
+    background: "rgba(255,255,255,0.04)",
   }}
 >
-  <input className="input" placeholder="Street no" value={streetNumber} onChange={(e) => setStreetNumber(e.target.value)} disabled={!canEdit} />
-  <input className="input" placeholder="Street name" value={streetName} onChange={(e) => setStreetName(e.target.value)} disabled={!canEdit} />
-  <input className="input" placeholder="Suburb" value={suburb} onChange={(e) => setSuburb(e.target.value)} disabled={!canEdit} />
-</div>
-            </div>
-          </div>
-
-          {/* Local authority / Job type / Job date */}
-          <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
-            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Local authority</div>
-            <select className="input" value={localAuthority || ""} onChange={(e) => setLocalAuthority(e.target.value)} disabled={!canEdit}>
-              <option value="">—</option>
-              {LOCAL_AUTHORITIES.map((la) => (
-                <option key={la} value={la}>
-                  {la}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
   <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Job Category / Type / Date</div>
   <div style={{ display: "grid", gap: 8 }}>
     <select
@@ -2098,22 +2128,37 @@ onChange={(e) => setFullAddress(e.target.value)}
   </div>
 </div>
 
-          {/* Lot/Plan/CT + Map ref */}
-          <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
-            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Lot / Plan / C/T</div>
+
+          {/* Address */}
+          <div style={{ gridColumn: "1 / -1", padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
+            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Address (Google autocomplete)</div>
+
             <div style={{ display: "grid", gap: 8 }}>
-              <input className="input" placeholder="Lot" value={lotNumber} onChange={(e) => setLotNumber(e.target.value)} disabled={!canEdit} />
-              <input className="input" placeholder="Plan" value={planNumber} onChange={(e) => setPlanNumber(e.target.value)} disabled={!canEdit} />
-              <input className="input" placeholder="C/T" value={ct} onChange={(e) => setCt(e.target.value)} disabled={!canEdit} />
+              <input
+                ref={addressInputRef}
+                className="input"
+                placeholder="Start typing an address…"
+               value={fullAddress || ""}
+onChange={(e) => setFullAddress(e.target.value)}
+                disabled={!canEdit}
+              />
+
+             <div
+  className="jobmodal-three-col"
+  style={{
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)",
+    gap: 8,
+  }}
+>
+  <input className="input" placeholder="Street no" value={streetNumber} onChange={(e) => setStreetNumber(e.target.value)} disabled={!canEdit} />
+  <input className="input" placeholder="Street name" value={streetName} onChange={(e) => setStreetName(e.target.value)} disabled={!canEdit} />
+  <input className="input" placeholder="Suburb" value={suburb} onChange={(e) => setSuburb(e.target.value)} disabled={!canEdit} />
+</div>
             </div>
           </div>
 
-          <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
-            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Map ref</div>
-            <input className="input" placeholder="Map ref" value={mapRef} onChange={(e) => setMapRef(e.target.value)} disabled={!canEdit} />
-          </div>
-
-          {/* MGA */}
+         {/* MGA */}
           <div style={{ gridColumn: "1 / -1", padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
             <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>MGA2020 (auto from Google address if available)</div>
            <div
@@ -2130,15 +2175,130 @@ onChange={(e) => setFullAddress(e.target.value)}
 </div>
           </div>
 
-          {/* Notes */}
-<div
+          {/* Local authority / Job type / Job date */}
+          <div style={{ padding: "10px 12px", borderRadius: 14, background: "rgba(255,255,255,0.04)" }}>
+  <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Local Authority</div>
+
+  <div ref={localAuthorityWrapRef} style={{ position: "relative" }}>
+    <input
+      className="input"
+      placeholder="Type local authority…"
+      value={localAuthoritySearch}
+      disabled={!canEdit}
+      onFocus={() => {
+        if (!canEdit) return;
+        setShowLocalAuthoritySuggestions(true);
+      }}
+      onChange={(e) => {
+        const v = e.target.value;
+        setLocalAuthoritySearch(v);
+        setLocalAuthority(v);
+        setShowLocalAuthoritySuggestions(true);
+        setLocalAuthorityActiveIdx(-1);
+      }}
+      onKeyDown={(e) => {
+        const hasList = filteredLocalAuthorities.length > 0;
+
+        if (e.key === "ArrowDown") {
+          if (!hasList) return;
+          e.preventDefault();
+          setShowLocalAuthoritySuggestions(true);
+          setLocalAuthorityActiveIdx((i) =>
+            i < filteredLocalAuthorities.length - 1 ? i + 1 : 0
+          );
+          return;
+        }
+
+if (e.key === "Enter") {
+  if (!hasList) return;
+
+  const q = (localAuthoritySearch || "").trim();
+  if (!q && localAuthorityActiveIdx < 0) return;
+
+  e.preventDefault();
+
+  const picked =
+    localAuthorityActiveIdx >= 0
+      ? filteredLocalAuthorities[localAuthorityActiveIdx]
+      : filteredLocalAuthorities[0];
+
+  if (picked) {
+    pickLocalAuthority(picked);
+  }
+  return;
+}
+
+        if (e.key === "Escape") {
+          setShowLocalAuthoritySuggestions(false);
+          setLocalAuthorityActiveIdx(-1);
+        }
+      }}
+    />
+
+    {showLocalAuthoritySuggestions && filteredLocalAuthorities.length > 0 && (
+      <div
+        className="contacts-suggestions"
+        style={{
+          marginTop: "0.4rem",
+          maxHeight: "220px",
+          overflowY: "auto",
+          WebkitOverflowScrolling: "touch",
+          display: "flex",
+          flexDirection: "column",
+          gap: "0.35rem",
+        }}
+      >
+        {filteredLocalAuthorities.map((la, idx) => (
+          <button
+            key={la}
+            type="button"
+            className={`contacts-suggestion ${idx === localAuthorityActiveIdx ? "is-active" : ""}`}
+            onMouseEnter={() => setLocalAuthorityActiveIdx(idx)}
+            onClick={() => pickLocalAuthority(la)}
+          >
+            <div className="contacts-suggestion-header">
+              <div>
+                <div className="contacts-suggestion-name">{stripLgaPrefix(la)}</div>
+                <div className="contacts-suggestion-role" style={{ fontSize: "0.72rem", opacity: 0.8 }}>
+                  {la}
+                </div>
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+</div>
+
+
+          {/* Lot/Plan/CT */}
+          <div
   style={{
-    gridColumn: "1 / -1",
+    gridRow: "span 2",
     padding: "10px 12px",
     borderRadius: 14,
     background: "rgba(255,255,255,0.04)",
   }}
 >
+            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Lot / Plan / C/T</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <input className="input" placeholder="Lot" value={lotNumber} onChange={(e) => setLotNumber(e.target.value)} disabled={!canEdit} />
+              <input className="input" placeholder="Plan" value={planNumber} onChange={(e) => setPlanNumber(e.target.value)} disabled={!canEdit} />
+              <input className="input" placeholder="C/T" value={ct} onChange={(e) => setCt(e.target.value)} disabled={!canEdit} />
+            </div>
+          </div>
+
+
+          {/* Notes */}
+<div
+  style={{
+    padding: "10px 12px",
+    borderRadius: 14,
+    background: "rgba(255,255,255,0.04)",
+  }}
+>
+
   <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Job Folder Sticker Notes</div>
 
   <div style={{ width: "139mm", maxWidth: "100%" }}>
@@ -3361,7 +3521,7 @@ useEffect(() => {
 
             <input
               className="maps-search-input"
-              placeholder="Type job number… (e.g. 1234)"
+              placeholder="Search job number… (e.g. 1234)"
               inputMode="numeric"
               pattern="[0-9]*"
               value={jobNoQuery}
@@ -3486,7 +3646,7 @@ useEffect(() => {
 
             <input
               className="maps-search-input"
-              placeholder="Start typing… (client, suburb, lot/plan, address, notes, etc.)"
+              placeholder="Search…(client, suburb, lot/plan, address, etc.)"
               value={globalQuery}
               onChange={(e) => {
   try {

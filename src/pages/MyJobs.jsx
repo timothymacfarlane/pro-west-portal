@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
 
-const STATUS_OPTIONS = ["Planned", "In progress", "On hold", "Complete", "Archived"];
+const STATUS_OPTIONS = ["In progress", "On hold", "Complete"];
 const PAGE_SIZE = 30;
 
 function addressSummaryFromRow(r) {

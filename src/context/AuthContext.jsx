@@ -16,22 +16,6 @@ function normalizeRole(role) {
   return r === "admin" ? "admin" : "basic";
 }
 
-function buildFallbackProfile(user) {
-  const fallbackName = user?.user_metadata?.full_name ?? user?.email ?? "User";
-
-  return {
-    id: user?.id ?? null,
-    // ✅ new canonical field
-    display_name: fallbackName,
-    // ✅ keep for legacy code (safe to remove later once you’ve migrated everything)
-    full_name: fallbackName,
-    role: null,
-    is_active: true,
-    mobile: "",
-    job_title: "",
-  };
-}
-
 
 // Helper: promise timeout wrapper
 async function withTimeout(promise, ms, label = "operation") {
@@ -66,41 +50,43 @@ export function AuthProvider({ children }) {
     hasProfileRef.current = !!profile;
   }, [profile]);
 
-  async function fetchProfile(currentUser) {
+async function fetchProfile(currentUser) {
+  async function runFetch() {
+    const { data, error } = await withTimeout(
+      supabase.from("profiles").select("*").eq("id", currentUser.id).maybeSingle(),
+      8000,
+      "profiles fetch"
+    );
+
+    if (error) throw error;
+    if (!data) return null;
+
+    const profile = { ...data, role: normalizeRole(data.role) };
+
+    if (!profile.is_active) {
+      console.warn("User is inactive — signing out");
+      await supabase.auth.signOut();
+      return null;
+    }
+
+    return profile;
+  }
+
+  try {
+    return await runFetch();
+  } catch (e) {
+    console.warn("Profile fetch failed, retrying once:", e?.message || e);
+
     try {
-      // Use maybeSingle so "no row" doesn't throw like single() can
-      const { data, error } = await withTimeout(
-        supabase.from("profiles").select("*").eq("id", currentUser.id).maybeSingle(),
-        8000,
-        "profiles fetch"
-      );
-
-     if (error) {
-  console.warn("Profile load error:", error.message);
-  return null;
+      return await runFetch();
+    } catch (retryError) {
+      console.warn("Profile fetch exception:", retryError?.message || retryError);
+      return null;
+    }
+  }
 }
 
-if (!data) {
-  console.warn("No profile row found");
-  return null;
-}
 
-     // Normalise role value
-const profile = { ...data, role: normalizeRole(data.role) };
-
-// 🚨 If inactive → force logout
-if (!profile.is_active) {
-  console.warn("User is inactive — signing out");
-  await supabase.auth.signOut();
-  return null;
-}
-
-return profile;
- } catch (e) {
-  console.warn("Profile fetch exception:", e?.message || e);
-  return null;
-}
- }
 async function updateLastLogin(userId) {
   if (!userId) return;
 
@@ -192,10 +178,6 @@ setProfileLoading(false);
 if (event === "TOKEN_REFRESHED") {
   setUser(newUser);
 
-  if (newUser?.id) {
-    await updateLastLogin(newUser.id);
-  }
-
   if (isMounted) {
     setProfileLoading(false);
     setAuthReady(true);
@@ -225,10 +207,14 @@ try {
     if (!isMounted) return;
 
     if (!p) {
-      console.warn("Profile failed to load — keeping user session");
-      setProfile(null);
-      return;
-    }
+  console.warn("Profile failed to load — keeping existing profile if same user");
+
+  if (userChanged) {
+    setProfile(null);
+  }
+
+  return;
+}
 
     if (event === "SIGNED_IN" && newUser?.id) {
       await updateLastLogin(newUser.id);
@@ -241,12 +227,10 @@ try {
   console.warn("Auth change handler exception:", e?.message || e);
   if (!isMounted) return;
 
-  if (newUser) {
-    setProfile(null);
-  } else {
-    setUser(null);
-    setProfile(null);
-  }
+ if (!newUser) {
+  setUser(null);
+  setProfile(null);
+}
 } finally {
   if (isMounted) {
     setAuthLoading(false);
