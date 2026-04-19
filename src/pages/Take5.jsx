@@ -274,7 +274,9 @@ function Take5() {
 
   // Header info
   const [jobNumber, setJobNumber] = useState("");
+  const [selectedJob, setSelectedJob] = useState(null);
   const [employeeName, setEmployeeName] = useState(derivedDisplayName);
+  const [employeeOptions, setEmployeeOptions] = useState([]);
 
   // ✅ Job number autosuggest (copied pattern from Jobs.jsx)
   const [jobNoQuery, setJobNoQuery] = useState("");
@@ -463,12 +465,61 @@ function Take5() {
   ]);
 
   // Keep employee/signature name synced with auth display name
-  useEffect(() => {
-    if (derivedDisplayName) {
-      setEmployeeName(derivedDisplayName);
-      setSignatureName((prev) => prev || derivedDisplayName);
+useEffect(() => {
+  if (derivedDisplayName) {
+    setEmployeeName((prev) => prev || derivedDisplayName);
+    setSignatureName((prev) => prev || derivedDisplayName);
+  }
+}, [derivedDisplayName]);
+
+useEffect(() => {
+  let isMounted = true;
+
+  const loadEmployees = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, display_name, email")
+        .order("display_name", { ascending: true });
+
+      if (error) throw error;
+
+      const options = (data || [])
+        .map((p) => ({
+          id: p.id,
+          name: (p.display_name || "").trim() || (p.email || "").trim(),
+          email: p.email,
+        }))
+        .filter((p) => p.name);
+
+      if (!isMounted) return;
+
+      setEmployeeOptions(options);
+
+      // 🔥 THIS IS THE KEY PART
+      const loggedInEmail = user?.email;
+
+      const matchedUser = options.find(
+        (emp) => emp.email === loggedInEmail
+      );
+
+      if (matchedUser) {
+        setEmployeeName(matchedUser.name);
+      } else if (derivedDisplayName) {
+        setEmployeeName(derivedDisplayName);
+      }
+    } catch (err) {
+      console.error("Failed to load employee profiles", err);
+      if (isMounted) setEmployeeOptions([]);
     }
-  }, [derivedDisplayName]);
+  };
+
+  loadEmployees();
+
+  return () => {
+    isMounted = false;
+  };
+}, [user, derivedDisplayName]);
 
   // Keep jobNoQuery synced if jobNumber is changed elsewhere (e.g. restore)
   useEffect(() => {
@@ -636,6 +687,7 @@ function Take5() {
     setJobNumber("");
     setJobNoQuery("");
     setJobNoSuggestions([]);
+    setSelectedJob(null);
     setEmployeeName(derivedDisplayName);
     setSignatureName(derivedDisplayName);
     setSwms("");
@@ -1106,17 +1158,21 @@ function Take5() {
         <div className="card-row" style={{ alignItems: "flex-start" }}>
           <span className="card-row-label" style={{ paddingTop: 8 }}>Job Number</span>
 
-          <div style={{ width: "100%", maxWidth: 320 }}>
+          <div style={{ width: "100%", maxWidth: 320, position: "relative" }}>
             <input
               type="text"
               value={jobNoQuery}
-              onChange={(e) => {
-                const v = e.target.value;
-                setJobNoQuery(v);
-                setJobNumber(v);
-                setIncompleteWarning("");
-              }}
+            onChange={(e) => {
+  const v = e.target.value;
+  setJobNoQuery(v);
+  setJobNumber(v);
+  setSelectedJob(null);
+  setIncompleteWarning("");
+}}
               onFocus={() => runJobNoSuggest(jobNoQuery)}
+              onBlur={() => {
+  setTimeout(() => setJobNoSuggestions([]), 150);
+}}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   setJobNoSuggestions([]);
@@ -1131,68 +1187,144 @@ function Take5() {
               style={{ width: "100%" }}
             />
 
-            {jobNoSuggestions.length > 0 && (
-              <div
-                style={{
-                  marginTop: 8,
-                  borderRadius: 14,
-                  overflow: "hidden",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(20,20,25,0.95)",
-                  boxShadow: "0 12px 30px rgba(0,0,0,0.35)",
-                  maxHeight: 280,
-                  overflowY: "auto",
-                  WebkitOverflowScrolling: "touch",
-                }}
-              >
-                {jobNoSuggestions.map((j) => (
-                  <button
-                    key={j.id}
-                    className="btn-pill"
-                    style={{
-                      width: "100%",
-                      justifyContent: "flex-start",
-                      borderRadius: 0,
-                      padding: "10px 12px",
-                      background: "transparent",
-                      textAlign: "left",
-                      whiteSpace: "normal",
-                    }}
-                    type="button"
-                    onClick={() => {
-                      setJobNoQuery(String(j.job_number));
-                      setJobNumber(String(j.job_number));
-                      setJobNoSuggestions([]);
-                      setIncompleteWarning("");
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 950, color: "#fff" }}>#{j.job_number}</div>
-                      <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2, color: "#fff" }}>
-                        {j.address}
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+           {jobNoSuggestions.length > 0 && (
+  <div
+
+    style={{
+      position: "absolute",
+      top: "calc(100% + 6px)",
+      left: 0,
+      right: 0,
+      zIndex: 20,
+      borderRadius: 12,
+      overflow: "hidden",
+      border: "1px solid var(--pw-border-soft, #eadada)",
+      background: "#fff",
+      boxShadow: "0 10px 24px rgba(0,0,0,0.12)",
+      maxHeight: 260,
+      overflowY: "auto",
+      WebkitOverflowScrolling: "touch",
+    }}
+  >
+    {jobNoSuggestions.map((j, idx) => (
+      <button
+        key={j.id}
+        type="button"
+        onClick={() => {
+  setJobNoQuery(String(j.job_number));
+  setJobNumber(String(j.job_number));
+  setSelectedJob(j);
+  setJobNoSuggestions([]);
+  setIncompleteWarning("");
+}}
+        style={{
+          width: "100%",
+          display: "block",
+          padding: "0.7rem 0.85rem",
+          textAlign: "left",
+          background: "#fff",
+          border: "none",
+          borderBottom:
+            idx === jobNoSuggestions.length - 1
+              ? "none"
+              : "1px solid #f3e1e1",
+          cursor: "pointer",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "#fff5f5";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "#fff";
+        }}
+      >
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: "0.9rem",
+            color: "var(--pw-primary-dark, #b71c1c)",
+            lineHeight: 1.2,
+          }}
+        >
+          Job #{j.job_number}
+        </div>
+
+        <div
+          style={{
+            fontSize: "0.78rem",
+            color: "#666",
+            marginTop: 3,
+            lineHeight: 1.35,
+          }}
+        >
+          {j.address}
+        </div>
+      </button>
+    ))}
+  </div>
+)}
           </div>
+
+{selectedJob && (
+  <div
+    style={{
+      marginTop: 6,
+      padding: "0.5rem 0.7rem",
+      borderRadius: 8,
+      background: "#e8f5e9",
+      border: "1px solid #c8e6c9",
+      fontSize: "0.8rem",
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: "0.5rem",
+      maxWidth: 320,
+    }}
+  >
+    <div>
+      <div style={{ fontWeight: 700, color: "#2e7d32" }}>
+        ✓ Job #{selectedJob.job_number} selected
+      </div>
+      <div style={{ fontSize: "0.75rem", color: "#555" }}>
+        {selectedJob.address}
+      </div>
+    </div>
+
+    <button
+      type="button"
+      className="btn-pill"
+      style={{ fontSize: "0.7rem", padding: "0.15rem 0.5rem" }}
+      onClick={() => {
+        setSelectedJob(null);
+        setJobNumber("");
+        setJobNoQuery("");
+      }}
+    >
+      Clear
+    </button>
+  </div>
+)}
+
         </div>
 
-        <div className="card-row">
-          <span className="card-row-label">Employee</span>
-          <input
-            type="text"
-            value={employeeName}
-            readOnly
-            className="maps-search-input"
-            style={{ maxWidth: "260px", backgroundColor: "#f5f5f5" }}
-          />
-        </div>
-
-        <p style={{ margin: 0, fontSize: "0.75rem", color: "#777" }}>
-          Employee name is pulled from your <strong>My Profile</strong> page.
-        </p>
+     <div className="card-row">
+  <span className="card-row-label">Employee</span>
+  <select
+    value={employeeName}
+    onChange={(e) => {
+      setEmployeeName(e.target.value);
+      setIncompleteWarning("");
+    }}
+    className="maps-search-input"
+    style={{ maxWidth: "260px" }}
+  >
+    <option value="">Select employee…</option>
+    {employeeOptions.map((emp) => (
+      <option key={emp.id} value={emp.name}>
+        {emp.name}
+      </option>
+    ))}
+  </select>
+</div>
       </div>
 
       <div style={{ marginTop: "0.8rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>

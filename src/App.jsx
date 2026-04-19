@@ -340,7 +340,7 @@ const handleLogout = async () => {
                     className="nav-link"
                     onClick={closeMobileSidebar}
                   >
-                    <span className="nav-icon">🚗📋</span>
+                    <span className="nav-icon">📋</span>
                     <span className="nav-label">
                       Vehicle Prestart Register
                     </span>

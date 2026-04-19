@@ -1469,18 +1469,47 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-
-  height: 26px;            /* 👈 CHANGE THIS */
-  padding: 0 10px;         /* horizontal padding only */
-
+  min-height: 26px;
+  padding: 4px 10px;
   border: 1px solid #ddd;
   border-radius: 999px;
   background: #fff;
-
   font-size: 0.8rem;
-  line-height: 1;          /* keeps text vertically centered */
+  line-height: 1;
 }
 
+.schedule-job-chip-remove {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  border: 1px solid #d0d0d0;
+  border-radius: 999px;
+  background: #fff;
+  color: #666;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.schedule-job-chip-remove:hover {
+  background: #f5f5f5;
+  color: #222;
+}
+
+@media (max-width: 768px) {
+  .schedule-job-chip-remove {
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    min-height: 16px;
+    font-size: 0.65rem;
+  }
+}
 /* ===============================
    PRINT LAYOUT FOR SCHEDULE
    =============================== */
@@ -1489,6 +1518,11 @@
   size: A4 landscape;
   margin: 16mm;
 }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
 
 @media print {
   /* Remove background grey and shadows when printing */
@@ -1518,6 +1552,20 @@
     box-shadow: none !important;
     border: none !important;
     padding: 0 !important;
+  }
+
+  .schedule-cell,
+  .schedule-legend-swatch,
+  .schedule-grid th,
+  .schedule-grid td,
+  .schedule-today-cell,
+  .schedule-today-col-header {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .schedule-legend-swatch {
+    box-shadow: none !important;
   }
 
   /* Make schedule grid use full width */

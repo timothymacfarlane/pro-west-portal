@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
@@ -110,6 +110,19 @@ function Schedule() {
 
   const todayISO = formatISO(new Date());
 
+  const originalTitleRef = useRef(document.title);
+
+const handlePrint = () => {
+  const printTitle = `${weekStartISO} - Schedule`;
+  const previousTitle = document.title;
+
+  document.title = printTitle;
+  window.print();
+
+  setTimeout(() => {
+    document.title = previousTitle;
+  }, 500);
+};
 
   // Load staff list for schedule
   useEffect(() => {
@@ -634,9 +647,9 @@ const handleJobKeyDown = (e) => {
               {isFlipped ? "Flip View" : "Flip View"}
             </button>
 
-            <button type="button" className="btn-pill" onClick={() => window.print()}>
-              Print PDF
-            </button>
+           <button type="button" className="btn-pill" onClick={handlePrint}>
+  Print PDF
+</button>
           </div>
         </div>
 
@@ -881,31 +894,22 @@ const handleJobKeyDown = (e) => {
     {/* Selected jobs */}
     {selectedJobs.length > 0 && (
       <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "6px" }}>
-        {selectedJobs.map((jn) => (
-          <span
-            key={jn}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "4px 8px",
-              border: "1px solid #ddd",
-              borderRadius: "999px",
-              fontSize: "0.8rem",
-              background: "#fff",
-            }}
-          >
-            {jn}
-            <button
-              type="button"
-              className="btn-pill"
-              style={{ padding: "2px 8px" }}
-              onClick={() => removeJobNumber(jn)}
-            >
-              ×
-            </button>
-          </span>
-        ))}
+       {selectedJobs.map((jn) => (
+  <span
+    key={jn}
+    className="schedule-job-chip"
+  >
+    {jn}
+    <button
+      type="button"
+      className="schedule-job-chip-remove"
+      onClick={() => removeJobNumber(jn)}
+      aria-label={`Remove job ${jn}`}
+    >
+      ×
+    </button>
+  </span>
+))}
       </div>
     )}
 
