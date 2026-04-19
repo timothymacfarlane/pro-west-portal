@@ -459,8 +459,8 @@ if (savedRow) {
   if (!isAdmin) return;
   if (!selectedContact || selectedContact.source !== "client") return;
 
- const ok = window.confirm(
-  `Delete client "${selectedContact.name}"?\n\nThis will permanently remove the contact from the portal.`
+const ok = window.confirm(
+  `Delete client "${selectedContact.name}"?\n\nThis will remove the contact from the Contacts register. Existing jobs will keep their saved client details.`
 );
   if (!ok) return;
 

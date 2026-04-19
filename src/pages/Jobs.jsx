@@ -246,8 +246,12 @@ function jobClientDisplayLiveFirst(job) {
     if (c.email) return c.email;
   }
 
-  // fallback to what’s stored on the job row
-  return jobClientSnapshot(job);
+  const snapshot = jobClientSnapshot(job);
+  if (snapshot && snapshot !== "—") {
+    return `${snapshot} (Deleted client)`;
+  }
+
+  return "—";
 }
 function safeText(v, fallback = "—") {
   if (v == null) return fallback;
@@ -1120,7 +1124,9 @@ async function handleClientSaved(savedClient) {
 async function handleDeleteClient() {
   if (!clientId) return;
 
-  const ok = window.confirm("Delete this client contact?");
+  const ok = window.confirm(
+  "Delete this client from the Contacts register? Existing jobs will keep their saved client details."
+);
   if (!ok) return;
 
   setDeletingClient(true);
@@ -1137,21 +1143,14 @@ async function handleDeleteClient() {
     clearClient();
 
     if (initial?.id) {
-      const clearedPayload = {
-        client_id: null,
-        client_first_name: null,
-        client_surname: null,
-        client_company: null,
-        client_phone: null,
-        client_mobile: null,
-        client_email: null,
-        client_name: null,
-      };
+    const clearedPayload = {
+  client_id: null,
+};
 
       const { error: upErr } = await supabase
-        .from("jobs")
-        .update(clearedPayload)
-        .eq("id", initial.id);
+  .from("jobs")
+  .update(clearedPayload)
+  .eq("client_id", clientId);
 
       if (upErr) throw upErr;
 
@@ -1902,6 +1901,12 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
 )}
   
 </div>
+
+{!clientId && (clientCompany || clientFirstName || clientSurname || clientEmail) && (
+  <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>
+    This client has been deleted from the Contacts register. Saved job details are preserved.
+  </div>
+)}
 
             <div style={{ display: "grid", gap: 8 }}>
      <div ref={clientSearchWrapRef}>
@@ -4224,30 +4229,47 @@ onClick={() => {
 
           <div className="jobs-selected-grid" style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
-              <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Client</div>
-              <div style={{ marginTop: 4 }}>
-                {(() => {
-  const c = getLiveClient(selected);
-  if (c) {
-    const person = norm(`${c.first_name || ""} ${c.surname || ""}`).trim();
-    return person || jobClientSnapshot(selected);
-  }
-  return (norm(`${selected.client_first_name || ""} ${selected.client_surname || ""}`).trim() || selected.client_name || "—");
-})()}
-              </div>
-              <div style={{ marginTop: 4, fontSize: 12, opacity: 0.85 }}>{(() => {
-  const c = getLiveClient(selected);
-  return (c?.company || selected.client_company || "—");
-})()}</div>
-              <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>
-                {(() => {
-  const c = getLiveClient(selected);
-  const phone = c?.mobile || c?.phone || selected.client_mobile || selected.client_phone || "—";
-  const email = c?.email || selected.client_email || "—";
-  return `${phone} · ${email}`;
-})()}
-              </div>
-            </div>
+  <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Client</div>
+
+  <div style={{ marginTop: 4 }}>
+    {(() => {
+      const c = getLiveClient(selected);
+      if (c) {
+        const person = norm(`${c.first_name || ""} ${c.surname || ""}`).trim();
+        return person || "—";
+      }
+
+      const snapshotPerson =
+        norm(`${selected.client_first_name || ""} ${selected.client_surname || ""}`).trim() ||
+        selected.client_name ||
+        "—";
+
+      return snapshotPerson !== "—"
+        ? `${snapshotPerson} (Deleted client)`
+        : "—";
+    })()}
+  </div>
+
+  <div style={{ marginTop: 4, fontSize: 12, opacity: 0.85 }}>
+    {(() => {
+      const c = getLiveClient(selected);
+      if (c) return c.company || "—";
+
+      return selected.client_company
+        ? `${selected.client_company} (Deleted client)`
+        : "—";
+    })()}
+  </div>
+
+  <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>
+    {(() => {
+      const c = getLiveClient(selected);
+      const phone = c?.mobile || c?.phone || selected.client_mobile || selected.client_phone || "—";
+      const email = c?.email || selected.client_email || "—";
+      return `${phone} · ${email}`;
+    })()}
+  </div>
+</div>
 
  <div>
   <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Job details</div>

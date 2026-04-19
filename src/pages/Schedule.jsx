@@ -631,7 +631,7 @@ const handleJobKeyDown = (e) => {
             </div>
 
             <button type="button" className="btn-pill" onClick={() => setIsFlipped((v) => !v)}>
-              {isFlipped ? "Normal view" : "Flip orientation"}
+              {isFlipped ? "Flip View" : "Flip View"}
             </button>
 
             <button type="button" className="btn-pill" onClick={() => window.print()}>
@@ -864,18 +864,18 @@ const handleJobKeyDown = (e) => {
             </div>
 
             <div className="schedule-editor-row">
-              <label className="schedule-editor-label">Region / area</label>
+              <label className="schedule-editor-label">Region / Area</label>
               <input
                 className="maps-search-input"
                 type="text"
                 value={editRegion}
                 onChange={(e) => setEditRegion(e.target.value)}
-                placeholder="e.g. METRO NORTH"
+                placeholder="e.g. North Run or Suburbs"
               />
             </div>
 
             <div className="schedule-editor-row">
-  <label className="schedule-editor-label">Job ref</label>
+  <label className="schedule-editor-label">Job Ref</label>
 
   <div style={{ position: "relative" }}>
     {/* Selected jobs */}
@@ -993,7 +993,7 @@ const handleJobKeyDown = (e) => {
               {saving ? "Saving…" : "Save"}
             </button>
             <button type="button" className="btn-pill" onClick={handleClear} disabled={saving}>
-              Clear / remove
+              Clear
             </button>
             <button type="button" className="btn-pill" onClick={() => setSelectedCell(null)} disabled={saving}>
               Close
