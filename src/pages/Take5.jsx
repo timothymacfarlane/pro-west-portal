@@ -55,11 +55,18 @@ function computeRiskResult(lCode, cCode) {
 }
 
 function addressSummaryFromRow(r) {
-  const a =
+  let a =
     (r?.full_address || "").trim() ||
-    [r?.street_number, r?.street_name, r?.suburb].filter(Boolean).join(" ").trim() ||
+    [r?.street_number, r?.street_name, r?.suburb]
+      .filter(Boolean)
+      .join(" ")
+      .trim() ||
     (r?.suburb || "").trim() ||
     "—";
+
+  // 🔥 Remove trailing ", Australia" (or " Australia")
+  a = a.replace(/,\s*Australia$/i, "").replace(/\s+Australia$/i, "");
+
   return a;
 }
 
@@ -278,6 +285,12 @@ function Take5() {
   const [employeeName, setEmployeeName] = useState(derivedDisplayName);
   const [employeeOptions, setEmployeeOptions] = useState([]);
 
+  const getLoggedInEmployeeName = useCallback(() => {
+  const loggedInEmail = user?.email;
+  const matchedUser = employeeOptions.find((emp) => emp.email === loggedInEmail);
+  return matchedUser?.name || derivedDisplayName || "";
+}, [employeeOptions, user?.email, derivedDisplayName]);
+
   // ✅ Job number autosuggest (copied pattern from Jobs.jsx)
   const [jobNoQuery, setJobNoQuery] = useState("");
   const [jobNoSuggestions, setJobNoSuggestions] = useState([]);
@@ -341,10 +354,9 @@ function Take5() {
 
   // ---------------- Draft autosave (field-friendly) ----------------
   const draftKey = useMemo(() => {
-    const uid = user?.id || "anon";
-    const j = (jobNumber || "").trim() || "nojob";
-    return `pw_take5_draft:${uid}:${j}`;
-  }, [user?.id, jobNumber]);
+  const uid = user?.id || "anon";
+  return `pw_take5_draft:${uid}`;
+}, [user?.id]);
 
   // Restore draft (when key changes)
   useEffect(() => {
@@ -358,7 +370,7 @@ function Take5() {
         setStep(parsed.step || 1);
         setJobNumber(parsed.jobNumber || "");
         setJobNoQuery(parsed.jobNumber || "");
-        setEmployeeName(parsed.employeeName || derivedDisplayName);
+        setEmployeeName(parsed.employeeName || derivedDisplayName || "");
         setSignatureName(parsed.signatureName || derivedDisplayName);
 
         setSwms(parsed.swms || "");
@@ -473,6 +485,12 @@ useEffect(() => {
 }, [derivedDisplayName]);
 
 useEffect(() => {
+  if (employeeName && !signatureName) {
+    setSignatureName(employeeName);
+  }
+}, [employeeName]);
+
+useEffect(() => {
   let isMounted = true;
 
   const loadEmployees = async () => {
@@ -497,17 +515,19 @@ useEffect(() => {
       setEmployeeOptions(options);
 
       // 🔥 THIS IS THE KEY PART
-      const loggedInEmail = user?.email;
+   const loggedInEmail = user?.email;
 
-      const matchedUser = options.find(
-        (emp) => emp.email === loggedInEmail
-      );
+const matchedUser = options.find(
+  (emp) => emp.email === loggedInEmail
+);
 
-      if (matchedUser) {
-        setEmployeeName(matchedUser.name);
-      } else if (derivedDisplayName) {
-        setEmployeeName(derivedDisplayName);
-      }
+if (matchedUser) {
+  setEmployeeName((prev) => prev || matchedUser.name);
+  setSignatureName((prev) => prev || matchedUser.name);
+} else if (derivedDisplayName) {
+  setEmployeeName((prev) => prev || derivedDisplayName);
+  setSignatureName((prev) => prev || derivedDisplayName);
+}
     } catch (err) {
       console.error("Failed to load employee profiles", err);
       if (isMounted) setEmployeeOptions([]);
@@ -688,8 +708,8 @@ useEffect(() => {
     setJobNoQuery("");
     setJobNoSuggestions([]);
     setSelectedJob(null);
-    setEmployeeName(derivedDisplayName);
-    setSignatureName(derivedDisplayName);
+    setEmployeeName(getLoggedInEmployeeName());
+    setSignatureName(getLoggedInEmployeeName());
     setSwms("");
     setJha("");
     setConsider({
@@ -742,13 +762,13 @@ useEffect(() => {
     } catch {
       // ignore
     }
-  }, [derivedDisplayName, draftKey]);
+  }, [derivedDisplayName, draftKey, getLoggedInEmployeeName]);
 
   const canContinueFromStep = useCallback(
     (currentStep) => {
-      if (currentStep === 1) {
-        return jobNumber.trim() && employeeName && swms && jha;
-      }
+     if (currentStep === 1) {
+  return !!selectedJob && employeeName && swms && jha;
+}
       if (currentStep === 2) {
         return Object.values(consider).every((v) => v);
       }
@@ -768,7 +788,7 @@ useEffect(() => {
       }
       return true;
     },
-    [jobNumber, employeeName, swms, jha, consider, assess, hazards, controls, signatureName, signatureConfirmed]
+    [selectedJob, jobNumber, employeeName, swms, jha, consider, assess, hazards, controls, signatureName, signatureConfirmed]
   );
 
   // detect red selections on the current step
@@ -1173,13 +1193,24 @@ useEffect(() => {
               onBlur={() => {
   setTimeout(() => setJobNoSuggestions([]), 150);
 }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  setJobNoSuggestions([]);
-                  setJobNumber(jobNoQuery);
-                }
-                if (e.key === "Escape") setJobNoSuggestions([]);
-              }}
+             onKeyDown={(e) => {
+  if (e.key === "Enter") {
+    const matched = jobNoSuggestions.find(
+      (j) => String(j.job_number) === String(jobNoQuery).trim()
+    );
+
+    setJobNoSuggestions([]);
+    setJobNumber(jobNoQuery);
+
+    if (matched) {
+      setSelectedJob(matched);
+    } else {
+      setSelectedJob(null);
+    }
+  }
+
+  if (e.key === "Escape") setJobNoSuggestions([]);
+}}
               placeholder={`Type job number…${jobNoLoading ? "…" : ""}`}
               inputMode="numeric"
               pattern="[0-9]*"
@@ -1691,19 +1722,24 @@ useEffect(() => {
         <h4 style={{ margin: 0, fontSize: "0.95rem", color: "var(--pw-primary-dark)" }}>Sign-off</h4>
 
         <div className="card-row">
-          <span className="card-row-label">Signature name</span>
-          <input
-            type="text"
-            value={signatureName}
-            onChange={(e) => {
-              setSignatureName(e.target.value);
-              setIncompleteWarning("");
-            }}
-            placeholder="Type your name to sign"
-            className="maps-search-input"
-            style={{ maxWidth: "260px" }}
-          />
-        </div>
+  <span className="card-row-label">Signature name</span>
+  <select
+    value={signatureName}
+    onChange={(e) => {
+      setSignatureName(e.target.value);
+      setIncompleteWarning("");
+    }}
+    className="maps-search-input"
+    style={{ maxWidth: "260px" }}
+  >
+    <option value="">Select employee…</option>
+    {employeeOptions.map((emp) => (
+      <option key={emp.id} value={emp.name}>
+        {emp.name}
+      </option>
+    ))}
+  </select>
+</div>
 
         <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem", color: "#555" }}>
           <input
@@ -2094,20 +2130,15 @@ useEffect(() => {
     );
   };
 
-  const footerBarStyle = {
-    marginTop: "0.8rem",
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "0.5rem",
-    position: "sticky",
-    bottom: 0,
-    background: "rgba(255,255,255,0.96)",
-    borderTop: "1px solid #f0f0f0",
-    padding: "0.7rem 0",
-    paddingBottom: "calc(0.7rem + env(safe-area-inset-bottom))",
-    backdropFilter: "blur(6px)",
-  };
-
+const footerBarStyle = {
+  marginTop: "1rem",
+  display: "flex",
+  gap: "0.5rem",
+  justifyContent: step === 1 ? "flex-end" : "space-between",
+  alignItems: "center",
+  paddingTop: "0.75rem",
+  borderTop: "1px solid #f3e1e1",
+};
   return (
     <PageLayout
       data-take5
@@ -2146,9 +2177,15 @@ useEffect(() => {
       )}
 
       <div style={footerBarStyle}>
-        <button type="button" className="btn-pill" onClick={prevStep} disabled={step === 1}>
-          ◀ Back
-        </button>
+  {step > 1 && (
+    <button
+      type="button"
+      className="btn-pill"
+      onClick={prevStep}
+    >
+      ◀ Back
+    </button>
+  )}
 
         {step < totalSteps && (
           <button
