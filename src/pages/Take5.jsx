@@ -252,6 +252,19 @@ function drawRiskPill(doc, result, x, y) {
   doc.text(result || "-", x + 4, y);
 }
 
+
+function drawRiskRow(doc, label, result, x, y, rowWidth) {
+  const pillW = 26;
+  const gap = 6;
+  const textWidth = rowWidth - pillW - gap - 4;
+
+  const lines = doc.splitTextToSize(label, textWidth);
+  doc.text(lines, x, y);
+
+  drawRiskPill(doc, result, x + rowWidth - pillW, y);
+
+  return lines.length * 4.8;
+}
 /* -------------- Component ---------------- */
 
 function Take5() {
@@ -269,6 +282,8 @@ function Take5() {
   const [submitSuccess, setSubmitSuccess] = useState("");
   const [incompleteWarning, setIncompleteWarning] = useState("");
   const [pdfUrl, setPdfUrl] = useState("");
+
+  const isSubmitted = !!submitSuccess;
 
   // red-warning modal
   const [showRedWarning, setShowRedWarning] = useState(false);
@@ -485,10 +500,9 @@ useEffect(() => {
 }, [derivedDisplayName]);
 
 useEffect(() => {
-  if (employeeName && !signatureName) {
-    setSignatureName(employeeName);
-  }
+  setSignatureName(employeeName || "");
 }, [employeeName]);
+
 
 useEffect(() => {
   let isMounted = true;
@@ -762,6 +776,14 @@ if (matchedUser) {
     } catch {
       // ignore
     }
+
+  if (typeof window !== "undefined") {
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth",
+  });
+}
+
   }, [derivedDisplayName, draftKey, getLoggedInEmployeeName]);
 
   const canContinueFromStep = useCallback(
@@ -775,9 +797,17 @@ if (matchedUser) {
       if (currentStep === 3) {
         return Object.values(assess).every((v) => v);
       }
-      if (currentStep === 4) {
-        return hazards.some((h) => h.description.trim());
-      }
+     if (currentStep === 4) {
+  return hazards.every(
+    (h) =>
+      h.description.trim() &&
+      h.preLikelihood &&
+      h.preConsequence &&
+      h.controlMeasure.trim() &&
+      h.postLikelihood &&
+      h.postConsequence
+  );
+}
       if (currentStep === 5) {
         return (
           controls.hazardsControlled &&
@@ -1006,37 +1036,80 @@ if (matchedUser) {
     }
 
     hazardsList.forEach((h, idx) => {
-      ensureSpace(38);
+  const cardX = left + 2;
+  const cardW = right - left - 4;
 
-      const cardX = left + 2;
-      const cardW = right - left - 4;
-      const startY = y - 2;
+  // 🔥 Pre-calculate wrapped text heights
+  const descLines = doc.splitTextToSize(
+    `${idx + 1}. ${h.description}`,
+    cardW - 10
+  );
 
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.text(`${idx + 1}. ${h.description}`, cardX + 2, y);
-      y += lineH;
+  const controlLines = doc.splitTextToSize(
+    `Control: ${h.controlMeasure || "-"}`,
+    cardW - 10
+  );
 
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9.2);
+  // 🔥 Estimate total height needed for this hazard
+ const preRiskLabel = `Pre-risk: Lik ${h.preLikelihood || "-"} | Cons ${h.preConsequence || "-"} | Result`;
+const postRiskLabel = `Post-risk: Lik ${h.postLikelihood || "-"} | Cons ${h.postConsequence || "-"} | Result`;
 
-      doc.text(`Pre-risk: Lik ${h.preLikelihood || "-"} | Cons ${h.preConsequence || "-"} | Result`, cardX + 4, y);
-      drawRiskPill(doc, h.preResult, cardX + cardW - 30, y);
-      y += lineH;
+const preRiskLines = doc.splitTextToSize(preRiskLabel, cardW - 36);
+const postRiskLines = doc.splitTextToSize(postRiskLabel, cardW - 36);
 
-      doc.text(`Control: ${h.controlMeasure || "-"}`, cardX + 4, y);
-      y += lineH;
+// 🔥 Estimate total height needed for this hazard
+const estimatedHeight =
+  (descLines.length * 5) +             // description
+  (preRiskLines.length * 4.8) +        // pre-risk
+  (controlLines.length * 4.8) +        // control
+  (postRiskLines.length * 4.8) +       // post-risk
+  14;                                  // padding + borders
 
-      doc.text(`Post-risk: Lik ${h.postLikelihood || "-"} | Cons ${h.postConsequence || "-"} | Result`, cardX + 4, y);
-      drawRiskPill(doc, h.postResult, cardX + cardW - 30, y);
-      y += lineH;
+  // 🔥 Now check space properly
+  ensureSpace(estimatedHeight);
 
-      const endY = y + 1;
-      doc.setDrawColor(PDF_COLOURS.border);
-      doc.roundedRect(cardX, startY, cardW, endY - startY, 2, 2, "S");
+  const startY = y - 2;
 
-      y += 4;
-    });
+  // ---- Description ----
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text(descLines, cardX + 2, y);
+  y += descLines.length * 5;
+
+  // ---- Pre-risk ----
+doc.setFont("helvetica", "normal");
+doc.setFontSize(9.2);
+
+y += drawRiskRow(
+  doc,
+  preRiskLabel,
+  h.preResult,
+  cardX + 4,
+  y,
+  cardW - 8
+);
+
+// ---- Control ----
+doc.text(controlLines, cardX + 4, y);
+y += controlLines.length * 4.8;
+
+// ---- Post-risk ----
+y += drawRiskRow(
+  doc,
+  postRiskLabel,
+  h.postResult,
+  cardX + 4,
+  y,
+  cardW - 8
+);
+
+  // ---- Border ----
+  const endY = y + 1;
+  doc.setDrawColor(PDF_COLOURS.border);
+  doc.roundedRect(cardX, startY, cardW, endY - startY, 2, 2, "S");
+
+  y += 4;
+});
 
     // Step 5
     sectionHeader("STEP 5 – Controls & Sign-off");
@@ -1047,6 +1120,20 @@ if (matchedUser) {
     ensureSpace(14);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
+    // 🔥 Signature declaration statement
+ensureSpace(12);
+
+doc.setFont("helvetica", "italic");
+doc.setFontSize(9.2);
+doc.setTextColor("#333");
+
+const declarationText = doc.splitTextToSize(
+  "I confirm that I have identified the hazards associated with this task and have implemented appropriate control measures to eliminate or reduce the risks to an acceptable level. I understand my responsibility to work safely and stop work if conditions change.",
+  right - left - 4
+);
+
+doc.text(declarationText, left + 2, y);
+y += declarationText.length * 4.8 + 2;
     doc.text("Signed by:", left + 2, y);
     doc.setFont("helvetica", "normal");
     doc.text(data.signature.name || "-", left + 28, y);
@@ -1689,23 +1776,27 @@ if (matchedUser) {
         <div>
           <div className="card-row-label">Have I removed the hazards or implemented effective controls?</div>
           <YesNoToggle
-            value={controls.hazardsControlled}
-            onChange={(v) => {
-              setControls((prev) => ({ ...prev, hazardsControlled: v }));
-              setIncompleteWarning("");
-            }}
-          />
+  value={controls.hazardsControlled}
+  disabled={isSubmitted}
+  onChange={(v) => {
+    if (isSubmitted) return;
+    setControls((prev) => ({ ...prev, hazardsControlled: v }));
+    setIncompleteWarning("");
+  }}
+/>
         </div>
 
         <div>
           <div className="card-row-label">Am I confident this task can be done safely?</div>
-          <YesNoToggle
-            value={controls.confidentSafe}
-            onChange={(v) => {
-              setControls((prev) => ({ ...prev, confidentSafe: v }));
-              setIncompleteWarning("");
-            }}
-          />
+         <YesNoToggle
+  value={controls.confidentSafe}
+  disabled={isSubmitted}
+  onChange={(v) => {
+    if (isSubmitted) return;
+    setControls((prev) => ({ ...prev, confidentSafe: v }));
+    setIncompleteWarning("");
+  }}
+/>
         </div>
       </div>
 
@@ -1721,35 +1812,28 @@ if (matchedUser) {
       >
         <h4 style={{ margin: 0, fontSize: "0.95rem", color: "var(--pw-primary-dark)" }}>Sign-off</h4>
 
-        <div className="card-row">
+       <div className="card-row">
   <span className="card-row-label">Signature name</span>
-  <select
+  <input
+    type="text"
     value={signatureName}
-    onChange={(e) => {
-      setSignatureName(e.target.value);
-      setIncompleteWarning("");
-    }}
+    readOnly
     className="maps-search-input"
-    style={{ maxWidth: "260px" }}
-  >
-    <option value="">Select employee…</option>
-    {employeeOptions.map((emp) => (
-      <option key={emp.id} value={emp.name}>
-        {emp.name}
-      </option>
-    ))}
-  </select>
+    style={{ maxWidth: "260px", backgroundColor: "#f5f5f5" }}
+  />
 </div>
 
         <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem", color: "#555" }}>
           <input
-            type="checkbox"
-            checked={signatureConfirmed}
-            onChange={(e) => {
-              setSignatureConfirmed(e.target.checked);
-              setIncompleteWarning("");
-            }}
-          />
+  type="checkbox"
+  checked={signatureConfirmed}
+  disabled={isSubmitted}
+  onChange={(e) => {
+    if (isSubmitted) return;
+    setSignatureConfirmed(e.target.checked);
+    setIncompleteWarning("");
+  }}
+/>
           I confirm I have completed this Take 5 honestly and to the best of my knowledge.
         </label>
       </div>
@@ -1757,8 +1841,25 @@ if (matchedUser) {
       <div style={{ marginTop: "1rem", fontSize: "0.8rem", color: "#555" }}>
         When you press <strong>Submit</strong>, this Take 5 will be saved and a PDF will be generated under:
         <br />
-        <code>{jobNumber || "JOB_NUMBER"}/take5/…</code>
+        <code>Take 5 Register - Job #{jobNumber || "JOB_NUMBER"}</code>
       </div>
+
+{isSubmitted && (
+  <div
+    style={{
+      marginTop: "0.9rem",
+      padding: "0.65rem 0.8rem",
+      borderRadius: 8,
+      background: "#e8f5e9",
+      border: "1px solid #c8e6c9",
+      color: "#2e7d32",
+      fontSize: "0.85rem",
+      fontWeight: 600,
+    }}
+  >
+    This Take 5 has been submitted and is now locked.
+  </div>
+)}
 
       {pdfUrl && (
         <div style={{ marginTop: "0.9rem" }}>
@@ -2176,15 +2277,25 @@ const footerBarStyle = {
         </div>
       )}
 
-      <div style={footerBarStyle}>
-  {step > 1 && (
+  <div style={footerBarStyle}>
+  {isSubmitted ? (
     <button
       type="button"
       className="btn-pill"
-      onClick={prevStep}
+      onClick={resetForm}
     >
-      ◀ Back
+      Return Home
     </button>
+  ) : (
+    step > 1 && (
+      <button
+        type="button"
+        className="btn-pill"
+        onClick={prevStep}
+      >
+        ◀ Back
+      </button>
+    )
   )}
 
         {step < totalSteps && (
@@ -2231,5 +2342,4 @@ const footerBarStyle = {
     </PageLayout>
   );
 }
-
 export default Take5;
