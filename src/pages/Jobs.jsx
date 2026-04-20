@@ -1644,6 +1644,7 @@ const nextAssigned = payload.assigned_to || null;
           p_street_name: payload.street_name,
           p_suburb: payload.suburb,
           p_local_authority: payload.local_authority,
+          p_map_ref: null,
           p_ct: payload.ct,
 
           // RPC compatibility: still send these
