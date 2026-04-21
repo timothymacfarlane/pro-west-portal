@@ -54,6 +54,13 @@ function computeRiskResult(lCode, cCode) {
   return "Low";
 }
 
+function computeRiskScore(lCode, cCode) {
+  const l = parseInt(lCode || "0", 10);
+  const c = parseInt(cCode || "0", 10);
+  if (!l || !c) return "";
+  return l * c;
+}
+
 function addressSummaryFromRow(r) {
   let a =
     (r?.full_address || "").trim() ||
@@ -167,8 +174,12 @@ function getRiskColour(result) {
   }
 }
 
-function RiskResultPill({ value }) {
+function RiskResultPill({ value, score }) {
   const { bg, text } = getRiskColour(value);
+  const display = value
+    ? `${value}${score ? ` ${score}` : ""}`
+    : "-";
+
   return (
     <div
       style={{
@@ -183,7 +194,7 @@ function RiskResultPill({ value }) {
         textAlign: "center",
       }}
     >
-      {value || "-"}
+      {display}
     </div>
   );
 }
@@ -238,9 +249,13 @@ function drawYesNoPill(doc, label, x, y, mode) {
   doc.text(label || "-", x + 4, y);
 }
 
-function drawRiskPill(doc, result, x, y) {
+function drawRiskPill(doc, result, score, x, y) {
   const { bg, text } = getRiskColour(result);
-  const w = 26;
+  const display = result
+    ? `${result}${score ? ` ${score}` : ""}`
+    : "-";
+
+  const w = 34;
   const h = 7.5;
 
   doc.setFillColor(bg);
@@ -248,8 +263,11 @@ function drawRiskPill(doc, result, x, y) {
 
   doc.setTextColor(text);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.text(result || "-", x + 4, y);
+  doc.setFontSize(8.5);
+  doc.text(display, x + 3, y);
+
+  doc.setTextColor("#000");
+  doc.setFont("helvetica", "normal");
 }
 
 
@@ -287,6 +305,8 @@ function Take5() {
 
   // red-warning modal
   const [showRedWarning, setShowRedWarning] = useState(false);
+
+  const [showRiskReductionWarning, setShowRiskReductionWarning] = useState(false);
 
   // Risk matrix tab state
   const [riskTab, setRiskTab] = useState("matrix"); // "matrix" | "likelihood" | "consequence"
@@ -724,6 +744,7 @@ if (matchedUser) {
     setSelectedJob(null);
     setEmployeeName(getLoggedInEmployeeName());
     setSignatureName(getLoggedInEmployeeName());
+    setShowRiskReductionWarning(false);
     setSwms("");
     setJha("");
     setConsider({
@@ -845,29 +866,62 @@ if (matchedUser) {
     [consider, assess, controls]
   );
 
+const hasUnreducedHazardRisk = useCallback(() => {
+  return hazards.some((h) => {
+    const hasStarted =
+      h.description.trim() ||
+      h.preLikelihood ||
+      h.preConsequence ||
+      h.controlMeasure.trim() ||
+      h.postLikelihood ||
+      h.postConsequence;
+
+    if (!hasStarted) return false;
+
+    const preScore = computeRiskScore(h.preLikelihood, h.preConsequence);
+    const postScore = computeRiskScore(h.postLikelihood, h.postConsequence);
+
+    if (!preScore || !postScore) return false;
+
+    return postScore >= preScore;
+  });
+}, [hazards]);
+
   const proceedToNextStep = useCallback(() => {
     setShowRedWarning(false);
     setIncompleteWarning("");
     setStep((s) => Math.min(s + 1, totalSteps));
   }, []);
 
-  const nextStep = useCallback(() => {
-    if (!canContinueFromStep(step)) {
-      setIncompleteWarning("All fields must be completed");
-      return;
-    }
+ const nextStep = useCallback(() => {
+  if (!canContinueFromStep(step)) {
+    setIncompleteWarning("All fields must be completed");
+    return;
+  }
 
-    if (hasRedSelectionsOnStep(step)) {
-      setShowRedWarning(true);
-      return;
-    }
+  if (step === 4 && hasUnreducedHazardRisk()) {
+    setShowRiskReductionWarning(true);
+    return;
+  }
 
-    proceedToNextStep();
-  }, [step, canContinueFromStep, hasRedSelectionsOnStep, proceedToNextStep]);
+  if (hasRedSelectionsOnStep(step)) {
+    setShowRedWarning(true);
+    return;
+  }
+
+  proceedToNextStep();
+}, [
+  step,
+  canContinueFromStep,
+  hasUnreducedHazardRisk,
+  hasRedSelectionsOnStep,
+  proceedToNextStep,
+]);
 
   const prevStep = useCallback(() => {
     setIncompleteWarning("");
     setShowRedWarning(false);
+    setShowRiskReductionWarning(false);
     setStep((s) => Math.max(s - 1, 1));
   }, []);
 
@@ -1035,80 +1089,117 @@ if (matchedUser) {
       y += lineH;
     }
 
-    hazardsList.forEach((h, idx) => {
+ hazardsList.forEach((h, idx) => {
   const cardX = left + 2;
   const cardW = right - left - 4;
+  const innerX = cardX + 4;
+  const innerW = cardW - 8;
 
-  // 🔥 Pre-calculate wrapped text heights
-  const descLines = doc.splitTextToSize(
-    `${idx + 1}. ${h.description}`,
-    cardW - 10
-  );
+  const lineGap = 5.4;
+  const sectionGap = 2.5;
+  const topPad = 5;
+  const bottomPad = 5;
 
-  const controlLines = doc.splitTextToSize(
-    `Control: ${h.controlMeasure || "-"}`,
-    cardW - 10
-  );
+  const descText = `${idx + 1}. ${h.description || "-"}`;
 
-  // 🔥 Estimate total height needed for this hazard
- const preRiskLabel = `Pre-risk: Lik ${h.preLikelihood || "-"} | Cons ${h.preConsequence || "-"} | Result`;
-const postRiskLabel = `Post-risk: Lik ${h.postLikelihood || "-"} | Cons ${h.postConsequence || "-"} | Result`;
+// 🔥 Calculate scores
+const preScore =
+  h.preLikelihood && h.preConsequence
+    ? parseInt(h.preLikelihood) * parseInt(h.preConsequence)
+    : "";
 
-const preRiskLines = doc.splitTextToSize(preRiskLabel, cardW - 36);
-const postRiskLines = doc.splitTextToSize(postRiskLabel, cardW - 36);
+const postScore =
+  h.postLikelihood && h.postConsequence
+    ? parseInt(h.postLikelihood) * parseInt(h.postConsequence)
+    : "";
 
-// 🔥 Estimate total height needed for this hazard
-const estimatedHeight =
-  (descLines.length * 5) +             // description
-  (preRiskLines.length * 4.8) +        // pre-risk
-  (controlLines.length * 4.8) +        // control
-  (postRiskLines.length * 4.8) +       // post-risk
-  14;                                  // padding + borders
+// 🔥 Build text with score included
+const preRiskText = `Pre-risk: Likelihood ${h.preLikelihood || "-"} | Consequence ${h.preConsequence || "-"} | Result: ${h.preResult || "-"}${preScore ? ` (${preScore})` : ""}`;
 
-  // 🔥 Now check space properly
-  ensureSpace(estimatedHeight);
+const controlText = `Control Measure: ${h.controlMeasure || "-"}`;
 
-  const startY = y - 2;
+const postRiskText = `Post-risk: Likelihood ${h.postLikelihood || "-"} | Consequence ${h.postConsequence || "-"} | Result: ${h.postResult || "-"}${postScore ? ` (${postScore})` : ""}`;
 
-  // ---- Description ----
+  const descLines = doc.splitTextToSize(descText, innerW);
+  const preRiskLines = doc.splitTextToSize(preRiskText, innerW);
+  const controlLines = doc.splitTextToSize(controlText, innerW);
+  const postRiskLines = doc.splitTextToSize(postRiskText, innerW);
+
+  const boxHeight =
+  topPad +
+  descLines.length * lineGap +
+  sectionGap +
+  preRiskLines.length * lineGap +
+  6 + // 🔥 space for pre-risk pill
+  sectionGap +
+  controlLines.length * lineGap +
+  sectionGap +
+  postRiskLines.length * lineGap +
+  6 + // 🔥 space for post-risk pill
+  bottomPad;
+
+  ensureSpace(boxHeight + 6);
+
+  const startY = y - 1;
+
+  // Top padding
+  y += topPad - 1;
+
+  doc.setTextColor("#000");
+
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text(descLines, cardX + 2, y);
-  y += descLines.length * 5;
+  doc.text(descLines, innerX, y);
+  y += descLines.length * lineGap + sectionGap;
 
-  // ---- Pre-risk ----
-doc.setFont("helvetica", "normal");
-doc.setFontSize(9.2);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9.2);
 
-y += drawRiskRow(
+doc.text(preRiskLines, innerX, y);
+
+// Draw pill BELOW the text
+y += preRiskLines.length * lineGap;
+
+drawRiskPill(
   doc,
-  preRiskLabel,
   h.preResult,
-  cardX + 4,
-  y,
-  cardW - 8
+  computeRiskScore(h.preLikelihood, h.preConsequence),
+  cardX + cardW - 40,
+  y
 );
 
-// ---- Control ----
-doc.text(controlLines, cardX + 4, y);
-y += controlLines.length * 4.8;
+// 🔥 Reset text colour after pill
+doc.setTextColor("#000");
 
-// ---- Post-risk ----
-y += drawRiskRow(
+y += sectionGap + 4;
+
+doc.setFont("helvetica", "bold");
+doc.text(controlLines, innerX, y);
+doc.setFont("helvetica", "normal");
+doc.setTextColor("#000");
+  y += controlLines.length * lineGap + sectionGap;
+
+doc.text(postRiskLines, innerX, y);
+
+y += postRiskLines.length * lineGap;
+
+drawRiskPill(
   doc,
-  postRiskLabel,
   h.postResult,
-  cardX + 4,
-  y,
-  cardW - 8
+  computeRiskScore(h.postLikelihood, h.postConsequence),
+  cardX + cardW - 40,
+  y
 );
 
-  // ---- Border ----
-  const endY = y + 1;
-  doc.setDrawColor(PDF_COLOURS.border);
-  doc.roundedRect(cardX, startY, cardW, endY - startY, 2, 2, "S");
+// 🔥 Reset text colour after pill
+doc.setTextColor("#000");
 
-  y += 4;
+y += 2;
+
+  doc.setDrawColor(PDF_COLOURS.border);
+  doc.roundedRect(cardX, startY, cardW, boxHeight, 2, 2, "S");
+
+  y = startY + boxHeight + 4;
 });
 
     // Step 5
@@ -1684,7 +1775,10 @@ y += declarationText.length * 4.8 + 2;
                   View Risk Matrix
                 </button>
               </div>
-              <RiskResultPill value={h.preResult} />
+              <RiskResultPill
+  value={h.preResult}
+  score={computeRiskScore(h.preLikelihood, h.preConsequence)}
+/>
             </div>
           </div>
 
@@ -1751,7 +1845,10 @@ y += declarationText.length * 4.8 + 2;
                   View Risk Matrix
                 </button>
               </div>
-              <RiskResultPill value={h.postResult} />
+              <RiskResultPill
+  value={h.postResult}
+  score={computeRiskScore(h.postLikelihood, h.postConsequence)}
+/>
             </div>
           </div>
         </div>
@@ -2231,6 +2328,73 @@ y += declarationText.length * 4.8 + 2;
     );
   };
 
+const renderRiskReductionWarningModal = () => {
+  if (!showRiskReductionWarning) return null;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 60,
+        padding: "0.75rem",
+      }}
+      onClick={() => setShowRiskReductionWarning(false)}
+    >
+      <div
+        className="card"
+        style={{
+          width: "100%",
+          maxWidth: 460,
+          padding: "1rem",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 style={{ marginTop: 0 }}>Risk Reduction Warning</h3>
+        <p style={{ fontSize: "0.9rem", color: "#555" }}>
+          One or more hazards have a post-risk score that is the same as or higher
+          than the pre-risk score. Are you sure you want to proceed?
+        </p>
+
+        <div
+          style={{
+            display: "flex",
+            gap: "0.6rem",
+            justifyContent: "flex-end",
+            marginTop: "1rem",
+          }}
+        >
+          <button
+            className="btn-pill"
+            onClick={() => setShowRiskReductionWarning(false)}
+            type="button"
+          >
+            No
+          </button>
+          <button
+            className="btn-pill primary"
+            onClick={() => {
+              setShowRiskReductionWarning(false);
+              if (hasRedSelectionsOnStep(step)) {
+                setShowRedWarning(true);
+              } else {
+                proceedToNextStep();
+              }
+            }}
+            type="button"
+          >
+            Yes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const footerBarStyle = {
   marginTop: "1rem",
   display: "flex",
@@ -2254,6 +2418,7 @@ const footerBarStyle = {
     >
       {renderRiskMatrixModal()}
       {renderRedWarningModal()}
+      {renderRiskReductionWarningModal()}
 
       {step === 1 && renderStep1()}
       {step === 2 && renderStep2()}
