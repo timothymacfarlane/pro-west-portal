@@ -12,6 +12,7 @@
   "dependencies": {
     "@googlemaps/markerclusterer": "^2.6.2",
     "@supabase/supabase-js": "^2.81.1",
+    "framer-motion": "^12.38.0",
     "jspdf": "^3.0.3",
     "proj4": "^2.20.2",
     "react": "^19.2.0",

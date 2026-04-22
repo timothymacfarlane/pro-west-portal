@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { jsPDF } from "jspdf";
@@ -523,6 +524,26 @@ useEffect(() => {
   setSignatureName(employeeName || "");
 }, [employeeName]);
 
+useEffect(() => {
+  const scrollTarget =
+    document.querySelector(".page-body") ||
+    document.querySelector("main") ||
+    document.querySelector("[data-take5]");
+
+  requestAnimationFrame(() => {
+    if (scrollTarget && typeof scrollTarget.scrollTo === "function") {
+      scrollTarget.scrollTo({
+        top: 0,
+        behavior: "auto",
+      });
+    } else {
+      window.scrollTo({
+        top: 0,
+        behavior: "auto",
+      });
+    }
+  });
+}, [step]);
 
 useEffect(() => {
   let isMounted = true;
@@ -798,12 +819,7 @@ if (matchedUser) {
       // ignore
     }
 
-  if (typeof window !== "undefined") {
-  window.scrollTo({
-    top: 0,
-    behavior: "smooth",
-  });
-}
+
 
   }, [derivedDisplayName, draftKey, getLoggedInEmployeeName]);
 
@@ -971,7 +987,7 @@ const hasUnreducedHazardRisk = useCallback(() => {
     // logo
     if (logoDataUrl) {
       try {
-        doc.addImage(logoDataUrl, "JPEG", left, 2.2, 40, 13);
+        doc.addImage(logoDataUrl, "JPEG", left, 2.5, 40, 13);
       } catch {
         try {
           doc.addImage(logoDataUrl, "PNG", left, 2.2, 40, 13);
@@ -1250,98 +1266,99 @@ y += declarationText.length * 4.8 + 2;
     return doc;
   };
 
-  const handleSubmit = async () => {
-    if (!canContinueFromStep(5)) {
-      setIncompleteWarning("All fields must be completed");
-      return;
+  const handleSubmit = async (forceSubmit = false) => {
+  const shouldForceSubmit = forceSubmit === true;
+
+  if (!canContinueFromStep(5)) {
+    setIncompleteWarning("All fields must be completed");
+    return;
+  }
+
+  if (!shouldForceSubmit && hasRedSelectionsOnStep(5)) {
+    setShowRedWarning(true);
+    return;
+  }
+
+  setIsSubmitting(true);
+  setSubmitError("");
+  setSubmitSuccess("");
+  setIncompleteWarning("");
+  setPdfUrl("");
+
+  try {
+    const { count, error: countError } = await supabase
+      .from("take5_submissions")
+      .select("id", { count: "exact", head: true })
+      .eq("job_number", jobNumber);
+
+    if (countError) throw countError;
+    const take5Number = (count || 0) + 1;
+
+    const formData = buildFormData(take5Number);
+
+    const { data: inserted, error: insertError } = await supabase
+      .from("take5_submissions")
+      .insert({
+        job_number: jobNumber,
+        employee_name: employeeName,
+        take5_number: take5Number,
+        form_data: formData,
+      })
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+    const take5Id = inserted.id;
+
+    const pdfDoc = generatePdf(formData);
+
+    let pdfBlob;
+    try {
+      pdfBlob = pdfDoc.output("blob");
+    } catch {
+      const ab = pdfDoc.output("arraybuffer");
+      pdfBlob = new Blob([ab], { type: "application/pdf" });
     }
 
-    if (hasRedSelectionsOnStep(5)) {
-      setShowRedWarning(true);
-      return;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const path = `${jobNumber}/take5/${take5Number}_${take5Id}_${timestamp}.pdf`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("take5-pdfs")
+      .upload(path, pdfBlob, { contentType: "application/pdf" });
+
+    if (uploadError) throw uploadError;
+
+    const { error: updateError } = await supabase
+      .from("take5_submissions")
+      .update({ pdf_path: path })
+      .eq("id", take5Id);
+
+    if (updateError) throw updateError;
+
+    const { data: signed, error: signedErr } = await supabase.storage
+      .from("take5-pdfs")
+      .createSignedUrl(path, 60 * 60);
+
+    if (!signedErr && signed?.signedUrl) {
+      setPdfUrl(signed.signedUrl);
     }
 
-    setIsSubmitting(true);
-    setSubmitError("");
-    setSubmitSuccess("");
-    setIncompleteWarning("");
-    setPdfUrl("");
+    setSubmitSuccess("Take 5 submitted and PDF saved successfully.");
+    setStep(totalSteps);
 
     try {
-      const { count, error: countError } = await supabase
-        .from("take5_submissions")
-        .select("id", { count: "exact", head: true })
-        .eq("job_number", jobNumber);
-
-      if (countError) throw countError;
-      const take5Number = (count || 0) + 1;
-
-      const formData = buildFormData(take5Number);
-
-      const { data: inserted, error: insertError } = await supabase
-        .from("take5_submissions")
-        .insert({
-          job_number: jobNumber,
-          employee_name: employeeName,
-          take5_number: take5Number,
-          form_data: formData,
-        })
-        .select()
-        .single();
-
-      if (insertError) throw insertError;
-      const take5Id = inserted.id;
-
-      const pdfDoc = generatePdf(formData);
-
-      let pdfBlob;
-      try {
-        pdfBlob = pdfDoc.output("blob");
-      } catch {
-        const ab = pdfDoc.output("arraybuffer");
-        pdfBlob = new Blob([ab], { type: "application/pdf" });
-      }
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const path = `${jobNumber}/take5/${take5Number}_${take5Id}_${timestamp}.pdf`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("take5-pdfs")
-        .upload(path, pdfBlob, { contentType: "application/pdf" });
-
-      if (uploadError) throw uploadError;
-
-      const { error: updateError } = await supabase
-        .from("take5_submissions")
-        .update({ pdf_path: path })
-        .eq("id", take5Id);
-
-      if (updateError) throw updateError;
-
-      const { data: signed, error: signedErr } = await supabase.storage
-        .from("take5-pdfs")
-        .createSignedUrl(path, 60 * 60);
-
-      if (!signedErr && signed?.signedUrl) {
-        setPdfUrl(signed.signedUrl);
-      }
-
-      setSubmitSuccess("Take 5 submitted and PDF saved successfully.");
-      setStep(totalSteps);
-
-      // Clear draft after successful submit (keeps admin clean)
-      try {
-        localStorage.removeItem(draftKey);
-      } catch {
-        // ignore
-      }
-    } catch (err) {
-      console.error(err);
-      setSubmitError("There was a problem submitting the Take 5. Please try again.");
-    } finally {
-      setIsSubmitting(false);
+      localStorage.removeItem(draftKey);
+    } catch {
+      // ignore
     }
-  };
+  } catch (err) {
+    console.error(err);
+    setSubmitError("There was a problem submitting the Take 5. Please try again.");
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   // -------- RENDER STEPS --------
 
@@ -1974,6 +1991,15 @@ y += declarationText.length * 4.8 + 2;
     </div>
   );
 
+const renderCurrentStep = () => {
+  if (step === 1) return renderStep1();
+  if (step === 2) return renderStep2();
+  if (step === 3) return renderStep3();
+  if (step === 4) return renderStep4();
+  if (step === 5) return renderStep5();
+  return null;
+};
+
   // ---------- Risk Matrix Modal (Tabbed) ----------
   const renderRiskMatrixModal = () => {
     if (!showRiskMatrix || !riskMatrixContext) return null;
@@ -2319,9 +2345,22 @@ y += declarationText.length * 4.8 + 2;
             <button className="btn-pill" onClick={() => setShowRedWarning(false)} type="button">
               No
             </button>
-            <button className="btn-pill primary" onClick={proceedToNextStep} type="button">
-              Yes
-            </button>
+  <button
+  className="btn-pill primary"
+  onClick={() => {
+    setShowRedWarning(false);
+    setIncompleteWarning("");
+
+   if (step === totalSteps) {
+  handleSubmit(true);
+} else {
+  proceedToNextStep();
+}
+  }}
+  type="button"
+>
+  Yes
+</button>
           </div>
         </div>
       </div>
@@ -2420,11 +2459,17 @@ const footerBarStyle = {
       {renderRedWarningModal()}
       {renderRiskReductionWarningModal()}
 
-      {step === 1 && renderStep1()}
-      {step === 2 && renderStep2()}
-      {step === 3 && renderStep3()}
-      {step === 4 && renderStep4()}
-      {step === 5 && renderStep5()}
+      <AnimatePresence mode="wait">
+  <motion.div
+    key={step}
+    initial={{ opacity: 0, y: 14 }}
+    animate={{ opacity: 1, y: 0 }}
+    exit={{ opacity: 0, y: -14 }}
+    transition={{ duration: 0.2 }}
+  >
+    {renderCurrentStep()}
+  </motion.div>
+</AnimatePresence>
 
       {incompleteWarning && (
         <div
@@ -2481,7 +2526,7 @@ const footerBarStyle = {
           <button
             type="button"
             className="btn-pill primary"
-            onClick={handleSubmit}
+            onClick={() => handleSubmit(false)}
             disabled={isSubmitting || !!submitSuccess}
             style={{
               opacity: canContinueFromStep(totalSteps) ? 1 : 0.55,
