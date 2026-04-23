@@ -130,6 +130,17 @@ function YesNoToggle({
           }
         }
 
+if (colorMode === "blueYes") {
+  if (opt === "Yes") {
+    selectedBg = "#0b79ff";
+    selectedBorder = "#075ec7";
+  }
+  if (opt === "No") {
+    selectedBg = "#2e7d32";
+    selectedBorder = "#1b5e20";
+  }
+}
+
         if (colorMode === "allGreen") {
           selectedBg = "#2e7d32";
           selectedBorder = "#1b5e20";
@@ -338,8 +349,18 @@ function Take5() {
   const [signatureConfirmed, setSignatureConfirmed] = useState(false);
 
   // Step 1 – SWMS / JHA
-  const [swms, setSwms] = useState("");
-  const [jha, setJha] = useState("");
+  // Step 1 – SWMS / JHA
+const [swms, setSwms] = useState("");
+const [jha, setJha] = useState("");
+
+const [swmsDocNumber, setSwmsDocNumber] = useState("");
+const [jhaDocNumber, setJhaDocNumber] = useState("");
+
+const [swmsImageFile, setSwmsImageFile] = useState(null);
+const [jhaImageFile, setJhaImageFile] = useState(null);
+
+const [swmsImagePreview, setSwmsImagePreview] = useState("");
+const [jhaImagePreview, setJhaImagePreview] = useState("");
 
   // Step 2 – Consider the Task
   const [consider, setConsider] = useState({
@@ -410,7 +431,14 @@ function Take5() {
         setSignatureName(parsed.signatureName || derivedDisplayName);
 
         setSwms(parsed.swms || "");
-        setJha(parsed.jha || "");
+setJha(parsed.jha || "");
+setSwmsDocNumber(parsed.swmsDocNumber || "");
+setJhaDocNumber(parsed.jhaDocNumber || "");
+
+setSwmsImageFile(null);
+setJhaImageFile(null);
+setSwmsImagePreview("");
+setJhaImagePreview("");
 
         setConsider(
           parsed.consider || {
@@ -479,20 +507,22 @@ function Take5() {
   // Save draft on changes (lightweight)
   useEffect(() => {
     try {
-      const payload = {
-        step,
-        jobNumber,
-        employeeName,
-        signatureName,
-        signatureConfirmed,
-        swms,
-        jha,
-        consider,
-        assess,
-        hazards,
-        controls,
-        savedAt: new Date().toISOString(),
-      };
+   const payload = {
+  step,
+  jobNumber,
+  employeeName,
+  signatureName,
+  signatureConfirmed,
+  swms,
+  jha,
+  swmsDocNumber,
+  jhaDocNumber,
+  consider,
+  assess,
+  hazards,
+  controls,
+  savedAt: new Date().toISOString(),
+};
       localStorage.setItem(draftKey, JSON.stringify(payload));
     } catch {
       // ignore
@@ -506,6 +536,8 @@ function Take5() {
     signatureConfirmed,
     swms,
     jha,
+    swmsDocNumber,
+    jhaDocNumber,
     consider,
     assess,
     hazards,
@@ -757,6 +789,64 @@ if (matchedUser) {
     });
   }, []);
 
+const fileToDataUrl = useCallback((file) => {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      resolve("");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}, []);
+
+const compressImageToDataUrl = useCallback((file, maxWidth = 1600, quality = 0.78) => {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      resolve("");
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const img = new Image();
+
+      img.onload = () => {
+        let { width, height } = img;
+
+        if (width > maxWidth) {
+          const ratio = maxWidth / width;
+          width = maxWidth;
+          height = Math.round(height * ratio);
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Canvas context unavailable"));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}, []);
+
   const resetForm = useCallback(() => {
     setStep(1);
     setJobNumber("");
@@ -767,7 +857,13 @@ if (matchedUser) {
     setSignatureName(getLoggedInEmployeeName());
     setShowRiskReductionWarning(false);
     setSwms("");
-    setJha("");
+setJha("");
+setSwmsDocNumber("");
+setJhaDocNumber("");
+setSwmsImageFile(null);
+setJhaImageFile(null);
+setSwmsImagePreview("");
+setJhaImagePreview("");
     setConsider({
       understandScope: "",
       inspectedArea: "",
@@ -825,8 +921,16 @@ if (matchedUser) {
 
   const canContinueFromStep = useCallback(
     (currentStep) => {
-     if (currentStep === 1) {
-  return !!selectedJob && employeeName && swms && jha;
+ if (currentStep === 1) {
+  const swmsComplete =
+    swms === "No" ||
+    (swms === "Yes" && swmsDocNumber.trim() && swmsImageFile);
+
+  const jhaComplete =
+    jha === "No" ||
+    (jha === "Yes" && jhaDocNumber.trim() && jhaImageFile);
+
+  return !!selectedJob && employeeName && swms && jha && swmsComplete && jhaComplete;
 }
       if (currentStep === 2) {
         return Object.values(consider).every((v) => v);
@@ -855,7 +959,7 @@ if (matchedUser) {
       }
       return true;
     },
-    [selectedJob, jobNumber, employeeName, swms, jha, consider, assess, hazards, controls, signatureName, signatureConfirmed]
+    [selectedJob, jobNumber, employeeName, swms, jha, swmsDocNumber, jhaDocNumber, swmsImageFile, jhaImageFile, consider, assess, hazards, controls, signatureName, signatureConfirmed]
   );
 
   // detect red selections on the current step
@@ -948,13 +1052,18 @@ const hasUnreducedHazardRisk = useCallback(() => {
       jobNumber,
       employeeName,
       take5Number,
-      steps: {
-        swmsJha: { swms, jha },
-        considerTask: consider,
-        assessTask: assess,
-        hazards,
-        controls,
-      },
+     steps: {
+  swmsJha: {
+    swms,
+    jha,
+    swmsDocNumber,
+    jhaDocNumber,
+  },
+  considerTask: consider,
+  assessTask: assess,
+  hazards,
+  controls,
+},
       signature: {
         name: signatureDisplayName,
         confirmed: signatureConfirmed,
@@ -1051,7 +1160,22 @@ const hasUnreducedHazardRisk = useCallback(() => {
     // Step 1
     sectionHeader("STEP 1 – SWMS / JHA");
     qaRow("SWMS in place for this job?", data.steps.swmsJha.swms, "allGreen");
-    qaRow("JHA in place for this job?", data.steps.swmsJha.jha, "allGreen");
+if (data.steps.swmsJha.swms === "Yes") {
+  ensureSpace(8);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9.5);
+  doc.text(`SWMS Document Number: ${data.steps.swmsJha.swmsDocNumber || "-"}`, left + 2, y);
+  y += lineH;
+}
+
+qaRow("JHA in place for this job?", data.steps.swmsJha.jha, "allGreen");
+if (data.steps.swmsJha.jha === "Yes") {
+  ensureSpace(8);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9.5);
+  doc.text(`JHA Document Number: ${data.steps.swmsJha.jhaDocNumber || "-"}`, left + 2, y);
+  y += lineH;
+}
     y += 2;
 
     // Step 2
@@ -1296,7 +1420,17 @@ y += declarationText.length * 4.8 + 2;
 
     const formData = buildFormData(take5Number);
 
-    const { data: inserted, error: insertError } = await supabase
+const compressedSwmsImage =
+  swms === "Yes" && swmsImageFile
+    ? await compressImageToDataUrl(swmsImageFile)
+    : "";
+
+const compressedJhaImage =
+  jha === "Yes" && jhaImageFile
+    ? await compressImageToDataUrl(jhaImageFile)
+    : "";
+
+const { data: inserted, error: insertError } = await supabase
       .from("take5_submissions")
       .insert({
         job_number: jobNumber,
@@ -1311,6 +1445,50 @@ y += declarationText.length * 4.8 + 2;
     const take5Id = inserted.id;
 
     const pdfDoc = generatePdf(formData);
+
+const appendImagePage = (title, docNumber, imageDataUrl) => {
+  if (!imageDataUrl) return;
+
+  pdfDoc.addPage();
+
+  let imgY = 20;
+
+  pdfDoc.setFont("helvetica", "bold");
+  pdfDoc.setFontSize(14);
+  pdfDoc.setTextColor("#000");
+  pdfDoc.text(title, 10, imgY);
+
+  imgY += 8;
+  pdfDoc.setFont("helvetica", "normal");
+  pdfDoc.setFontSize(10);
+  pdfDoc.text(`Document Number: ${docNumber || "-"}`, 10, imgY);
+
+  imgY += 8;
+
+  const pageW = pdfDoc.internal.pageSize.getWidth();
+  const pageH = pdfDoc.internal.pageSize.getHeight();
+  const maxW = pageW - 20;
+  const maxH = pageH - imgY - 15;
+
+  try {
+    const imgProps = pdfDoc.getImageProperties(imageDataUrl);
+    const imgWidth = imgProps.width;
+    const imgHeight = imgProps.height;
+
+    const ratio = Math.min(maxW / imgWidth, maxH / imgHeight);
+    const renderW = imgWidth * ratio;
+    const renderH = imgHeight * ratio;
+
+    const x = (pageW - renderW) / 2;
+
+    pdfDoc.addImage(imageDataUrl, "JPEG", x, imgY, renderW, renderH);
+  } catch (err) {
+    console.warn("Could not append attachment image to PDF", err);
+  }
+};
+
+appendImagePage("SWMS Attachment", swmsDocNumber, compressedSwmsImage);
+appendImagePage("JHA Attachment", jhaDocNumber, compressedJhaImage);
 
     let pdfBlob;
     try {
@@ -1555,18 +1733,157 @@ y += declarationText.length * 4.8 + 2;
 
       <div style={{ marginTop: "0.8rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
         <div>
-          <div className="card-row-label">
-            Is there a Safe Work Method Statement in place for this job?
-          </div>
-          <YesNoToggle colorMode="allGreen" value={swms} onChange={setSwms} />
-        </div>
+  <div className="card-row-label">
+    Is there a Safe Work Method Statement in place for this job?
+  </div>
+  <YesNoToggle
+    colorMode="blueYes"
+    value={swms}
+    onChange={(v) => {
+      setSwms(v);
+      setIncompleteWarning("");
 
-        <div>
-          <div className="card-row-label">
-            Is there a Job Hazards Analysis in place for this job?
-          </div>
-          <YesNoToggle colorMode="allGreen" value={jha} onChange={setJha} />
+      if (v !== "Yes") {
+        setSwmsDocNumber("");
+        setSwmsImageFile(null);
+        setSwmsImagePreview("");
+      }
+    }}
+  />
+
+  {swms === "Yes" && (
+    <div style={{ marginTop: "0.6rem", display: "flex", flexDirection: "column", gap: "0.55rem" }}>
+      <div>
+        <div className="card-row-label">SWMS Document Number</div>
+        <input
+          type="text"
+          value={swmsDocNumber}
+          onChange={(e) => {
+            setSwmsDocNumber(e.target.value);
+            setIncompleteWarning("");
+          }}
+          className="maps-search-input"
+          placeholder="Enter SWMS document number…"
+          style={{ width: "100%", maxWidth: "320px", marginTop: "0.2rem" }}
+        />
+      </div>
+
+      <div>
+        <div className="card-row-label">Attach SWMS image/photo</div>
+        <input
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+
+            setSwmsImageFile(file);
+            const preview = await fileToDataUrl(file);
+            setSwmsImagePreview(preview);
+            setIncompleteWarning("");
+          }}
+          className="maps-search-input"
+          style={{ width: "100%", maxWidth: "320px", marginTop: "0.2rem" }}
+        />
+        <div style={{ fontSize: "0.75rem", color: "#666", marginTop: "0.25rem" }}>
+          On mobile this will allow choosing or taking a photo.
         </div>
+      </div>
+
+      {swmsImagePreview && (
+        <img
+          src={swmsImagePreview}
+          alt="SWMS preview"
+          style={{
+            width: "100%",
+            maxWidth: "220px",
+            borderRadius: 8,
+            border: "1px solid #ddd",
+            display: "block",
+          }}
+        />
+      )}
+    </div>
+  )}
+</div>
+
+<div>
+  <div className="card-row-label">
+    Is there a Job Hazards Analysis in place for this job?
+  </div>
+  <YesNoToggle
+    colorMode="blueYes"
+    value={jha}
+    onChange={(v) => {
+      setJha(v);
+      setIncompleteWarning("");
+
+      if (v !== "Yes") {
+        setJhaDocNumber("");
+        setJhaImageFile(null);
+        setJhaImagePreview("");
+      }
+    }}
+  />
+
+  {jha === "Yes" && (
+    <div style={{ marginTop: "0.6rem", display: "flex", flexDirection: "column", gap: "0.55rem" }}>
+      <div>
+        <div className="card-row-label">JHA Document Number</div>
+        <input
+          type="text"
+          value={jhaDocNumber}
+          onChange={(e) => {
+            setJhaDocNumber(e.target.value);
+            setIncompleteWarning("");
+          }}
+          className="maps-search-input"
+          placeholder="Enter JHA document number…"
+          style={{ width: "100%", maxWidth: "320px", marginTop: "0.2rem" }}
+        />
+      </div>
+
+      <div>
+        <div className="card-row-label">Attach JHA image/photo</div>
+        <input
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+
+            setJhaImageFile(file);
+            const preview = await fileToDataUrl(file);
+            setJhaImagePreview(preview);
+            setIncompleteWarning("");
+          }}
+          className="maps-search-input"
+          style={{ width: "100%", maxWidth: "320px", marginTop: "0.2rem" }}
+        />
+        <div style={{ fontSize: "0.75rem", color: "#666", marginTop: "0.25rem" }}>
+          On mobile this will allow choosing or taking a photo.
+        </div>
+      </div>
+
+      {jhaImagePreview && (
+        <img
+          src={jhaImagePreview}
+          alt="JHA preview"
+          style={{
+            width: "100%",
+            maxWidth: "220px",
+            borderRadius: 8,
+            border: "1px solid #ddd",
+            display: "block",
+          }}
+        />
+      )}
+    </div>
+  )}
+</div>
+          
       </div>
     </div>
   );
