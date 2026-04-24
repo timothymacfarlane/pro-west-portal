@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
+import { useAuth } from "../context/AuthContext.jsx";
 
 function addressSummaryFromRow(r) {
   const a =
@@ -12,18 +13,68 @@ function addressSummaryFromRow(r) {
 }
 
 function Take5Register() {
+  const { user } = useAuth();
+
+const [staff, setStaff] = useState([]);
+const [myDisplayName, setMyDisplayName] = useState("");
+const [surveyorMode, setSurveyorMode] = useState("__my__"); // __my__ | __all__ | name
   const [rows, setRows] = useState([]);
   const [pdfMap, setPdfMap] = useState({}); // { [rowId]: signedUrl }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   // ✅ Job filter with autosuggest (same approach as Jobs.jsx / Take5.jsx)
-  const [jobFilter, setJobFilter] = useState("");
-  const [jobFilterSuggestions, setJobFilterSuggestions] = useState([]);
-  const [jobFilterLoading, setJobFilterLoading] = useState(false);
-  const debounceJobFilterRef = useRef(null);
+ const [jobFilter, setJobFilter] = useState("");
+const [selectedJob, setSelectedJob] = useState(null);
+const [jobFilterSuggestions, setJobFilterSuggestions] = useState([]);
+const [jobFilterLoading, setJobFilterLoading] = useState(false);
+const debounceJobFilterRef = useRef(null);
+
+const selectedSurveyor = useMemo(() => {
+  if (surveyorMode === "__all__") return "__all__";
+  if (surveyorMode === "__my__") return (myDisplayName || "").trim();
+  return (surveyorMode || "").trim();
+}, [surveyorMode, myDisplayName]);
+
+const surveyorDropdownOptions = useMemo(() => {
+  const list = (staff || []).map((p) => p.name).filter(Boolean);
+  return Array.from(new Set(list)).sort((a, b) => a.localeCompare(b));
+}, [staff]);
 
   const [expandedJobs, setExpandedJobs] = useState({}); // { [jobNumber]: bool }
+
+ useEffect(() => {
+  if (!user) return;
+
+  const loadStaff = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, display_name, email, is_active")
+        .eq("is_active", true)
+        .order("display_name", { ascending: true });
+
+      if (error) throw error;
+
+      const list = (data || []).map((p) => ({
+        id: p.id,
+        name: (p.display_name || p.email || "Unnamed").trim(),
+      }));
+
+      setStaff(list);
+
+      const me = list.find((x) => x.id === user.id);
+      const fallback = user?.user_metadata?.full_name || user?.email || "";
+      setMyDisplayName((me?.name || fallback || "").trim());
+    } catch (e) {
+      console.warn("Error loading surveyors:", e?.message || e);
+      setStaff([]);
+      setMyDisplayName((user?.user_metadata?.full_name || user?.email || "").trim());
+    }
+  };
+
+  loadStaff();
+}, [user]);
 
   const runJobFilterSuggest = useCallback(async (query) => {
     const q = (query || "").trim();
@@ -83,6 +134,17 @@ function Take5Register() {
           query = query.ilike("job_number", `%${jobFilter.trim()}%`);
         }
 
+if (selectedSurveyor !== "__all__") {
+  if (!selectedSurveyor) {
+    setRows([]);
+    setPdfMap({});
+    setLoading(false);
+    return;
+  }
+
+  query = query.eq("employee_name", selectedSurveyor);
+}
+
         const { data, error: qError } = await query;
         if (qError) throw qError;
 
@@ -119,7 +181,7 @@ function Take5Register() {
     };
 
     fetchData();
-  }, [jobFilter]);
+  }, [jobFilter, selectedSurveyor]);
 
   // Group rows by job number (so PDFs sit under job number)
   const groupedByJob = useMemo(() => {
@@ -131,6 +193,15 @@ function Take5Register() {
     });
     return groups;
   }, [rows]);
+
+const expandSelectedJob = (jobNumber) => {
+  if (!jobNumber) return;
+
+  setExpandedJobs((prev) => ({
+    ...prev,
+    [String(jobNumber)]: true,
+  }));
+};
 
   const toggleJob = (job) => {
     setExpandedJobs((prev) => ({ ...prev, [job]: !prev[job] }));
@@ -146,92 +217,205 @@ function Take5Register() {
       <div className="card">
         <h3 className="card-title">Filter</h3>
         <p className="card-subtitle">
-          Filter by job number. Leave blank to show all.
+          Filter by job number and surveyor. Defaults to your Take 5s.
         </p>
 
         <div className="card-row" style={{ marginTop: "0.4rem", alignItems: "flex-start" }}>
           <span className="card-row-label" style={{ paddingTop: 8 }}>Job number</span>
 
-          <div style={{ width: "100%", maxWidth: 320 }}>
+          <div style={{ width: "100%", maxWidth: 320, position: "relative" }}>
             <input
               type="text"
               inputMode="numeric"
               pattern="[0-9]*"
               aria-label="Filter by job number"
               value={jobFilter}
-              onChange={(e) => setJobFilter(e.target.value)}
-              onFocus={() => runJobFilterSuggest(jobFilter)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") setJobFilterSuggestions([]);
-                if (e.key === "Escape") setJobFilterSuggestions([]);
-              }}
-              className="maps-search-input"
-              placeholder={`e.g. 101441${jobFilterLoading ? "…" : ""}`}
+              onChange={(e) => {
+  const v = e.target.value;
+  setJobFilter(v);
+  setSelectedJob(null);
+}}
+onFocus={() => runJobFilterSuggest(jobFilter)}
+onBlur={() => {
+  setTimeout(() => setJobFilterSuggestions([]), 150);
+}}
+onKeyDown={(e) => {
+  if (e.key === "Enter") {
+    const matched = jobFilterSuggestions.find(
+      (j) => String(j.job_number) === String(jobFilter).trim()
+    );
+
+    if (matched) {
+  const selectedJobNumber = String(matched.job_number);
+
+  setSelectedJob(matched);
+  setJobFilter(selectedJobNumber);
+  expandSelectedJob(selectedJobNumber);
+}
+
+    setJobFilterSuggestions([]);
+  }
+
+  if (e.key === "Escape") setJobFilterSuggestions([]);
+}}
+placeholder={`Type job number…${jobFilterLoading ? "…" : ""}`}
+className="maps-search-input"
               style={{ width: "100%" }}
             />
 
             {jobFilterSuggestions.length > 0 && (
-              <div
-                style={{
-                  marginTop: 8,
-                  borderRadius: 14,
-                  overflow: "hidden",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(20,20,25,0.95)",
-                  boxShadow: "0 12px 30px rgba(0,0,0,0.35)",
-                  maxHeight: 280,
-                  overflowY: "auto",
-                  WebkitOverflowScrolling: "touch",
-                }}
-              >
-                {jobFilterSuggestions.map((j) => (
-                  <button
-                    key={j.id}
-                    className="btn-pill"
-                    style={{
-                      width: "100%",
-                      justifyContent: "flex-start",
-                      borderRadius: 0,
-                      padding: "10px 12px",
-                      background: "transparent",
-                      textAlign: "left",
-                      whiteSpace: "normal",
-                    }}
-                    type="button"
-                    onClick={() => {
-                      setJobFilter(String(j.job_number));
-                      setJobFilterSuggestions([]);
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 950, color: "#fff" }}>#{j.job_number}</div>
-                      <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2, color: "#fff" }}>
-                        {j.address}
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+  <div
+    style={{
+      position: "absolute",
+      top: "calc(100% + 6px)",
+      left: 0,
+      right: 0,
+      zIndex: 20,
+      borderRadius: 12,
+      overflow: "hidden",
+      border: "1px solid var(--pw-border-soft, #eadada)",
+      background: "#fff",
+      boxShadow: "0 10px 24px rgba(0,0,0,0.12)",
+      maxHeight: 260,
+      overflowY: "auto",
+      WebkitOverflowScrolling: "touch",
+    }}
+  >
+    {jobFilterSuggestions.map((j, idx) => (
+      <button
+        key={j.id}
+        type="button"
+      onClick={() => {
+  const selectedJobNumber = String(j.job_number);
 
-            {jobFilter.trim() && (
-              <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  className="btn-pill"
-                  onClick={() => {
-                    setJobFilter("");
-                    setJobFilterSuggestions([]);
-                  }}
-                  style={{ fontSize: "0.8rem" }}
-                >
-                  Clear filter
-                </button>
-              </div>
-            )}
+  setJobFilter(selectedJobNumber);
+  setSelectedJob(j);
+  setJobFilterSuggestions([]);
+  expandSelectedJob(selectedJobNumber);
+}}
+        style={{
+          width: "100%",
+          display: "block",
+          padding: "0.7rem 0.85rem",
+          textAlign: "left",
+          background: "#fff",
+          border: "none",
+          borderBottom:
+            idx === jobFilterSuggestions.length - 1
+              ? "none"
+              : "1px solid #f3e1e1",
+          cursor: "pointer",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "#fff5f5";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "#fff";
+        }}
+      >
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: "0.9rem",
+            color: "var(--pw-primary-dark, #b71c1c)",
+            lineHeight: 1.2,
+          }}
+        >
+          Job #{j.job_number}
+        </div>
+
+        <div
+          style={{
+            fontSize: "0.78rem",
+            color: "#666",
+            marginTop: 3,
+            lineHeight: 1.35,
+          }}
+        >
+          {j.address}
+        </div>
+      </button>
+    ))}
+  </div>
+)}
+
+{selectedJob && (
+  <div
+    style={{
+      marginTop: 6,
+      padding: "0.5rem 0.7rem",
+      borderRadius: 8,
+      background: "#e8f5e9",
+      border: "1px solid #c8e6c9",
+      fontSize: "0.8rem",
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: "0.5rem",
+    }}
+  >
+    <div>
+      <div style={{ fontWeight: 700, color: "#2e7d32" }}>
+        ✓ Job #{selectedJob.job_number} selected
+      </div>
+      <div style={{ fontSize: "0.75rem", color: "#555" }}>
+        {selectedJob.address}
+      </div>
+    </div>
+
+    <button
+      type="button"
+      className="btn-pill"
+      style={{ fontSize: "0.7rem", padding: "0.15rem 0.5rem" }}
+      onClick={() => {
+        setSelectedJob(null);
+        setJobFilter("");
+        setJobFilterSuggestions([]);
+      }}
+    >
+      Clear
+    </button>
+  </div>
+)}
+
           </div>
         </div>
+        <div className="card-row" style={{ marginTop: "0.6rem" }}>
+  <span className="card-row-label">Surveyor</span>
+
+  <select
+    className="maps-search-input"
+    aria-label="Filter by surveyor"
+    style={{ maxWidth: "260px" }}
+    value={surveyorMode}
+    onChange={(e) => {
+  setSurveyorMode(e.target.value);
+  setExpandedJobs({});
+}}
+    disabled={!user || loading}
+  >
+    <option value="__my__">My Take 5s</option>
+    <option value="__all__">All</option>
+    <option disabled>────────</option>
+
+    {surveyorDropdownOptions.map((name) => (
+      <option key={name} value={name}>
+        {name}
+      </option>
+    ))}
+  </select>
+</div>
+<div className="card-row" style={{ marginTop: "0.6rem" }}>
+  <span className="card-row-label">Showing</span>
+  <span className="card-row-value">
+    <b>{rows.length}</b> Take 5{rows.length === 1 ? "" : "s"}
+    {selectedSurveyor !== "__all__" && selectedSurveyor ? ` for ${selectedSurveyor}` : ""}
+    {jobFilter.trim() ? ` • Job #${jobFilter.trim()}` : ""}
+  </span>
+</div>
       </div>
+
+
 
       <div className="card">
         <h3 className="card-title">Submissions</h3>

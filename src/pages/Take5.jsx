@@ -228,6 +228,11 @@ const PDF_COLOURS = {
 function getYNStyle(mode, value) {
   if (!value) return { bg: PDF_COLOURS.grey, text: PDF_COLOURS.textWhite };
 
+if (mode === "blueYes") {
+  if (value === "Yes") return { bg: PDF_COLOURS.blue, text: PDF_COLOURS.textWhite };
+  if (value === "No") return { bg: PDF_COLOURS.green, text: PDF_COLOURS.textWhite };
+}
+
   if (mode === "allGreen") {
     return { bg: PDF_COLOURS.green, text: PDF_COLOURS.textWhite };
   }
@@ -350,6 +355,12 @@ function Take5() {
 
   // Step 1 – SWMS / JHA
   // Step 1 – SWMS / JHA
+const [sameHazardsToday, setSameHazardsToday] = useState("");
+const [previousTake5Id, setPreviousTake5Id] = useState("");
+const [previousTake5Options, setPreviousTake5Options] = useState([]);
+const [previousTake5Loading, setPreviousTake5Loading] = useState(false);
+const [previousTake5Message, setPreviousTake5Message] = useState("");
+
 const [swms, setSwms] = useState("");
 const [jha, setJha] = useState("");
 
@@ -435,6 +446,12 @@ setJha(parsed.jha || "");
 setSwmsDocNumber(parsed.swmsDocNumber || "");
 setJhaDocNumber(parsed.jhaDocNumber || "");
 
+setSameHazardsToday(parsed.sameHazardsToday || "");
+setPreviousTake5Id(parsed.previousTake5Id || "");
+setPreviousTake5Options([]);
+setPreviousTake5Loading(false);
+setPreviousTake5Message("");
+
 setSwmsImageFile(null);
 setJhaImageFile(null);
 setSwmsImagePreview("");
@@ -513,6 +530,8 @@ setJhaImagePreview("");
   employeeName,
   signatureName,
   signatureConfirmed,
+  sameHazardsToday,
+  previousTake5Id,
   swms,
   jha,
   swmsDocNumber,
@@ -534,6 +553,8 @@ setJhaImagePreview("");
     employeeName,
     signatureName,
     signatureConfirmed,
+    sameHazardsToday,
+    previousTake5Id,
     swms,
     jha,
     swmsDocNumber,
@@ -627,6 +648,206 @@ if (matchedUser) {
     isMounted = false;
   };
 }, [user, derivedDisplayName]);
+
+const getPerthDayRangeUtc = useCallback(() => {
+  const now = new Date();
+
+  // Perth is UTC+8 and has no daylight saving
+  const perthNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+
+  const y = perthNow.getUTCFullYear();
+  const m = perthNow.getUTCMonth();
+  const d = perthNow.getUTCDate();
+
+  const perthStartUtc = new Date(Date.UTC(y, m, d, 0, 0, 0) - 8 * 60 * 60 * 1000);
+  const perthEndUtc = new Date(Date.UTC(y, m, d + 1, 0, 0, 0) - 8 * 60 * 60 * 1000);
+
+  return {
+    startIso: perthStartUtc.toISOString(),
+    endIso: perthEndUtc.toISOString(),
+  };
+}, []);
+
+useEffect(() => {
+  let isMounted = true;
+
+  const loadPreviousTake5s = async () => {
+    if (sameHazardsToday !== "Yes" || !employeeName) {
+      setPreviousTake5Options([]);
+      setPreviousTake5Id("");
+      setPreviousTake5Message("");
+      return;
+    }
+
+    setPreviousTake5Loading(true);
+    setPreviousTake5Message("");
+
+    try {
+      const { startIso, endIso } = getPerthDayRangeUtc();
+
+      const { data, error } = await supabase
+        .from("take5_submissions")
+        .select("id, job_number, take5_number, employee_name, form_data, created_at")
+        .eq("employee_name", employeeName)
+        .gte("created_at", startIso)
+        .lt("created_at", endIso)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      if (!isMounted) return;
+
+      const options = (data || []).map((row) => {
+        const createdAt = row.created_at
+          ? new Date(row.created_at).toLocaleTimeString("en-AU", {
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+              timeZone: "Australia/Perth",
+            })
+          : "";
+
+        return {
+          id: row.id,
+          label: `Take 5 #${row.take5_number || "-"} — Job #${row.job_number || "-"}${createdAt ? ` — ${createdAt}` : ""}`,
+          formData: row.form_data,
+        };
+      });
+
+      setPreviousTake5Options(options);
+
+      if (!options.length) {
+        setPreviousTake5Message("No completed Take 5s found for this employee today.");
+      }
+    } catch (err) {
+      console.error("Failed to load previous Take 5s", err);
+      if (isMounted) {
+        setPreviousTake5Options([]);
+        setPreviousTake5Message("Could not load previous Take 5s for today.");
+      }
+    } finally {
+      if (isMounted) setPreviousTake5Loading(false);
+    }
+  };
+
+  loadPreviousTake5s();
+
+  return () => {
+    isMounted = false;
+  };
+}, [sameHazardsToday, employeeName, getPerthDayRangeUtc]);
+
+const applyPreviousTake5 = useCallback((formData) => {
+  if (!formData?.steps) return;
+
+  const prevSwms = formData.steps?.swmsJha?.swms || "";
+  const prevJha = formData.steps?.swmsJha?.jha || "";
+
+  setSwms(prevSwms);
+  setJha(prevJha);
+  setSwmsDocNumber(formData.steps?.swmsJha?.swmsDocNumber || "");
+  setJhaDocNumber(formData.steps?.swmsJha?.jhaDocNumber || "");
+
+  // Force reattachment for the new Take 5
+  setSwmsImageFile(null);
+  setJhaImageFile(null);
+  setSwmsImagePreview("");
+  setJhaImagePreview("");
+
+  setConsider(
+    formData.steps?.considerTask || {
+      understandScope: "",
+      inspectedArea: "",
+      readInstructions: "",
+      toolsInOrder: "",
+      fitAndCompetent: "",
+      correctPpe: "",
+    }
+  );
+
+  setAssess(
+    formData.steps?.assessTask || {
+      requirePermits: "",
+      obtainedPermit: "",
+      sprainStrainRisk: "",
+      riskToOthers: "",
+      hazardousEnvironment: "",
+    }
+  );
+
+  const copiedHazards = Array.isArray(formData.steps?.hazards)
+    ? formData.steps.hazards.map((h, idx) => ({
+        id: idx + 1,
+        description: h.description || "",
+        preLikelihood: h.preLikelihood || "",
+        preConsequence: h.preConsequence || "",
+        preResult: h.preResult || "",
+        controlMeasure: h.controlMeasure || "",
+        postLikelihood: h.postLikelihood || "",
+        postConsequence: h.postConsequence || "",
+        postResult: h.postResult || "",
+      }))
+    : [
+        {
+          id: 1,
+          description: "",
+          preLikelihood: "",
+          preConsequence: "",
+          preResult: "",
+          controlMeasure: "",
+          postLikelihood: "",
+          postConsequence: "",
+          postResult: "",
+        },
+      ];
+
+  setHazards(copiedHazards.length ? copiedHazards : [
+    {
+      id: 1,
+      description: "",
+      preLikelihood: "",
+      preConsequence: "",
+      preResult: "",
+      controlMeasure: "",
+      postLikelihood: "",
+      postConsequence: "",
+      postResult: "",
+    },
+  ]);
+
+  nextHazardId.current = Math.max(2, copiedHazards.length + 1);
+
+  setControls(
+    formData.steps?.controls || {
+      hazardsControlled: "",
+      confidentSafe: "",
+    }
+  );
+
+  // Keep current employee / signature, but force fresh confirmation
+  setSignatureName(employeeName || "");
+  setSignatureConfirmed(false);
+
+  setSubmitError("");
+  setSubmitSuccess("");
+  setIncompleteWarning("");
+  setPdfUrl("");
+  setShowRedWarning(false);
+  setShowRiskReductionWarning(false);
+  setPreviousTake5Message(
+    "Previous Take 5 copied. Please select the current job number and reattach any SWMS/JHA images if required."
+  );
+}, [employeeName]);
+
+const handlePreviousTake5Select = useCallback((take5Id) => {
+  setPreviousTake5Id(take5Id);
+  setIncompleteWarning("");
+
+  const selected = previousTake5Options.find((opt) => String(opt.id) === String(take5Id));
+  if (!selected?.formData) return;
+
+  applyPreviousTake5(selected.formData);
+}, [previousTake5Options, applyPreviousTake5]);
 
   // Keep jobNoQuery synced if jobNumber is changed elsewhere (e.g. restore)
   useEffect(() => {
@@ -857,7 +1078,14 @@ const compressImageToDataUrl = useCallback((file, maxWidth = 1600, quality = 0.7
     setSignatureName(getLoggedInEmployeeName());
     setShowRiskReductionWarning(false);
     setSwms("");
-setJha("");
+
+setSameHazardsToday("");
+setPreviousTake5Id("");
+setPreviousTake5Options([]);
+setPreviousTake5Loading(false);
+setPreviousTake5Message("");
+
+    setJha("");
 setSwmsDocNumber("");
 setJhaDocNumber("");
 setSwmsImageFile(null);
@@ -921,7 +1149,11 @@ setJhaImagePreview("");
 
   const canContinueFromStep = useCallback(
     (currentStep) => {
- if (currentStep === 1) {
+if (currentStep === 1) {
+  const previousSelectionComplete =
+    sameHazardsToday === "No" ||
+    (sameHazardsToday === "Yes" && previousTake5Id);
+
   const swmsComplete =
     swms === "No" ||
     (swms === "Yes" && swmsDocNumber.trim() && swmsImageFile);
@@ -930,7 +1162,16 @@ setJhaImagePreview("");
     jha === "No" ||
     (jha === "Yes" && jhaDocNumber.trim() && jhaImageFile);
 
-  return !!selectedJob && employeeName && swms && jha && swmsComplete && jhaComplete;
+  return (
+    !!selectedJob &&
+    employeeName &&
+    sameHazardsToday &&
+    previousSelectionComplete &&
+    swms &&
+    jha &&
+    swmsComplete &&
+    jhaComplete
+  );
 }
       if (currentStep === 2) {
         return Object.values(consider).every((v) => v);
@@ -959,7 +1200,25 @@ setJhaImagePreview("");
       }
       return true;
     },
-    [selectedJob, jobNumber, employeeName, swms, jha, swmsDocNumber, jhaDocNumber, swmsImageFile, jhaImageFile, consider, assess, hazards, controls, signatureName, signatureConfirmed]
+    [
+  selectedJob,
+  jobNumber,
+  employeeName,
+  sameHazardsToday,
+  previousTake5Id,
+  swms,
+  jha,
+  swmsDocNumber,
+  jhaDocNumber,
+  swmsImageFile,
+  jhaImageFile,
+  consider,
+  assess,
+  hazards,
+  controls,
+  signatureName,
+  signatureConfirmed,
+]
   );
 
   // detect red selections on the current step
@@ -1159,7 +1418,7 @@ const hasUnreducedHazardRisk = useCallback(() => {
 
     // Step 1
     sectionHeader("STEP 1 – SWMS / JHA");
-    qaRow("SWMS in place for this job?", data.steps.swmsJha.swms, "allGreen");
+    qaRow("SWMS in place for this job?", data.steps.swmsJha.swms, "blueYes");
 if (data.steps.swmsJha.swms === "Yes") {
   ensureSpace(8);
   doc.setFont("helvetica", "normal");
@@ -1168,7 +1427,7 @@ if (data.steps.swmsJha.swms === "Yes") {
   y += lineH;
 }
 
-qaRow("JHA in place for this job?", data.steps.swmsJha.jha, "allGreen");
+qaRow("JHA in place for this job?", data.steps.swmsJha.jha, "blueYes");
 if (data.steps.swmsJha.jha === "Yes") {
   ensureSpace(8);
   doc.setFont("helvetica", "normal");
@@ -1732,6 +1991,66 @@ appendImagePage("JHA Attachment", jhaDocNumber, compressedJhaImage);
       </div>
 
       <div style={{ marginTop: "0.8rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+       
+       <div>
+  <div className="card-row-label">
+    Are the hazards at this job site the same as a previous job completed today?
+  </div>
+  <YesNoToggle
+    colorMode="blueYes"
+    value={sameHazardsToday}
+    onChange={(v) => {
+      setSameHazardsToday(v);
+      setIncompleteWarning("");
+      setPreviousTake5Message("");
+
+      if (v !== "Yes") {
+        setPreviousTake5Id("");
+        setPreviousTake5Options([]);
+      }
+    }}
+  />
+
+  {sameHazardsToday === "Yes" && (
+    <div style={{ marginTop: "0.6rem", display: "flex", flexDirection: "column", gap: "0.55rem" }}>
+      <div>
+        <div className="card-row-label">Select previous Take 5 from today</div>
+        <select
+          value={previousTake5Id}
+          onChange={(e) => handlePreviousTake5Select(e.target.value)}
+          className="maps-search-input"
+          style={{ maxWidth: "420px", marginTop: "0.2rem" }}
+          disabled={previousTake5Loading}
+        >
+          <option value="">
+            {previousTake5Loading ? "Loading Take 5s..." : "Select a previous Take 5…"}
+          </option>
+          {previousTake5Options.map((opt) => (
+            <option key={opt.id} value={opt.id}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {previousTake5Message && (
+        <div
+          style={{
+            fontSize: "0.78rem",
+            color: previousTake5Options.length ? "#2e7d32" : "#666",
+            background: previousTake5Options.length ? "#e8f5e9" : "#f5f5f5",
+            border: `1px solid ${previousTake5Options.length ? "#c8e6c9" : "#ddd"}`,
+            borderRadius: 8,
+            padding: "0.5rem 0.65rem",
+            maxWidth: "520px",
+          }}
+        >
+          {previousTake5Message}
+        </div>
+      )}
+    </div>
+  )}
+</div>
         <div>
   <div className="card-row-label">
     Is there a Safe Work Method Statement in place for this job?
