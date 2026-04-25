@@ -5,9 +5,8 @@ import "./App.css";
 import prowestLogo from "./assets/prowest-logo.png";
 import { supabase } from "./lib/supabaseClient.js";
 
-import Login from "./pages/Login.jsx";
-import ProtectedRoute from "./components/ProtectedRoute.jsx";
-import ResetPassword from "./pages/ResetPassword.jsx";
+const Login = lazy(() => import("./pages/Login.jsx"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword.jsx"));
 
 const Home = lazy(() => import("./pages/Home.jsx"));
 const Admin = lazy(() => import("./pages/Admin.jsx"));
@@ -27,8 +26,9 @@ const VehiclePrestartRegister = lazy(() => import("./pages/VehiclePrestartRegist
 const Weather = lazy(() => import("./pages/Weather.jsx"));
 
 
-import NotificationBell from "./components/NotificationBell.jsx"; // 🔔 ADDED
+const NotificationBell = lazy(() => import("./components/NotificationBell.jsx"));
 
+import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 
 import { AppVisibilityProvider } from "./context/AppVisibilityContext.jsx";
@@ -41,11 +41,9 @@ function App() {
   const navigate = useNavigate();
 
   // Updated: rely on AuthContext canonical flags rather than "ADMIN" string checks
- const { isAdmin, authLoading, profileLoading, user } = useAuth();
+const { isAdmin, user } = useAuth();
 
-  const isAuthPage =
-  location.pathname === "/login" ||
-  location.pathname === "/reset-password";
+ const isAuthPage = ["/login", "/reset-password"].includes(location.pathname);
 
   const toggleSidebar = () => {
     // Desktop collapse toggle (existing behaviour)
@@ -126,7 +124,11 @@ const handleLogout = async () => {
 
           <div className="header-right">
             {/* 🔔 In-app notifications */}
-            {!isAuthPage && <NotificationBell />}
+            {!isAuthPage && user && (
+  <Suspense fallback={null}>
+    <NotificationBell />
+  </Suspense>
+)}
 
             <a
               href="https://prowestsurveying.com.au/"
@@ -188,7 +190,7 @@ const handleLogout = async () => {
                 </li>
 
                 {/* Admin tab: only show once auth has resolved, and user is admin */}
-                {!authLoading && !profileLoading && isAdmin && (
+                {isAdmin && (
                   <li>
                     <NavLink
                       to="/admin"
@@ -256,7 +258,7 @@ const handleLogout = async () => {
                     <span className="nav-label">Jobs</span>
                   </NavLink>
                 </li>
-{!authLoading && !profileLoading && isAdmin && (
+{isAdmin && (
   <li>
     <NavLink
       to="/job-planning"
@@ -378,7 +380,7 @@ const handleLogout = async () => {
 
         {/* ---------- MAIN CONTENT ---------- */}
 <main className="main-content">
-  <Suspense fallback={<div style={{ padding: 16 }}>Loading…</div>}>
+  <Suspense fallback={<div className="page-loading">Loading portal...</div>}>
     <Routes>
       <Route path="/login" element={<Login />} />
 <Route path="/reset-password" element={<ResetPassword />} />

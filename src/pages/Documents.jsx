@@ -125,6 +125,22 @@ function Documents() {
     };
   }, []);
 
+useEffect(() => {
+  const handleKey = (e) => {
+    if (e.key === "Escape") {
+      setViewerOpen(false);
+      setVersionsOpen(false);
+      setUploadOpen(false);
+    }
+  };
+
+  window.addEventListener("keydown", handleKey);
+
+  return () => {
+    window.removeEventListener("keydown", handleKey);
+  };
+}, []);
+
   // Load favourites (per user) — fast and separate
   useEffect(() => {
     let cancelled = false;
@@ -294,7 +310,7 @@ function Documents() {
       const pdf = isPdf(v.mime_type, v.file_name);
       const isOffice = !pdf && /(word|excel|spreadsheet|officedocument|msword|ms-excel)/i.test(v.mime_type);
       setOpenUrl(url);
-      setOpenFileName(v.file_name || "document");      
+      setOpenFileName(v.file_name || "document");     
       setOpenKind(pdf ? "pdf" : isOffice ? "office" : "download");
       setViewerOpen(true);
     } catch (e) {
@@ -545,7 +561,7 @@ const handleDownloadCurrent = async () => {
       const pdf = isPdf(versionRow.mime_type, versionRow.file_name);
       const isOffice = !pdf && /(word|excel|spreadsheet|officedocument|msword|ms-excel)/i.test(versionRow.mime_type);
       setOpenUrl(url);
-      setOpenFileName(v.file_name || "document");
+      setOpenFileName(versionRow.file_name || "document");
       setOpenKind(pdf ? "pdf" : isOffice ? "office" : "download");
       setViewerOpen(true);
     } catch (e) {
@@ -692,22 +708,30 @@ const deleteDocument = async (doc) => {
               Favourites
             </label>
 
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={openNewUpload}
-                style={{
-                  padding: "0.35rem 0.6rem",
-                  borderRadius: 10,
-                  border: "1px solid rgba(0,0,0,0.15)",
-                  background: "#fff",
-                  cursor: "pointer",
-                  fontSize: "0.92rem",
-                }}
-              >
-                + Add document
-              </button>
-            )}
+            <button
+  type="button"
+  onClick={() => {
+    setQuery("");
+    setCategory("All");
+    setShowFavouritesOnly(false);
+    fetchDocuments({ reset: true });
+  }}
+  disabled={loading}
+  className="btn-pill secondary"
+>
+  {loading ? "Refreshing…" : "Refresh"}
+</button>
+
+{isAdmin && (
+  <button
+    type="button"
+    onClick={openNewUpload}
+    className="btn-pill primary"
+  >
+    + Add document
+  </button>
+)}
+            
           </div>
         </div>
 
@@ -802,75 +826,45 @@ const deleteDocument = async (doc) => {
 
           <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginTop: "0.6rem" }}>
             <button
-              type="button"
-              onClick={() => openDocument(selectedDoc)}
-              disabled={!selectedDoc.currentVersion}
-              style={{
-                padding: "0.45rem 0.8rem",
-                borderRadius: 10,
-                border: "1px solid rgba(0,0,0,0.15)",
-                background: "#fff",
-                cursor: "pointer",
-              }}
-            >
-              Open
-            </button>
+  type="button"
+  onClick={() => openDocument(selectedDoc)}
+  disabled={!selectedDoc.currentVersion}
+  className="btn-pill secondary"
+>
+  Open
+</button>
 
-            <button
-              type="button"
-              onClick={() => toggleFavourite(selectedDoc.id)}
-              style={{
-                padding: "0.45rem 0.8rem",
-                borderRadius: 10,
-                border: "1px solid rgba(0,0,0,0.15)",
-                background: "#fff",
-                cursor: "pointer",
-              }}
-            >
+          <button
+  type="button"
+  onClick={() => toggleFavourite(selectedDoc.id)}
+  className="btn-pill secondary"
+>
               {favouriteSet.has(selectedDoc.id) ? "★ Unfavourite" : "☆ Favourite"}
             </button>
 
             <button
-              type="button"
-              onClick={() => loadVersions(selectedDoc.id)}
-              style={{
-                padding: "0.45rem 0.8rem",
-                borderRadius: 10,
-                border: "1px solid rgba(0,0,0,0.15)",
-                background: "#fff",
-                cursor: "pointer",
-              }}
-            >
+  type="button"
+  onClick={() => loadVersions(selectedDoc.id)}
+  className="btn-pill secondary"
+>
               Versions
             </button>
 
             {isAdmin && (
               <>
-                <button
-                  type="button"
-                  onClick={openNewVersionUpload}
-                  style={{
-                    padding: "0.45rem 0.8rem",
-                    borderRadius: 10,
-                    border: "1px solid rgba(0,0,0,0.15)",
-                    background: "#fff",
-                    cursor: "pointer",
-                  }}
-                >
+               <button
+  type="button"
+  onClick={openNewVersionUpload}
+  className="btn-pill primary"
+>
                   + New version
                 </button>
 
                 <button
-                  type="button"
-                  onClick={() => deleteDocument(selectedDoc)}
-                  style={{
-                    padding: "0.45rem 0.8rem",
-                    borderRadius: 10,
-                    border: "1px solid rgba(0,0,0,0.15)",
-                    background: "#fff",
-                    cursor: "pointer",
-                  }}
-                >
+  type="button"
+  onClick={() => deleteDocument(selectedDoc)}
+  className="btn-pill danger"
+>
                   Delete
                 </button>
               </>
@@ -941,41 +935,26 @@ const deleteDocument = async (doc) => {
                 </div>
 
                 <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleFavourite(d.id);
-                  }}
-                  aria-label={d.isFavourite ? "Unfavourite" : "Favourite"}
-                  style={{
-                    flex: "0 0 auto",
-                    padding: "0.35rem 0.55rem",
-                    borderRadius: 10,
-                    border: "1px solid rgba(0,0,0,0.15)",
-                    background: "#fff",
-                    cursor: "pointer",
-                    fontSize: "1rem",
-                  }}
-                >
+  type="button"
+  onClick={(e) => {
+    e.stopPropagation();
+    toggleFavourite(d.id);
+  }}
+  aria-label={d.isFavourite ? "Unfavourite" : "Favourite"}
+  className="btn-pill secondary"
+>
                   {d.isFavourite ? "★" : "☆"}
                 </button>
               </div>
             ))}
 
             {hasMoreRef.current && (
-              <button
-                type="button"
-                onClick={() => fetchDocuments({ reset: false })}
-                disabled={loadingMore}
-                style={{
-                  marginTop: "0.6rem",
-                  padding: "0.55rem 0.8rem",
-                  borderRadius: 12,
-                  border: "1px solid rgba(0,0,0,0.15)",
-                  background: "#fff",
-                  cursor: "pointer",
-                }}
-              >
+             <button
+  type="button"
+  onClick={() => fetchDocuments({ reset: false })}
+  disabled={loadingMore}
+  className="btn-pill secondary"
+>
                 {loadingMore ? "Loading…" : "Load more"}
               </button>
             )}
@@ -988,7 +967,6 @@ const deleteDocument = async (doc) => {
   <div
     role="dialog"
     aria-modal="true"
-    onClick={() => setViewerOpen(false)}
     style={{
       position: "fixed",
       inset: 0,
@@ -1026,30 +1004,18 @@ const deleteDocument = async (doc) => {
         </div>
 
 <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-  <button
-    type="button"
-    onClick={handleDownloadCurrent}
-    style={{
-      padding: "0.35rem 0.6rem",
-      borderRadius: 10,
-      border: "1px solid rgba(0,0,0,0.15)",
-      background: "#fff",
-      cursor: "pointer",
-    }}
-  >
+ <button
+  type="button"
+  onClick={handleDownloadCurrent}
+  className="btn-pill secondary"
+>
     Download
   </button>
         </div>
         <button
-          onClick={() => setViewerOpen(false)}
-          style={{
-            padding: "0.35rem 0.6rem",
-            borderRadius: 10,
-            border: "1px solid rgba(0,0,0,0.15)",
-            background: "#fff",
-            cursor: "pointer",
-          }}
-        >
+  onClick={() => setViewerOpen(false)}
+  className="btn-pill secondary"
+>
           Close
         </button>
       </div>
@@ -1088,7 +1054,6 @@ const deleteDocument = async (doc) => {
         <div
           role="dialog"
           aria-modal="true"
-          onClick={() => setVersionsOpen(false)}
           style={{
             position: "fixed",
             inset: 0,
@@ -1125,17 +1090,10 @@ const deleteDocument = async (doc) => {
             >
               <div style={{ fontWeight: 700 }}>Versions</div>
               <button
-                type="button"
-                onClick={() => setVersionsOpen(false)}
-                style={{
-                  padding: "0.35rem 0.6rem",
-                  borderRadius: 10,
-                  border: "1px solid rgba(0,0,0,0.15)",
-                  background: "#fff",
-                  cursor: "pointer",
-                  fontSize: "0.92rem",
-                }}
-              >
+  type="button"
+  onClick={() => setVersionsOpen(false)}
+  className="btn-pill secondary"
+>
                 Close
               </button>
             </div>
@@ -1196,19 +1154,11 @@ const deleteDocument = async (doc) => {
     </button>
 
     {isAdmin && (
-      <button
-        type="button"
-        onClick={() => deleteVersion(v)}
-        style={{
-          alignSelf: "flex-end",
-          padding: "0.35rem 0.6rem",
-          borderRadius: 10,
-          border: "1px solid rgba(0,0,0,0.15)",
-          background: "#fff",
-          cursor: "pointer",
-          fontSize: "0.85rem",
-        }}
-      >
+     <button
+  type="button"
+  onClick={() => deleteVersion(v)}
+  className="btn-pill danger"
+>
         Delete version
       </button>
     )}
@@ -1226,7 +1176,6 @@ const deleteDocument = async (doc) => {
         <div
           role="dialog"
           aria-modal="true"
-          onClick={() => setUploadOpen(false)}
           style={{
             position: "fixed",
             inset: 0,
@@ -1262,18 +1211,10 @@ const deleteDocument = async (doc) => {
                 {uploadMode === "new" ? "Add document" : "Upload new version"}
               </div>
               <button
-                type="button"
-                onClick={() => setUploadOpen(false)}
-                disabled={uploading}
-                style={{
-                  padding: "0.35rem 0.6rem",
-                  borderRadius: 10,
-                  border: "1px solid rgba(0,0,0,0.15)",
-                  background: "#fff",
-                  cursor: "pointer",
-                  fontSize: "0.92rem",
-                }}
-              >
+  type="button"
+  onClick={() => setUploadOpen(false)}
+  className="btn-pill secondary"
+>
                 Close
               </button>
             </div>
@@ -1315,18 +1256,11 @@ const deleteDocument = async (doc) => {
               />
 
               <button
-                type="button"
-                onClick={uploadDocument}
-                disabled={uploading}
-                style={{
-                  padding: "0.6rem 0.9rem",
-                  borderRadius: 12,
-                  border: "1px solid rgba(0,0,0,0.15)",
-                  background: "#fff",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                }}
-              >
+  type="button"
+  onClick={uploadDocument}
+  disabled={uploading}
+  className="btn-pill primary"
+>
                 {uploading ? "Uploading…" : "Upload"}
               </button>
             </div>

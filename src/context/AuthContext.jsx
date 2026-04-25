@@ -108,20 +108,18 @@ async function updateLastLogin(userId) {
 
       try {
         // 1) Fast/local: get current session (no network required)
-        const { data: sessionData, error: sessionError } = await withTimeout(
-          supabase.auth.getSession(),
-          8000,
-          "auth getSession"
-        );
+        const { data: sessionData, error: sessionError } =
+  await supabase.auth.getSession();
 
         if (!isMounted) return;
 
         if (sessionError) {
-          console.warn("Session error:", sessionError.message);
-          setUser(null);
-          setProfile(null);
-          return;
-        }
+  console.warn("Session error:", sessionError.message);
+
+  // Do not force logout on a session read error.
+  // Let the user stay on the loading screen rather than being sent to login.
+  return;
+}
 
 const sessionUser = sessionData?.session?.user ?? null;
 setUser(sessionUser);
@@ -140,14 +138,16 @@ const p = await fetchProfile(sessionUser);
 if (!isMounted) return;
 
 if (!p) {
-  console.warn("Profile failed to load — keeping user session");
+  console.warn("Profile failed to load — retrying profile on next auth event");
   setProfile(null);
   return;
 }
 
-await updateLastLogin(sessionUser.id);
-
 setProfile(p);
+
+updateLastLogin(sessionUser.id).catch((e) =>
+  console.warn("Last login update failed:", e?.message || e)
+);
 setProfileLoading(false);
 
       } catch (e) {
@@ -178,10 +178,25 @@ setProfileLoading(false);
 if (event === "TOKEN_REFRESHED") {
   setUser(newUser);
 
+  // 🔥 Ensure profile exists after token refresh
+  if (!hasProfileRef.current && newUser) {
+    try {
+      setProfileLoading(true);
+      const p = await fetchProfile(newUser);
+      if (p) {
+        setProfile(p);
+      }
+    } catch (e) {
+      console.warn("Profile fetch on token refresh failed:", e?.message || e);
+    } finally {
+      setProfileLoading(false);
+    }
+  }
+
   if (isMounted) {
-    setProfileLoading(false);
     setAuthReady(true);
   }
+
   return;
 }
 
@@ -216,11 +231,13 @@ try {
   return;
 }
 
-    if (event === "SIGNED_IN" && newUser?.id) {
-      await updateLastLogin(newUser.id);
-    }
-
     setProfile(p);
+
+if (event === "SIGNED_IN" && newUser?.id) {
+  updateLastLogin(newUser.id).catch((e) =>
+    console.warn("Last login update failed:", e?.message || e)
+  );
+}
     setProfileLoading(false);
   }
 } catch (e) {

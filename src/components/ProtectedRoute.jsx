@@ -2,7 +2,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 
 function ProtectedRoute({ children, adminOnly = false }) {
-  const { user, authReady, profileLoading, isAdmin } = useAuth();
+  const { user, profile, authReady, profileLoading, isAdmin } = useAuth();
   const location = useLocation();
 
   // Only block during first app boot (not on every navigation)
@@ -20,9 +20,18 @@ if (!user && location.pathname !== "/reset-password") {
 }
 
   // 🔐 NEW: Admin-only protection
-  if (adminOnly && !isAdmin) {
-    return <Navigate to="/" replace />;
-  }
+ // Wait until profile is loaded before deciding admin access
+if (adminOnly && user && (profileLoading || !profile)) {
+  return (
+    <div style={{ padding: 24, textAlign: "center", fontWeight: 600 }}>
+      Loading…
+    </div>
+  );
+}
+
+if (adminOnly && !isAdmin) {
+  return <Navigate to="/" replace />;
+}
 
   return children;
 }

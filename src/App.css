@@ -3909,3 +3909,9 @@ body,
   max-width: 100%;
   height: auto;
 }
+
+.page-loading {
+  padding: 24px;
+  font-size: 0.95rem;
+  color: #555;
+}
