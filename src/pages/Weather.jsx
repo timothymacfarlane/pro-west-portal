@@ -11,8 +11,7 @@ function Weather() {
       <div className="card">
         <h3 className="card-title">Weather overview</h3>
         <p className="card-subtitle">
-          Quick access to Perth rain radar and marine / wind conditions
-          commonly used for Pro&nbsp;West field work.
+          Quick access to Perth rain radar, weather and wind conditions.
         </p>
 
         <div
@@ -27,7 +26,7 @@ function Weather() {
               <strong>Radar</strong> &mdash; BOM Perth rain radar loop.
             </li>
             <li>
-              <strong>Marine / wind</strong> &mdash; Seabreeze Perth wind
+              <strong>Weather / Wind</strong> &mdash; Seabreeze Perth weather and wind
               forecast.
             </li>
           </ul>
@@ -38,8 +37,7 @@ function Weather() {
       <div className="card">
         <h3 className="card-title">Perth rain radar (BOM)</h3>
         <p className="card-subtitle">
-          Official BOM Perth radar loop. Useful for planning field work around
-          showers and fronts.
+          Official BOM Perth radar loop.
         </p>
 
         <div
@@ -65,10 +63,9 @@ function Weather() {
 
       {/* Marine / wind section */}
       <div className="card">
-        <h3 className="card-title">Marine / wind (Seabreeze Perth)</h3>
+        <h3 className="card-title">Weather / Wind (Seabreeze Perth)</h3>
         <p className="card-subtitle">
-          Seabreeze Perth wind forecast and graphs, handy for planning coastal
-          and offshore work days.
+          Perth weather and wind forecasts.
         </p>
 
         <div

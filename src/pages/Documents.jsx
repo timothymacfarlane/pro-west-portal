@@ -85,6 +85,7 @@ const debouncedQuery = useDebounced(query, 250);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [openUrl, setOpenUrl] = useState("");
@@ -141,6 +142,31 @@ useEffect(() => {
     window.removeEventListener("keydown", handleKey);
   };
 }, []);
+
+// ESC key close
+useEffect(() => {
+  const handleKey = (e) => {
+    if (e.key === "Escape") {
+      setViewerOpen(false);
+      setVersionsOpen(false);
+      setUploadOpen(false);
+    }
+  };
+
+  window.addEventListener("keydown", handleKey);
+  return () => window.removeEventListener("keydown", handleKey);
+}, []);
+
+// ✅ ADD AUTO-HIDE HERE
+useEffect(() => {
+  if (!success) return;
+
+  const t = setTimeout(() => {
+    setSuccess("");
+  }, 3000);
+
+  return () => clearTimeout(t);
+}, [success]);
 
   // Load favourites (per user) — fast and separate
   useEffect(() => {
@@ -420,7 +446,8 @@ const downloadCurrentVersion = async (doc) => {
     }
 
     setUploading(true);
-    setError("");
+setError("");
+setSuccess("");
 
     try {
       const safeTitle = normalizeSpace(uploadTitle);
@@ -465,9 +492,14 @@ const downloadCurrentVersion = async (doc) => {
 
       // 3) Upload to Storage
       const file = uploadFile;
-      const fileName = file.name || `document-${Date.now()}`;
-      const path = `global/${docId}/v${nextVersion}/${fileName}`;
 
+const originalFileName = file.name || `document-${Date.now()}`;
+const safeFileName = originalFileName
+  .replace(/[^a-zA-Z0-9._-]/g, "_")
+  .replace(/_+/g, "_");
+
+const fileName = safeFileName;
+const path = `global/${docId}/v${nextVersion}/${fileName}`;
       const { error: upErr } = await supabase.storage
         .from("documents")
         .upload(path, file, {
@@ -516,10 +548,17 @@ const downloadCurrentVersion = async (doc) => {
       if (updDocErr) throw updDocErr;
 
       setUploadOpen(false);
-      setUploadFile(null);
+setUploadFile(null);
 
-      // refresh list
-      await fetchDocuments({ reset: true });
+// ✅ SUCCESS MESSAGE
+setSuccess(
+  uploadMode === "new"
+    ? "Document successfully added"
+    : "New version uploaded successfully"
+);
+
+// refresh list
+await fetchDocuments({ reset: true });
 
       // reselect if possible
       if (uploadMode === "new") {
@@ -690,7 +729,7 @@ const deleteDocument = async (doc) => {
     <PageLayout
       icon="📄"
       title="Documents"
-      subtitle="Global reference documents for Pro West Portal"
+      subtitle="Quick reference to Pro West and Global documents"
     >
       {/* Search + filter card */}
       <div className="card">
@@ -805,6 +844,17 @@ const deleteDocument = async (doc) => {
         {error && (
           <div style={{ marginTop: "0.6rem", color: "#b00020" }}>{error}</div>
         )}
+        {success && (
+  <div
+    style={{
+      marginTop: "0.6rem",
+      color: "#2e7d32",
+      fontWeight: 600,
+    }}
+  >
+    {success}
+  </div>
+)}
 
         {/* Suggestions like Contacts: only show while typing */}
         {showSuggestions && query.trim() && (
@@ -901,7 +951,7 @@ const deleteDocument = async (doc) => {
 >
               {favouriteSet.has(selectedDoc.id) ? "★ Unfavourite" : "☆ Favourite"}
             </button>
-            
+
             <button
   type="button"
   onClick={() => loadVersions(selectedDoc.id)}
@@ -1028,37 +1078,46 @@ const deleteDocument = async (doc) => {
   <div
     role="dialog"
     aria-modal="true"
-    style={{
-      position: "fixed",
-      inset: 0,
-      background: "rgba(0,0,0,0.45)",
-      zIndex: 9999,
-      padding: "1rem",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-    }}
+   style={{
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.45)",
+  zIndex: 9999,
+  padding: "max(0.5rem, env(safe-area-inset-top)) 0.5rem max(0.5rem, env(safe-area-inset-bottom))",
+  display: "flex",
+  alignItems: "stretch",
+  justifyContent: "center",
+}}
   >
     <div
       onClick={(e) => e.stopPropagation()}
-      style={{
-        width: "min(980px, 96vw)",
-        height: "min(78vh, 760px)",
-        background: "#fff",
-        borderRadius: 14,
-        border: "1px solid rgba(0,0,0,0.12)",
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-      }}
+     style={{
+  width: "min(980px, 100vw)",
+  height: "100%",
+maxHeight: "100%",
+  background: "#fff",
+  borderRadius: 14,
+  border: "1px solid rgba(0,0,0,0.12)",
+  overflow: "hidden",
+  display: "flex",
+  flexDirection: "column",
+}}
     >
       <div
-        style={{
-          padding: "0.6rem 0.75rem",
-          borderBottom: "1px solid rgba(0,0,0,0.1)",
-          display: "flex",
-          justifyContent: "space-between",
-        }}
+  style={{
+  padding: "0.6rem 0.75rem",
+  borderBottom: "1px solid rgba(0,0,0,0.1)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "0.5rem",
+  flexWrap: "wrap",
+  flexShrink: 0,
+  position: "sticky",
+  top: 0,
+  background: "#fff",
+  zIndex: 2,
+}}
       >
         <div style={{ fontWeight: 700 }}>
           {selectedDoc?.title || "Document"}
@@ -1081,12 +1140,26 @@ const deleteDocument = async (doc) => {
         </button>
       </div>
 
-      <div style={{ flex: 1 }}>
+      <div
+  style={{
+    flex: 1,
+    minHeight: 0,
+    overflow: "auto",
+    WebkitOverflowScrolling: "touch",
+    paddingBottom: "env(safe-area-inset-bottom)",
+  }}
+>
         {openKind === "pdf" && (
           <iframe
             title="PDF viewer"
             src={openUrl}
-            style={{ width: "100%", height: "100%", border: 0 }}
+           style={{
+  width: "100%",
+  height: "100%",
+  minHeight: "100%",
+  border: 0,
+  display: "block",
+}}
           />
         )}
 
@@ -1094,7 +1167,13 @@ const deleteDocument = async (doc) => {
           <iframe
             title="Office viewer"
             src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(openUrl)}`}
-            style={{ width: "100%", height: "100%", border: 0 }}
+           style={{
+  width: "100%",
+  height: "100%",
+  minHeight: "100%",
+  border: 0,
+  display: "block",
+}}
           />
         )}
 
@@ -1214,15 +1293,17 @@ const deleteDocument = async (doc) => {
       </div>
     </button>
 
-    {isAdmin && (
-     <button
-  type="button"
-  onClick={() => deleteVersion(v)}
-  className="btn-pill danger"
->
-        Delete version
-      </button>
-    )}
+   {isAdmin && (
+  <div style={{ display: "flex", justifyContent: "flex-start" }}>
+    <button
+      type="button"
+      onClick={() => deleteVersion(v)}
+      className="btn-pill danger"
+    >
+      Delete version
+    </button>
+  </div>
+)}
   </div>
 ))}
                 </div>
@@ -1316,14 +1397,16 @@ const deleteDocument = async (doc) => {
                 onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
               />
 
-              <button
-  type="button"
-  onClick={uploadDocument}
-  disabled={uploading}
-  className="btn-pill primary"
->
-                {uploading ? "Uploading…" : "Upload"}
-              </button>
+             <div style={{ display: "flex", justifyContent: "flex-start" }}>
+  <button
+    type="button"
+    onClick={uploadDocument}
+    disabled={uploading}
+    className="btn-pill primary"
+  >
+    {uploading ? "Uploading…" : "Upload"}
+  </button>
+</div>
             </div>
           </div>
         </div>

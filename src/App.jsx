@@ -17,6 +17,7 @@ const MyJobs = lazy(() => import("./pages/MyJobs.jsx"));
 const Maps = lazy(() => import("./pages/Maps.jsx"));
 const Profile = lazy(() => import("./pages/Profile.jsx"));
 const Schedule = lazy(() => import("./pages/Schedule.jsx"));
+const ShoppingList = lazy(() => import("./pages/ShoppingList.jsx"));
 const Take5 = lazy(() => import("./pages/Take5.jsx"));
 const Take5Register = lazy(() => import("./pages/Take5Register.jsx"));
 const Timesheets = lazy(() => import("./pages/Timesheets.jsx"));
@@ -349,6 +350,17 @@ const handleLogout = async () => {
                   </NavLink>
                 </li>
 
+<li>
+  <NavLink
+    to="/shopping-list"
+    className="nav-link"
+    onClick={closeMobileSidebar}
+  >
+    <span className="nav-icon">🛒</span>
+    <span className="nav-label">Shopping List</span>
+  </NavLink>
+</li>
+
                 <li>
                   <NavLink
                     to="/weather"
@@ -517,6 +529,15 @@ const handleLogout = async () => {
           </ProtectedRoute>
         }
       />
+
+<Route
+  path="/shopping-list"
+  element={
+    <ProtectedRoute>
+      <ShoppingList />
+    </ProtectedRoute>
+  }
+/>
 
       <Route
         path="/weather"
