@@ -74,7 +74,8 @@ function Documents() {
   const [userId, setUserId] = useState(null);
 
   const [query, setQuery] = useState("");
-  const debouncedQuery = useDebounced(query, 250);
+const [showSuggestions, setShowSuggestions] = useState(false);
+const debouncedQuery = useDebounced(query, 250);
 
   const [category, setCategory] = useState("All");
   const [showFavouritesOnly, setShowFavouritesOnly] = useState(false);
@@ -285,13 +286,11 @@ useEffect(() => {
     return docs.slice(0, 6);
   }, [docs, query]);
 
-  const handleSelectDoc = async (doc) => {
-    setSelectedDoc(doc);
-    setQuery(doc.title || "");
-
-    // open immediately on tap (fast UX)
-    await openDocument(doc);
-  };
+ const handleSelectDoc = (doc) => {
+  setSelectedDoc(doc);
+  setQuery(doc.title || "");
+  setShowSuggestions(false);
+};
 
   const openDocument = async (docOrVersionContainer) => {
     try {
@@ -318,6 +317,41 @@ useEffect(() => {
       setError(e?.message || "Could not open document.");
     }
   };
+
+const downloadCurrentVersion = async (doc) => {
+  try {
+    const v = doc?.currentVersion;
+    if (!v?.storage_path) return;
+
+    const { data, error } = await supabase.storage
+      .from("documents")
+      .createSignedUrl(v.storage_path, 60 * 10);
+
+    if (error) throw error;
+
+    const url = data?.signedUrl || "";
+    if (!url) throw new Error("Could not create signed URL.");
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Download failed.");
+
+    const blob = await res.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = v.file_name || "document";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    window.URL.revokeObjectURL(blobUrl);
+  } catch (e) {
+    console.error("Download current version error:", e);
+    setError(e?.message || "Could not download document.");
+  }
+};
+
 
   const toggleFavourite = async (docId) => {
     if (!userId) return;
@@ -660,103 +694,120 @@ const deleteDocument = async (doc) => {
     >
       {/* Search + filter card */}
       <div className="card">
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "0.75rem",
-            flexWrap: "wrap",
-          }}
-        >
-          <h3 className="card-title" style={{ margin: 0 }}>
-            Search documents
-          </h3>
-
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            <select
-              aria-label="Category filter"
-              className="maps-search-input"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              style={{ paddingRight: "2rem" }}
-            >
-              <option value="All">All categories</option>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: "0.95rem",
-                color: "#444",
-                cursor: "pointer",
-                padding: "0.2rem 0.35rem",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={showFavouritesOnly}
-                onChange={(e) => setShowFavouritesOnly(e.target.checked)}
-              />
-              Favourites
-            </label>
-
-            <button
-  type="button"
-  onClick={() => {
-    setQuery("");
-    setCategory("All");
-    setShowFavouritesOnly(false);
-    fetchDocuments({ reset: true });
+      <div
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "1rem",
+    flexWrap: "wrap",
   }}
-  disabled={loading}
-  className="btn-pill secondary"
 >
-  {loading ? "Refreshing…" : "Refresh"}
-</button>
+  {/* LEFT SIDE */}
+  <div style={{ minWidth: "260px", flex: "1 1 300px" }}>
+    <h3 className="card-title" style={{ margin: 0 }}>
+      Search documents
+    </h3>
 
-{isAdmin && (
-  <button
-    type="button"
-    onClick={openNewUpload}
-    className="btn-pill primary"
+    <p className="card-subtitle" style={{ marginTop: "0.4rem" }}>
+      Start typing a title. Empty search shows all documents.
+    </p>
+
+    <div style={{ marginTop: "0.4rem" }}>
+      <input
+        type="text"
+        aria-label="Search documents by title"
+        inputMode="search"
+        className="maps-search-input"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setShowSuggestions(true);
+        }}
+        placeholder="Search by document title..."
+      />
+    </div>
+  </div>
+
+  {/* RIGHT SIDE */}
+  <div
+    style={{
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "flex-end",
+      gap: "0.5rem",
+      flex: "0 1 auto",
+    }}
   >
-    + Add document
-  </button>
-)}
-            
-          </div>
-        </div>
+    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+      <select
+        aria-label="Category filter"
+        className="maps-search-input"
+        value={category}
+        onChange={(e) => setCategory(e.target.value)}
+        style={{ paddingRight: "2rem" }}
+      >
+        <option value="All">All categories</option>
+        {[...CATEGORIES].sort().map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
 
-        <p className="card-subtitle">
-          Start typing a title. Empty search shows all documents.
-        </p>
+      <label
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: "0.95rem",
+          color: "#444",
+          cursor: "pointer",
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={showFavouritesOnly}
+          onChange={(e) => setShowFavouritesOnly(e.target.checked)}
+        />
+        Favourites
+      </label>
+    </div>
 
-        <div style={{ marginTop: "0.4rem" }}>
-          <input
-            type="text"
-            aria-label="Search documents by title"
-            inputMode="search"
-            className="maps-search-input"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by document title..."
-          />
-        </div>
+    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+      <button
+        type="button"
+        onClick={() => {
+          setQuery("");
+          setCategory("All");
+          setShowFavouritesOnly(false);
+          setSelectedDoc(null);
+          fetchDocuments({ reset: true });
+        }}
+        disabled={loading}
+        className="btn-pill secondary"
+      >
+        {loading ? "Refreshing…" : "Refresh"}
+      </button>
 
+      {isAdmin && (
+        <button
+          type="button"
+          onClick={openNewUpload}
+          className="btn-pill primary"
+        >
+          + Add document
+        </button>
+      )}
+    </div>
+  </div>
+</div>
+       
         {error && (
           <div style={{ marginTop: "0.6rem", color: "#b00020" }}>{error}</div>
         )}
 
         {/* Suggestions like Contacts: only show while typing */}
-        {query.trim() && (
+        {showSuggestions && query.trim() && (
           <div
             style={{
               marginTop: "0.4rem",
@@ -808,7 +859,7 @@ const deleteDocument = async (doc) => {
         )}
       </div>
 
-      {/* Selected doc actions (optional, lightweight) */}
+      {/* Selected document result/actions */}
       {selectedDoc && (
         <div className="card">
           <h3 className="card-title" style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
@@ -834,14 +885,23 @@ const deleteDocument = async (doc) => {
   Open
 </button>
 
-          <button
+<button
+  type="button"
+  onClick={() => downloadCurrentVersion(selectedDoc)}
+  disabled={!selectedDoc.currentVersion}
+  className="btn-pill secondary"
+>
+  Download
+</button>
+
+<button
   type="button"
   onClick={() => toggleFavourite(selectedDoc.id)}
   className="btn-pill secondary"
 >
               {favouriteSet.has(selectedDoc.id) ? "★ Unfavourite" : "☆ Favourite"}
             </button>
-
+            
             <button
   type="button"
   onClick={() => loadVersions(selectedDoc.id)}
@@ -867,6 +927,7 @@ const deleteDocument = async (doc) => {
 >
                   Delete
                 </button>
+
               </>
             )}
           </div>
@@ -877,7 +938,7 @@ const deleteDocument = async (doc) => {
       <div className="card">
         <h3 className="card-title">All documents</h3>
         <p className="card-subtitle">
-          Tap a document to open. Use favourites to pin your most-used items.
+          Tap a document to select it, then choose Open, Favourite, Versions or Delete.
         </p>
 
         {loading ? (

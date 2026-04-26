@@ -8,7 +8,6 @@ import { supabase } from "./lib/supabaseClient.js";
 const Login = lazy(() => import("./pages/Login.jsx"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword.jsx"));
 
-const Home = lazy(() => import("./pages/Home.jsx"));
 const Admin = lazy(() => import("./pages/Admin.jsx"));
 const Contacts = lazy(() => import("./pages/Contacts.jsx"));
 const Documents = lazy(() => import("./pages/Documents.jsx"));
@@ -28,6 +27,7 @@ const Weather = lazy(() => import("./pages/Weather.jsx"));
 
 const NotificationBell = lazy(() => import("./components/NotificationBell.jsx"));
 
+import Home from "./pages/Home.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 
