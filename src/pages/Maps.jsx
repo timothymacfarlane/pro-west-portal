@@ -905,9 +905,14 @@ useEffect(() => {
       return false;
     }
   });
-  const [mobilePanelCollapsed, setMobilePanelCollapsed] = useState(false);
-  const [mobileKeyboardOpen, setMobileKeyboardOpen] = useState(false);
-  const [isFollowingLocation, setIsFollowingLocation] = useState(false);
+ const [mobilePanelCollapsed, setMobilePanelCollapsed] = useState(true);
+const [mobileKeyboardOpen, setMobileKeyboardOpen] = useState(false);
+const [isFollowingLocation, setIsFollowingLocation] = useState(false);
+
+const mobileDrawerOpen = isMobile && !mobilePanelCollapsed;
+
+const openMobileDrawer = () => setMobilePanelCollapsed(false);
+const closeMobileDrawer = () => setMobilePanelCollapsed(true);
 
   useEffect(() => {
     const onResize = () => {
@@ -1749,7 +1754,9 @@ const notePayload = {
   useEffect(() => {
     if (!window.google || !mapDivRef.current || mapRef.current) return;
 
-    const mobile = isSmallScreen();
+  const mobile =
+  typeof window !== "undefined" &&
+  window.innerWidth <= 900;
 
     const persisted = safeReadState() || {};
     const startCenter =
@@ -1806,110 +1813,6 @@ window.google.maps.event.addListener(infoWindowRef.current, "closeclick", () => 
       // ignore
     }
 
-    // ✅ Add top horizontal tools
-    if (!toolsControlDivRef.current) {
-      const div = document.createElement("div");
-      div.className = "maps-tools-bar";
-      div.style.display = "flex";
-      div.style.gap = "6px";
-      div.style.marginLeft = "8px";
-      div.style.alignItems = "center";
-      div.style.padding = "4px";
-      div.style.background = "rgba(255,255,255,0.9)";
-      div.style.border = "2px solid #000";
-      div.style.borderRadius = "8px";
-      div.style.boxShadow = "0 2px 8px rgba(0,0,0,0.25)";
-
-      const btnW = mobile ? 30 : 34;
-      const btnH = mobile ? 26 : 28;
-      const fontSize = mobile ? "14px" : "15px";
-
-      const makeBtn = (label, title, action) => {
-        const b = document.createElement("button");
-        b.textContent = label;
-        b.title = title;
-        b.dataset.action = action;
-        b.style.width = `${btnW}px`;
-        b.style.height = `${btnH}px`;
-        b.style.borderRadius = "6px";
-        b.style.border = "2px solid #000";
-        b.style.background = "#fff";
-        b.style.color = "#000";
-        b.style.fontWeight = "900";
-        b.style.fontSize = fontSize;
-        b.style.cursor = "pointer";
-        b.style.display = "grid";
-        b.style.placeItems = "center";
-        b.style.lineHeight = "1";
-        return b;
-      };
-
-      const distBtn = makeBtn("📏", "Measure distance (metres)", "distance");
-      const areaBtn = makeBtn("📐", "Measure area (m² / ha)", "area");
-      const locBtn = makeBtn("📍", "My location", "location");
-      const histBtn = makeBtn("🕘", "Historical imagery (opens Google Earth)", "history");
-      const svBtn = makeBtn("👤", "Street View at map centre", "streetview");
-      const clearBtn = makeBtn("✖", "Clear measurement", "clear");
-      clearBtn.style.display = "none";
-
-      const finishBtn = makeBtn("✔", "Finish measurement", "finish");
-      finishBtn.style.display = "none";
-      finishBtn.onclick = () => finishMeasure();
-
-      distBtn.onclick = () => startDistanceMeasure();
-      areaBtn.onclick = () => startAreaMeasure();
-      locBtn.onclick = () => handleMyLocation();
-      const exportBtn = document.createElement("button");
-exportBtn.type = "button";
-exportBtn.dataset.action = "export";
-exportBtn.title = "Export visible layers";
-exportBtn.setAttribute("aria-label", "Export visible layers");
-exportBtn.textContent = "⬇";
-
-Object.assign(exportBtn.style, {
-  width: "34px",
-  height: "34px",
-  display: "grid",
-  placeItems: "center",
-  borderRadius: "10px",
-  border: "2px solid #111",
-  background: "#fff",
-  color: "#111",
-  fontWeight: "900",
-  cursor: "pointer",
-  fontSize: "15px",
-  padding: "0",
-});
-      exportBtn.onclick = () => toggleExportPanel();
-      histBtn.onclick = () => {
-        const c = map.getCenter();
-        const url = buildGoogleEarthUrl(c.lat(), c.lng(), map.getZoom());
-        openExternalNav(url);      };
-      svBtn.onclick = () => {
-        const sv = map.getStreetView();
-        const c = map.getCenter();
-        const isVis = sv.getVisible();
-        if (isVis) sv.setVisible(false);
-        else {
-          sv.setPosition(c);
-          sv.setPov({ heading: 0, pitch: 0 });
-          sv.setVisible(true);
-        }
-      };
-      clearBtn.onclick = () => clearMeasure();
-
-      div.appendChild(distBtn);
-      div.appendChild(areaBtn);
-      div.appendChild(locBtn);
-      div.appendChild(histBtn);
-      div.appendChild(svBtn);
-      div.appendChild(exportBtn);
-      div.appendChild(finishBtn);
-      div.appendChild(clearBtn);
-
-      map.controls[window.google.maps.ControlPosition.TOP_LEFT].push(div);
-      toolsControlDivRef.current = div;
-    }
  
     // Persist view/type on idle + tick
 map.addListener("idle", () => {
@@ -2140,7 +2043,9 @@ if (!isWA) {
   };
 
   const getPortalIcon = (color, mobileScale = null) => {
-    const mobile = isSmallScreen();
+    const mobile =
+  typeof window !== "undefined" &&
+  window.innerWidth <= 900;
     const scale = mobileScale ?? (mobile ? 4.2 : 4.8); // small pins
     return {
       path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
@@ -5038,6 +4943,25 @@ return (
         <a href="/" className="maps-back-link">
           ← Back to Portal
         </a>
+
+{isMobile && (
+ <button
+  type="button"
+  className="maps-header-menu-btn"
+  onClick={() => {
+    if (mobileDrawerOpen) {
+      closeMobileDrawer();   // close if already open
+    } else {
+      openMobileDrawer();    // open if closed
+    }
+  }}
+  aria-label="Toggle maps menu"
+  title="Toggle maps menu"
+>
+  {mobileDrawerOpen ? "☰" : "☰"}
+</button>
+)}
+
       </div>
 
       <div
@@ -5047,7 +4971,63 @@ return (
           position: "relative",
         }}
       >
-        <div ref={mapDivRef} className="maps-map" />
+
+<div ref={mapDivRef} className="maps-map" />
+
+<div className="maps-floating-tools">
+  <button type="button" title="Measure distance" onClick={startDistanceMeasure}>📏</button>
+  <button type="button" title="Measure area" onClick={startAreaMeasure}>📐</button>
+  <button type="button" title="My location" onClick={handleMyLocation}>📍</button>
+  <button
+    type="button"
+    title="Historical imagery"
+    onClick={() => {
+      const map = mapRef.current;
+      if (!map) return;
+      const c = map.getCenter();
+      const url = buildGoogleEarthUrl(c.lat(), c.lng(), map.getZoom());
+      openExternalNav(url);
+    }}
+  >
+    🕘
+  </button>
+  <button
+    type="button"
+    title="Street View"
+    onClick={() => {
+      const map = mapRef.current;
+      if (!map) return;
+      const sv = map.getStreetView();
+      const c = map.getCenter();
+      if (sv.getVisible()) sv.setVisible(false);
+      else {
+        sv.setPosition(c);
+        sv.setPov({ heading: 0, pitch: 0 });
+        sv.setVisible(true);
+      }
+    }}
+  >
+    👤
+  </button>
+  <button type="button" title="Export visible layers" onClick={toggleExportPanel}>⬇</button>
+
+  {measureMode && (
+    <button type="button" title="Finish measurement" onClick={finishMeasure}>✔</button>
+  )}
+
+  {hasMeasure && (
+    <button type="button" title="Clear measurement" onClick={clearMeasure}>✖</button>
+  )}
+</div>
+
+{mobileDrawerOpen && (
+  <button
+    type="button"
+    className="maps-mobile-drawer-backdrop"
+    onClick={closeMobileDrawer}
+    aria-label="Close maps menu"
+  />
+)}
 
       {exportPanelOpen && (
   <div
@@ -5412,58 +5392,19 @@ return (
         )}
 
         {/* Left retractable panel */}
-        <div
-          className={`maps-rightpanel ${panelOpen ? "open" : "closed"}`}
-          style={
-            isMobile
-              ? {
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  width: "100vw",
-                  maxHeight: "70vh",
-                  transform: mobilePanelCollapsed ? "translateY(72%)" : "translateY(0)",
-                  transition: "transform 180ms ease",
-                  zIndex: 5,
-                  overflowY: "auto",
-                  overflowX: "hidden",
-                  overflow: "visible",
-                  paddingTop: 18,
-                }
-              : undefined
-          }
-        >
-          {/* ✅ requested: toggle button on RIGHT edge of the tab */}
-          <button
-            type="button"
-            className="maps-mobile-retract-toggle"
-            onClick={() => setMobilePanelCollapsed((v) => !v)}
-            title={mobilePanelCollapsed ? "Show panel" : "Hide panel"}
-            style={{
-              position: "absolute",
-              top: -36,
-              left: "50%",
-              transform: "translateX(-50%)",
-              zIndex: 20,
-              width: 54,
-              height: 30,
-              borderRadius: 999,
-              border: "1px solid rgba(0,0,0,0.18)",
-              background: "rgba(255,255,255,0.96)",
-              fontWeight: 900,
-              display: isMobile ? "flex" : "none",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
-              cursor: "pointer",
-              userSelect: "none",
-            }}
-          >
-            {mobilePanelCollapsed ? "˄" : "˅"}
-          </button>
-
-
+   {/* Retractable maps panel */}
+<div
+  className={`maps-rightpanel ${
+    isMobile
+      ? mobileDrawerOpen
+        ? "mobile-open"
+        : "mobile-closed"
+      : panelOpen
+      ? "open"
+      : "closed"
+  }`}
+>
+          
           <div
   className="panel-content"
   style={{
@@ -5627,9 +5568,9 @@ return (
   if (String(jobNumberQuery || "").trim()) setJobPicked(false);
 
   if (isMobile) {
-    setMobilePanelCollapsed(false);
-    setMobileKeyboardOpen(true);
-  }
+  openMobileDrawer();
+  setMobileKeyboardOpen(true);
+}
 
   setTimeout(() => {
     try {
