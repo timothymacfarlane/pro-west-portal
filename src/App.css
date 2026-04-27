@@ -1955,7 +1955,9 @@ textarea {
   padding: 0.65rem;
   padding-top: 0.75rem;
   padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
-  background: rgba(255, 255, 255, 0.98);
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(6px);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.22);
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -4165,7 +4167,7 @@ body,
   top: 12px;
   display: flex;
   gap: 6px;
-  padding: 5px;
+  padding: 4px;
   background: rgba(255,255,255,0.92);
   border: 2px solid #111;
   border-radius: 10px;
@@ -4189,17 +4191,25 @@ body,
 @media (max-width: 900px) {
   .maps-floating-tools {
     top: auto;
-    bottom: calc(54px + env(safe-area-inset-bottom));
-    left: 10px;
+    bottom: calc(50px + env(safe-area-inset-bottom));
+    left: 6px;
+
     flex-direction: column;
-    gap: 3px;
-    z-index: 50;
+    gap: 2px;
+    padding: 2px;
+
+    border-width: 1px;
   }
 
   .maps-floating-tools button {
-    width: 25px;
-    height: 25px;
+    width: 22px;
+    height: 22px;   /* 👈 equal = not elongated */
     font-size: 10px;
+
+    border-width: 1px;
+    border-radius: 6px;
+
+    line-height: 1;   /* 👈 prevents vertical stretch */
   }
 }
 
@@ -4227,4 +4237,137 @@ body,
   .maps-header-menu-btn:active {
     transform: scale(0.96);
   }
+}
+
+/* ==========================================================
+   MAPS – RIGHT SIDE DRAWER ON DESKTOP + MOBILE
+   ========================================================== */
+
+.maps-header-menu-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 2px solid rgba(255,255,255,0.75);
+  background: rgba(255,255,255,0.14);
+  color: #fff;
+  font-size: 19px;
+  font-weight: 900;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.maps-header-menu-btn:active {
+  transform: scale(0.96);
+}
+
+.maps-rightpanel {
+  position: absolute !important;
+  top: 0 !important;
+  right: 0 !important;
+  left: auto !important;
+  bottom: 0 !important;
+  width: min(360px, 86vw) !important;
+  max-height: none !important;
+  height: 100% !important;
+  z-index: 60 !important;
+  display: flex !important;
+  background: transparent !important;
+  pointer-events: auto !important;
+  opacity: 1 !important;
+  transition: transform 0.22s ease !important;
+}
+
+.maps-rightpanel.mobile-open {
+  transform: translateX(0) !important;
+}
+
+.maps-rightpanel.mobile-closed {
+  transform: translateX(110%) !important;
+  pointer-events: none !important;
+}
+
+.maps-rightpanel .panel-content {
+  width: 100% !important;
+  max-height: none !important;
+  height: 100% !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding: 0.75rem !important;
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom)) !important;
+  border-radius: 0 !important;
+  background: rgba(255, 255, 255, 0.88) !important;
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.22) !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  border-left: 1px solid rgba(0,0,0,0.08);
+}
+
+.maps-mobile-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 55;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+}
+
+/* Hide the old desktop side-tab toggle if still rendered */
+.panel-toggle {
+  display: none !important;
+}
+
+/* PC only: keep Back to Portal beside the maps hamburger */
+@media (min-width: 901px) {
+  .maps-topbar {
+    justify-content: flex-start;
+    gap: 12px;
+  }
+
+  .maps-title-group {
+    flex: 1;
+  }
+
+  .maps-back-link {
+    margin-left: auto;
+  }
+
+  .maps-header-menu-btn {
+    margin-left: 0;
+  }
+}
+
+/* =========================================
+   MAPS – DESKTOP TOOLS (bottom-left vertical)
+   ========================================= */
+
+@media (min-width: 901px) {
+  .maps-floating-tools {
+    top: auto !important;
+    bottom: 40px;
+    left: 12px;
+
+    flex-direction: column;
+    gap: 5px;
+    padding: 5px;
+
+    border-radius: 10px;
+  }
+
+  .maps-floating-tools button {
+    width: 30px;
+    height: 28px;
+    font-size: 14px;
+  }
+}
+
+.maps-floating-tools {
+  backdrop-filter: blur(6px);
+  background: rgba(255,255,255,0.9);
 }

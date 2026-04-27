@@ -909,17 +909,18 @@ useEffect(() => {
 const [mobileKeyboardOpen, setMobileKeyboardOpen] = useState(false);
 const [isFollowingLocation, setIsFollowingLocation] = useState(false);
 
-const mobileDrawerOpen = isMobile && !mobilePanelCollapsed;
+const mapsDrawerOpen = !mobilePanelCollapsed;
 
-const openMobileDrawer = () => setMobilePanelCollapsed(false);
-const closeMobileDrawer = () => setMobilePanelCollapsed(true);
+const openMapsDrawer = () => setMobilePanelCollapsed(false);
+const closeMapsDrawer = () => setMobilePanelCollapsed(true);
+const toggleMapsDrawer = () => setMobilePanelCollapsed((prev) => !prev);
 
   useEffect(() => {
     const onResize = () => {
       try {
         const mobile = typeof window !== "undefined" && window.innerWidth <= 900;
         setIsMobile(mobile);
-        if (!mobile) setMobilePanelCollapsed(false); // never hide panel on desktop
+        // Keep drawer behaviour the same on desktop and mobile.
       } catch {
         // ignore
       }
@@ -2184,23 +2185,27 @@ const safeLA =
   };
 
   const openPortalHover = (job, pt, marker) => {
-    const map = mapRef.current;
-    if (!map) return;
+  const map = mapRef.current;
+  if (!map) return;
 
-    const safeClient = job.client_name || "—";
-    const safeAddr = job.full_address || "—";
+  const safeClient = job.client_name || "—";
+  const safeAddr = job.full_address || "—";
+  const safeJobType = job.job_type_legacy || "—";
 
-    const html = `
-      <div style="font-family: Inter, system-ui, sans-serif; font-size: 12px; min-width: 220px;">
-        <div style="font-weight:900; font-size:13px; color:#111;">Job #${job.job_number}</div>
-        <div style="font-weight:800; color:#333; margin-top:2px;">${safeClient}</div>
-        <div style="color:#111; margin-top:2px;">${safeAddr}</div>
+  const html = `
+    <div style="font-family: Inter, system-ui, sans-serif; font-size: 12px; min-width: 230px;">
+      <div style="font-weight:900; font-size:13px; color:#111;">Job #${job.job_number}</div>
+      <div style="font-weight:800; color:#333; margin-top:2px;">${safeClient}</div>
+      <div style="color:#111; margin-top:2px;">${safeAddr}</div>
+      <div style="color:#333; margin-top:5px; font-weight:800;">
+        Type: ${safeJobType}
       </div>
-    `;
+    </div>
+  `;
 
-    hoverInfoWindowRef.current.setContent(html);
-    hoverInfoWindowRef.current.open({ anchor: marker, map });
-  };
+  hoverInfoWindowRef.current.setContent(html);
+  hoverInfoWindowRef.current.open({ anchor: marker, map });
+};
 
   const closePortalHover = () => {
     try {
@@ -2220,13 +2225,14 @@ const safeLA =
 
     let marker = portalMarkersByIdRef.current.get(id);
     if (!marker) {
-      const safeClient = job.client_name || "—";
+ const safeClient = job.client_name || "—";
 const safeAddr = job.full_address || "—";
+const safeJobType = job.job_type_legacy || "—";
 
 marker = new window.google.maps.Marker({
   position: pt,
   map: null,
-  title: `Job #${job.job_number}\n${safeClient}\n${safeAddr}`,
+  title: `Job #${job.job_number}\n${safeClient}\n${safeAddr}\nType: ${safeJobType}`,
   optimized: true,
   icon: getPortalIcon("#d32f2f"),
 });
@@ -4944,23 +4950,15 @@ return (
           ← Back to Portal
         </a>
 
-{isMobile && (
- <button
+<button
   type="button"
   className="maps-header-menu-btn"
-  onClick={() => {
-    if (mobileDrawerOpen) {
-      closeMobileDrawer();   // close if already open
-    } else {
-      openMobileDrawer();    // open if closed
-    }
-  }}
+  onClick={toggleMapsDrawer}
   aria-label="Toggle maps menu"
   title="Toggle maps menu"
 >
-  {mobileDrawerOpen ? "☰" : "☰"}
+  {mapsDrawerOpen ? "☰" : "☰"}
 </button>
-)}
 
       </div>
 
@@ -5020,11 +5018,11 @@ return (
   )}
 </div>
 
-{mobileDrawerOpen && (
+{isMobile && mapsDrawerOpen && (
   <button
     type="button"
     className="maps-mobile-drawer-backdrop"
-    onClick={closeMobileDrawer}
+    onClick={closeMapsDrawer}
     aria-label="Close maps menu"
   />
 )}
@@ -5394,15 +5392,9 @@ return (
         {/* Left retractable panel */}
    {/* Retractable maps panel */}
 <div
-  className={`maps-rightpanel ${
-    isMobile
-      ? mobileDrawerOpen
-        ? "mobile-open"
-        : "mobile-closed"
-      : panelOpen
-      ? "open"
-      : "closed"
-  }`}
+ className={`maps-rightpanel ${
+  mapsDrawerOpen ? "mobile-open" : "mobile-closed"
+}`}
 >
           
           <div
@@ -5568,7 +5560,7 @@ return (
   if (String(jobNumberQuery || "").trim()) setJobPicked(false);
 
   if (isMobile) {
-  openMobileDrawer();
+  openMapsDrawer()
   setMobileKeyboardOpen(true);
 }
 
@@ -6177,7 +6169,9 @@ title={
                     <div>📍 My location</div>
                     <div>🕘 Historical (Earth)</div>
                     <div>👤 Street View</div>
-                    <div>✖ Clear</div>
+                    <div>⬇ Export visible layers</div>
+  <div>✔ Finish measurement</div>
+  <div>✖ Clear measurement</div>
                   </div>
                 </div>
               </div>
