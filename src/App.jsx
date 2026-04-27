@@ -131,15 +131,21 @@ const handleLogout = async () => {
   </Suspense>
 )}
 
-            <a
-              href="https://prowestsurveying.com.au/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="badge header-link"
-            >
-              Pro West Surveying
-            </a>
-            <span className="badge badge-secondary">9242 8247</span>
+    <a
+  href="https://prowestsurveying.com.au/"
+  target="_blank"
+  rel="noopener noreferrer"
+  className="badge header-link"
+>
+  🌐 Pro West Surveying
+</a>
+
+<a
+  href="tel:0892428247"
+  className="badge header-link header-phone-link"
+>
+  📞 9242 8247
+</a>
           </div>
         </div>
       </header>

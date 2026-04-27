@@ -97,6 +97,25 @@
   background: rgba(0, 0, 0, 0.18);
 }
 
+.header-phone-link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.header-phone-link:hover {
+  text-decoration: none;
+}
+
+.header-phone-link {
+  cursor: pointer;
+}
+
+.header-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
 .badge-secondary {
   border-color: rgba(255, 255, 255, 0.4);
   background: rgba(255, 255, 255, 0.2);
