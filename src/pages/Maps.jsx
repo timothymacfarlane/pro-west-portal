@@ -155,7 +155,9 @@ const LGATE_001_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Property_and_Planning/MapServer/2/query"; // Cadastre (LGATE-001)
 const LGATE_233_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Boundaries/MapServer/14/query"; // LGA Boundaries (LGATE-233)
-const DPLH_070_QUERY =
+const LGATE_234_QUERY =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Boundaries/MapServer/16/query"; // Localities (LGATE-234)
+  const DPLH_070_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Property_and_Planning/MapServer/111/query"; // R-Codes Zoning (DPLH-070)
 const WCORP_068_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer/17/query"; // Sewer Gravity Pipe (WCORP-068)
@@ -686,6 +688,69 @@ function getFeatureZValue(props = {}, layer) {
   return v !== undefined && v !== null && String(v).trim() !== "" ? v : "";
 }
 
+function getPolygonPathsFromDataGeometry(geometry) {
+  const polygons = [];
+
+  const walk = (g) => {
+    if (!g) return;
+
+    const type = g.getType();
+
+    if (type === "Polygon") {
+      const rings = g.getArray().map((ring) => ring.getArray());
+      if (rings.length) polygons.push(rings);
+    } else if (type === "MultiPolygon") {
+      g.getArray().forEach((poly) => walk(poly));
+    }
+  };
+
+  walk(geometry);
+  return polygons;
+}
+
+function dataPolygonFeatureContainsLatLng(feature, latLng, googleMaps) {
+  if (!feature || !latLng || !googleMaps?.geometry?.poly) return false;
+
+  const geometry = feature.getGeometry?.();
+  const polygons = getPolygonPathsFromDataGeometry(geometry);
+
+  for (const rings of polygons) {
+    const outerRing = rings[0];
+    if (!outerRing || outerRing.length < 3) continue;
+
+    const outerPoly = new googleMaps.Polygon({ paths: outerRing });
+
+    if (!googleMaps.geometry.poly.containsLocation(latLng, outerPoly)) {
+      continue;
+    }
+
+    let insideHole = false;
+
+    for (let i = 1; i < rings.length; i++) {
+      const holeRing = rings[i];
+      if (!holeRing || holeRing.length < 3) continue;
+
+      const holePoly = new googleMaps.Polygon({ paths: holeRing });
+
+      if (googleMaps.geometry.poly.containsLocation(latLng, holePoly)) {
+        insideHole = true;
+        break;
+      }
+    }
+
+    if (!insideHole) return true;
+  }
+
+  return false;
+}
+
+function escapeHtml(value = "") {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function getFeatureLabelText(props = {}, layer) {
   const labelFields = layer?.data?.dxfLabelFields || [];
   const v = getFirstDefinedValue(props, labelFields);
@@ -721,12 +786,17 @@ function Maps() {
 
   // UI + view tick
   const [layers, setLayers] = useState([]);
+  const layersRef = useRef([]);
   const [geodeticNotice, setGeodeticNotice] = useState("");
   const [viewTick, setViewTick] = useState(0);
 
   const toolsControlDivRef = useRef(null);
   const idleDebounceRef = useRef(null);
   const viewRef = useRef({ bounds: null, zoom: null });
+
+useEffect(() => {
+  layersRef.current = layers;
+}, [layers]);
 
   // Fetch throttles + caches
 const lastFetchRef = useRef({
@@ -735,6 +805,7 @@ const lastFetchRef = useRef({
   rm199: 0,
   cad001: 0,
   lga233: 0,
+  localities234: 0,
   zoning070: 0,
   sewer068: 0,
   sewer026: 0,
@@ -768,6 +839,9 @@ const lineLayersRef = useRef(new Map());
   const measureModeRef = useRef(null);
   const [measureMode, setMeasureMode] = useState(null);
   const [hasMeasure, setHasMeasure] = useState(false);
+
+  const infoModeRef = useRef(false);
+const [infoMode, setInfoMode] = useState(false);
 
   const measureListenersRef = useRef([]);
   const measurePathRef = useRef([]);
@@ -1814,6 +1888,20 @@ window.google.maps.event.addListener(infoWindowRef.current, "closeclick", () => 
       // ignore
     }
 
+    map.addListener("click", (e) => {
+  if (!infoModeRef.current) return;
+  if (!e?.latLng) return;
+
+  const html = buildMapInfoPopupHtml(e.latLng);
+
+  infoWindowRef.current?.setContent(html);
+  infoWindowRef.current?.setPosition(e.latLng);
+  infoWindowRef.current?.open({ map });
+
+  window.google.maps.event.addListenerOnce(infoWindowRef.current, "domready", () => {
+    setTimeout(makeLatestInfoWindowDraggable, 0);
+  });
+});
  
     // Persist view/type on idle + tick
 map.addListener("idle", () => {
@@ -1951,14 +2039,15 @@ if (!isWA) {
     const btns = Array.from(div.querySelectorAll("button"));
     btns.forEach((b) => {
       const action = b.dataset.action;
-      const active =
-        (action === "distance" && measureMode === "distance") ||
-        (action === "area" && measureMode === "area") ||
-        (action === "location" && isFollowingLocation) ||
-        (
-          action === "export" &&
-          (exportPanelOpen || !!exportMode || exportHasFence || exportDialogOpen)
-        );
+     const active =
+  (action === "distance" && measureMode === "distance") ||
+  (action === "area" && measureMode === "area") ||
+  (action === "location" && isFollowingLocation) ||
+  (action === "info" && infoMode) ||
+  (
+    action === "export" &&
+    (exportPanelOpen || !!exportMode || exportHasFence || exportDialogOpen)
+  );
 
       b.style.background = active ? "#000" : "#fff";
       b.style.color = active ? "#fff" : "#000";
@@ -1977,6 +2066,7 @@ if (!isWA) {
     exportMode,
     exportHasFence,
     exportDialogOpen,
+    infoMode,
   ]);
 
 
@@ -2091,6 +2181,135 @@ if (!isWA) {
     setTimeout(makeLatestInfoWindowDraggable, 0);
   });
 };
+
+function buildMapInfoPopupHtml(latLng) {
+  const googleMaps = window.google?.maps;
+  if (!googleMaps) return "";
+
+  if (!googleMaps.geometry?.poly) {
+    return `
+      <div style="font-family:Inter,sans-serif; font-size:12px; max-width:260px;">
+        <div data-pw-drag-handle="1" style="font-weight:900; font-size:13px; margin-bottom:6px;">
+          Map Information
+        </div>
+        <div style="color:#8a1f1f; font-weight:800;">
+          Google Maps geometry library is not loaded.
+        </div>
+      </div>
+    `;
+  }
+
+const visiblePolygonLayers = (layersRef.current || []).filter(
+  (l) => l.type === "polygon" && l.visible
+);
+  const sections = [];
+
+  visiblePolygonLayers.forEach((layer) => {
+    const store = polygonLayersRef.current.get(layer.id);
+    if (!store?.polygons) return;
+
+    let matchedFeature = null;
+
+    store.polygons.forEach((feature) => {
+      if (matchedFeature) return;
+
+      if (dataPolygonFeatureContainsLatLng(feature, latLng, googleMaps)) {
+        matchedFeature = feature;
+      }
+    });
+
+    if (!matchedFeature) return;
+
+  const infoFields = layer.data?.infoFields || [];
+
+const props = {};
+matchedFeature.forEachProperty((value, key) => {
+  props[key] = value;
+});
+
+const rows = infoFields
+  .map(({ key, label }) => {
+    const value = props[key];
+
+    if (value === null || value === undefined || String(value).trim() === "") {
+      return "";
+    }
+
+    return `
+      <div style="margin-top:5px;">
+        <div style="font-weight:900; color:#333;">${escapeHtml(label || key)}</div>
+        <div style="color:#111; word-break:break-word;">${escapeHtml(value)}</div>
+      </div>
+    `;
+  })
+  .filter(Boolean);
+
+    sections.push(`
+      <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.12);">
+        <div style="font-weight:950; font-size:13px; color:#111;">
+          ${escapeHtml(layer.name)}
+        </div>
+        ${
+          rows.length
+            ? rows.join("")
+            : `<div style="margin-top:5px; color:#666; font-weight:800;">No selected attributes found.</div>`
+        }
+      </div>
+    `);
+  });
+
+  if (!sections.length) {
+    return `
+      <div style="font-family:Inter,sans-serif; font-size:12px; max-width:260px;">
+        <div data-pw-drag-handle="1" style="font-weight:900; font-size:13px; margin-bottom:6px;">
+          Map Information
+        </div>
+        <div style="color:#666; font-weight:800;">
+          No visible polygon data found at this point.
+        </div>
+        <div style="margin-top:6px; color:#666;">
+          Turn on Cadastre, Local Authority, or R-Codes Zoning first.
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div style="font-family:Inter,sans-serif; font-size:12px; max-width:280px; max-height:300px; overflow:auto;">
+      <div data-pw-drag-handle="1" style="font-weight:950; font-size:14px; margin-bottom:6px;">
+        Map Information
+      </div>
+      ${sections.join("")}
+    </div>
+  `;
+}
+
+function stopInfoMode() {
+  infoModeRef.current = false;
+  setInfoMode(false);
+
+  try {
+    mapRef.current?.setOptions({ draggableCursor: null });
+  } catch {
+    // ignore
+  }
+}
+
+function toggleInfoMode() {
+  clearMeasure();
+  clearExportInteraction();
+  setNoteAddMode(false);
+
+  const next = !infoModeRef.current;
+  infoModeRef.current = next;
+  setInfoMode(next);
+
+  try {
+    mapRef.current?.setOptions({ draggableCursor: next ? "help" : null });
+  } catch {
+    // ignore
+  }
+}
 
 function openMainInfoWindow({ html, marker, markerId, layerId }) {
   const map = mapRef.current;
@@ -4009,6 +4228,7 @@ if (pointSets.length) {
       const hasRM = prev.some((l) => l.id === "rm199");
       const hasCad = prev.some((l) => l.id === "cad001");
       const hasLGA = prev.some((l) => l.id === "lga233");
+      const hasLocalities = prev.some((l) => l.id === "localities234");
       const hasZoning = prev.some((l) => l.id === "zoning070");
       const hasSewer = prev.some((l) => l.id === "sewer068");
       const hasSewerMh = prev.some((l) => l.id === "sewer026");
@@ -4267,6 +4487,9 @@ data: {
 exportFormats: ["dxf"],
 dxfLabelFields: [],
 outputLayerName: "Cadastre",
+infoFields: [
+  { key: "objectid", label: "OBJECTID" },
+],
           },
         });
       if (!hasLGA)
@@ -4299,8 +4522,44 @@ outputLayerName: "Cadastre",
 exportFormats: ["dxf"],
 dxfLabelFields: ["name", "lga_name", "local_government_authority"],
 outputLayerName: "Local_Authority",
+infoFields: [
+  { key: "name", label: "Local Government Authority" },
+],
           },
         });
+if (!hasLocalities)
+  next.push({
+    id: "localities234",
+    name: "Localities (LGATE-234)",
+    type: "polygon",
+    visible: false,
+    data: {
+      url: LGATE_234_QUERY,
+      where: "1=1",
+      minZoom: 0,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      outputLayerName: "Localities",
+      style: {
+        clickable: false,
+        strokeColor: "#1976d2",
+        strokeWeight: 1.4,
+        fillColor: "#90caf9",
+        fillOpacity: 0.18,
+      },
+      labels: {
+        minZoom: 10,
+        fields: ["name"],
+        color: "#0d47a1",
+        fontWeight: "700",
+        fontSize: (zoom) => (zoom >= 13 ? "12px" : "10px"),
+        repeatAtZoom: null,
+      },
+      infoFields: [
+        { key: "name", label: "Locality" },
+        { key: "postcode", label: "Postcode" },
+      ],
+    },
+  });
       if (!hasZoning)
         next.push({
           id: "zoning070",
@@ -4332,6 +4591,11 @@ outputLayerName: "Local_Authority",
 exportFormats: ["dxf"],
 dxfLabelFields: ["zone_code", "zone", "r_code", "rcode", "name", "label"],
 outputLayerName: "Zoning",
+infoFields: [
+  { key: "rcode_no", label: "R Code Zoning" },
+  { key: "scheme_nam", label: "Scheme Name" },
+  { key: "scheme_no", label: "Scheme Number" },
+],
           },
         });
         if (!hasSewer)
@@ -4972,10 +5236,10 @@ return (
 
 <div ref={mapDivRef} className="maps-map" />
 
-<div className="maps-floating-tools">
-  <button type="button" title="Measure distance" onClick={startDistanceMeasure}>📏</button>
-  <button type="button" title="Measure area" onClick={startAreaMeasure}>📐</button>
-  <button type="button" title="My location" onClick={handleMyLocation}>📍</button>
+<div ref={toolsControlDivRef} className="maps-floating-tools">
+ <button type="button" data-action="distance" title="Measure distance" onClick={startDistanceMeasure}>📏</button>
+<button type="button" data-action="area" title="Measure area" onClick={startAreaMeasure}>📐</button>
+<button type="button" data-action="location" title="My location" onClick={handleMyLocation}>📍</button>
   <button
     type="button"
     title="Historical imagery"
@@ -5007,7 +5271,21 @@ return (
   >
     👤
   </button>
-  <button type="button" title="Export visible layers" onClick={toggleExportPanel}>⬇</button>
+
+<button
+  type="button"
+  title="Map information"
+  data-action="info"
+  onClick={toggleInfoMode}
+  style={{
+    background: infoMode ? "#000" : undefined,
+    color: infoMode ? "#fff" : undefined,
+  }}
+>
+  ℹ
+</button>
+
+  <button type="button" data-action="export" title="Export visible layers" onClick={toggleExportPanel}>⬇</button>
 
   {measureMode && (
     <button type="button" title="Finish measurement" onClick={finishMeasure}>✔</button>
@@ -5763,7 +6041,7 @@ onBlur={() => {
                   <div className="maps-layer-section-title">Local Authority</div>
                   <div className="layers-list">
                     {layers
-                      .filter((l) => l.id === "lga233")
+  .filter((l) => ["lga233", "localities234"].includes(l.id))
                       .map((l) => (
                         <div key={l.id} className="layer-row layer-row-compact">
                           <label className="layer-left">
@@ -6126,6 +6404,16 @@ title={
                   <div className="maps-legend-row">
   <span
     className="maps-legend-line"
+    style={{ background: "#1976d2", height: 2 }}
+  />
+  <div>
+    <div className="maps-legend-title">Localities</div>
+    <div className="maps-legend-sub">LGATE-234 (blue boundary, light blue fill + label)</div>
+  </div>
+</div>
+                  <div className="maps-legend-row">
+  <span
+    className="maps-legend-line"
     style={{ background: "#c62828", height: 2 }}
   />
   <div>
@@ -6169,7 +6457,8 @@ title={
                     <div>📍 My location</div>
                     <div>🕘 Historical (Earth)</div>
                     <div>👤 Street View</div>
-                    <div>⬇ Export visible layers</div>
+<div>ℹ Map information</div>
+<div>⬇ Export visible layers</div>
   <div>✔ Finish measurement</div>
   <div>✖ Clear measurement</div>
                   </div>
