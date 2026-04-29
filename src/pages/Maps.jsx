@@ -4510,14 +4510,16 @@ infoFields: [
               fillColor: "#a5d6a7",
               fillOpacity: 0.25,
             },
-            labels: {
-              minZoom: 8,
-              fields: ["name"],
-              color: "#1b5e20",
-              fontWeight: "600",
-              fontSize: (zoom) => (zoom >= 12 ? "12px" : "10px"),
-              repeatAtZoom: null,
-            },
+labels: {
+  minZoom: 8,
+  fields: ["name", "lga_name", "local_government_authority"],
+  color: "#1b5e20",
+  fontWeight: "800",
+  fontSize: (zoom) => (zoom >= 14 ? "13px" : zoom >= 11 ? "11px" : "10px"),
+  repeatAtZoom: 15,
+  repeatOffset: { lat: 0.006, lng: 0.006 },
+  repeatGrid: true,
+},
             exportable: true,
 exportFormats: ["dxf"],
 dxfLabelFields: ["name", "lga_name", "local_government_authority"],
@@ -4546,14 +4548,16 @@ if (!hasLocalities)
         fillColor: "#90caf9",
         fillOpacity: 0.18,
       },
-      labels: {
-        minZoom: 10,
-        fields: ["name"],
-        color: "#0d47a1",
-        fontWeight: "700",
-        fontSize: (zoom) => (zoom >= 13 ? "12px" : "10px"),
-        repeatAtZoom: null,
-      },
+labels: {
+  minZoom: 9,
+  fields: ["name", "locality", "locality_name"],
+  color: "#0d47a1",
+  fontWeight: "800",
+  fontSize: (zoom) => (zoom >= 14 ? "13px" : zoom >= 11 ? "11px" : "10px"),
+  repeatAtZoom: 14,
+  repeatOffset: { lat: 0.0025, lng: 0.0025 },
+  repeatGrid: true,
+},
       infoFields: [
         { key: "name", label: "Locality" },
         { key: "postcode", label: "Postcode" },
@@ -5015,34 +5019,87 @@ const staleTimer = setInterval(() => {
               })
             );
 
-            if (labelCfg.repeatAtZoom && (zoom ?? 0) >= labelCfg.repeatAtZoom) {
-              const latOffset = labelCfg.repeatOffset?.lat ?? 0;
-              const lngOffset = labelCfg.repeatOffset?.lng ?? 0;
+     
 
-              const repeats = [
-                new googleMaps.LatLng(center.lat() + latOffset, center.lng()),
-                new googleMaps.LatLng(center.lat() - latOffset, center.lng()),
-                new googleMaps.LatLng(center.lat(), center.lng() + lngOffset),
-                new googleMaps.LatLng(center.lat(), center.lng() - lngOffset),
-              ];
+ if (labelCfg.repeatAtZoom && (zoom ?? 0) >= labelCfg.repeatAtZoom) {
+  const latOffset = labelCfg.repeatOffset?.lat ?? 0;
+  const lngOffset = labelCfg.repeatOffset?.lng ?? 0;
 
-              repeats.forEach((pos) => {
-                nextLabels.push(
-                  buildInvisibleLabelMarker({
-                    googleMaps,
-                    map,
-                    position: pos,
-                    text,
-                    color: labelCfg.color || "#111",
-                    fontWeight: labelCfg.fontWeight || "700",
-                    fontSize:
-                      typeof labelCfg.fontSize === "function"
-                        ? labelCfg.fontSize(zoom)
-                        : labelCfg.fontSize || "10px",
-                  })
-                );
-              });
-            }
+  if (labelCfg.repeatGrid) {
+    const featureBounds = new googleMaps.LatLngBounds();
+
+    const walkGeometry = (geometry) => {
+      if (!geometry) return;
+
+      const type = geometry.getType();
+
+      if (type === "Point") {
+        featureBounds.extend(geometry.get());
+      } else if (type === "MultiPoint" || type === "LineString" || type === "LinearRing") {
+        geometry.getArray().forEach((latLng) => featureBounds.extend(latLng));
+      } else if (
+        type === "MultiLineString" ||
+        type === "Polygon" ||
+        type === "MultiPolygon"
+      ) {
+        geometry.getArray().forEach((part) => walkGeometry(part));
+      }
+    };
+
+    walkGeometry(feature.getGeometry());
+
+    if (!featureBounds.isEmpty() && latOffset && lngOffset) {
+      const sw = featureBounds.getSouthWest();
+      const ne = featureBounds.getNorthEast();
+
+      for (let lat = sw.lat() + latOffset; lat < ne.lat(); lat += latOffset) {
+        for (let lng = sw.lng() + lngOffset; lng < ne.lng(); lng += lngOffset) {
+          const pos = new googleMaps.LatLng(lat, lng);
+
+          if (
+            googleMaps.geometry?.poly?.containsLocation &&
+            dataPolygonFeatureContainsLatLng(feature, pos, googleMaps)
+          ) {
+            nextLabels.push(
+              buildInvisibleLabelMarker({
+                googleMaps,
+                map,
+                position: pos,
+                text,
+                color: labelCfg.color || "#111",
+                fontWeight: labelCfg.fontWeight || "700",
+                fontSize:
+                  typeof labelCfg.fontSize === "function"
+                    ? labelCfg.fontSize(zoom)
+                    : labelCfg.fontSize || "10px",
+              })
+            );
+          }
+        }
+      }
+    }
+  } else {
+    const pos = new googleMaps.LatLng(
+      center.lat() + latOffset,
+      center.lng() + lngOffset
+    );
+
+    nextLabels.push(
+      buildInvisibleLabelMarker({
+        googleMaps,
+        map,
+        position: pos,
+        text,
+        color: labelCfg.color || "#111",
+        fontWeight: labelCfg.fontWeight || "700",
+        fontSize:
+          typeof labelCfg.fontSize === "function"
+            ? labelCfg.fontSize(zoom)
+            : labelCfg.fontSize || "10px",
+      })
+    );
+  }
+}
           });
 
           store.labels = nextLabels;
