@@ -51,10 +51,14 @@ export function AuthProvider({ children }) {
   }, [profile]);
 
 async function fetchProfile(currentUser) {
-  async function runFetch() {
+  try {
     const { data, error } = await withTimeout(
-      supabase.from("profiles").select("*").eq("id", currentUser.id).maybeSingle(),
-      8000,
+      supabase
+        .from("profiles")
+        .select("id, role, display_name, is_active")
+        .eq("id", currentUser.id)
+        .maybeSingle(),
+      2000,
       "profiles fetch"
     );
 
@@ -70,19 +74,9 @@ async function fetchProfile(currentUser) {
     }
 
     return profile;
-  }
-
-  try {
-    return await runFetch();
   } catch (e) {
-    console.warn("Profile fetch failed, retrying once:", e?.message || e);
-
-    try {
-      return await runFetch();
-    } catch (retryError) {
-      console.warn("Profile fetch exception:", retryError?.message || retryError);
-      return null;
-    }
+    console.warn("Profile fetch exception:", e?.message || e);
+    return null;
   }
 }
 
@@ -126,20 +120,34 @@ setUser(sessionUser);
 
 // ✅ session state is now known — routes should not redirect because we're "still checking"
 setAuthReady(true);
+setAuthLoading(false);
 
 if (!sessionUser) {
   setProfile(null);
   return;
 }
 
-// 2) Fetch profile (network) — do NOT block authReady on this
+// 2) Fetch profile (network) — do NOT block the portal opening
 setProfileLoading(true);
 const p = await fetchProfile(sessionUser);
 if (!isMounted) return;
 
 if (!p) {
-  console.warn("Profile failed to load — retrying profile on next auth event");
-  setProfile(null);
+  console.warn("Profile failed to load — retrying in background");
+  setProfileLoading(false);
+
+ setTimeout(async () => {
+  if (!isMounted) return;
+
+  const retryProfile = await fetchProfile(sessionUser);
+
+  if (!isMounted) return;
+
+  if (retryProfile) {
+    setProfile(retryProfile);
+  }
+}, 3000);
+
   return;
 }
 
@@ -221,12 +229,26 @@ try {
     const p = await fetchProfile(newUser);
     if (!isMounted) return;
 
-    if (!p) {
-  console.warn("Profile failed to load — keeping existing profile if same user");
+if (!p) {
+  console.warn("Profile failed to load — retrying in background");
 
   if (userChanged) {
     setProfile(null);
   }
+
+  setProfileLoading(false);
+
+  setTimeout(async () => {
+  if (!isMounted) return;
+
+  const retryProfile = await fetchProfile(newUser);
+
+  if (!isMounted) return;
+
+  if (retryProfile) {
+    setProfile(retryProfile);
+  }
+}, 3000);
 
   return;
 }
@@ -304,25 +326,27 @@ const value = useMemo(() => {
   const rawRole = profile?.role;
   const role = rawRole ? normalizeRole(rawRole) : null;
 
+  const permissionsReady = !user || !!profile;
+
   // ✅ canonical display name for the whole app
   const displayName =
-    profile?.display_name ||
-    profile?.full_name ||
-    user?.email ||
-    "";
+  profile?.display_name ||
+  user?.email ||
+  "";
 
-  return {
-    user,
-    profile,
-    role,
-    displayName,
-    permissionLabel:
-      role === "admin" ? "Admin" : role === "basic" ? "Basic" : "Loading",
-    authLoading,
-    authReady,
-    profileLoading,
-    isAdmin: role === "admin",
-  };
+ return {
+  user,
+  profile,
+  role,
+  displayName,
+  permissionLabel:
+    role === "admin" ? "Admin" : role === "basic" ? "Basic" : "Loading",
+  authLoading,
+  authReady,
+  profileLoading,
+  permissionsReady,
+  isAdmin: role === "admin",
+};
 }, [user, profile, authLoading, authReady, profileLoading]);
 
 
