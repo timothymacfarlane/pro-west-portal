@@ -163,6 +163,15 @@ const WCORP_068_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer/17/query"; // Sewer Gravity Pipe (WCORP-068)
 const WCORP_026_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer/1/query"; // Sewer Manhole (WCORP-026)
+const WCORP_084_QUERY =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer/19/query"; // Sewer Connection (WCORP-084)
+const WCORP_083_QUERY =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer/18/query"; // Sewer Pressure Main (WCORP-083)  
+const WCORP_002_QUERY =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer/20/query"; // Water Pipes (WCORP-002)
+const WCORP_006_QUERY =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer/0/query"; // Water Meters (WCORP-006)  
+
 
   // ---- Speed knobs ----
 const MIN_GEODETIC_ZOOM = 12;
@@ -809,6 +818,10 @@ const lastFetchRef = useRef({
   zoning070: 0,
   sewer068: 0,
   sewer026: 0,
+  sewer084: 0,
+  sewer083: 0,
+  water002: 0,
+  water006: 0,
 });
 
   const clustererRef = useRef(null);
@@ -4232,6 +4245,10 @@ if (pointSets.length) {
       const hasZoning = prev.some((l) => l.id === "zoning070");
       const hasSewer = prev.some((l) => l.id === "sewer068");
       const hasSewerMh = prev.some((l) => l.id === "sewer026");
+      const hasSewerConnection = prev.some((l) => l.id === "sewer084");
+      const hasSewerPressure = prev.some((l) => l.id === "sewer083");
+      const hasWaterPipes = prev.some((l) => l.id === "water002");
+      const hasWaterMeters = prev.some((l) => l.id === "water006");
       const next = [...prev];
 
     if (!hasSSM)
@@ -4465,6 +4482,30 @@ data: {
   cluster: false,
 },
   });
+
+if (!hasSewerConnection)
+  next.push({
+    id: "sewer084",
+    name: "Sewer Connections (WCORP-084)",
+    type: "line",
+    visible: false,
+    data: {
+      url: WCORP_084_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      exportable: true,
+      exportFormats: ["dxf"],
+      dxfLabelFields: [],
+      outputLayerName: "Sewer_Connections",
+      style: {
+        clickable: false,
+        strokeColor: "#ff4da6",
+        strokeWeight: 3,
+        strokeOpacity: 0.6,
+      },
+    },
+  });
            if (!hasCad)
         next.push({
           id: "cad001",
@@ -4648,6 +4689,106 @@ style: (feature) => {
 },
     },
   });
+
+  if (!hasSewerPressure)
+  next.push({
+    id: "sewer083",
+    name: "Sewer Pressure Main (WCORP-083)",
+    type: "line",
+    visible: false,
+    data: {
+      url: WCORP_083_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      exportable: true,
+      exportFormats: ["dxf"],
+      dxfLabelFields: [],
+      outputLayerName: "Sewer_Pressure_Main",
+     style: {
+  clickable: false,
+  strokeColor: "#ff4da6",
+  strokeWeight: 3,
+  strokeOpacity: 0,
+  icons: [
+    {
+      icon: {
+        path: "M 0,-1 0,1",
+        strokeColor: "#ff4da6",
+        strokeOpacity: 1,
+        scale: 3,
+      },
+      offset: "0",
+      repeat: "20px",
+    },
+  ],
+},
+    },
+  });
+
+if (!hasWaterPipes)
+  next.push({
+    id: "water002",
+    name: "Water Pipes (WCORP-002)",
+    type: "line",
+    visible: false,
+    data: {
+      url: WCORP_002_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      exportable: true,
+      exportFormats: ["dxf"],
+      dxfLabelFields: [],
+      outputLayerName: "Water_Pipes",
+      style: {
+        clickable: false,
+        strokeColor: "#4fc3f7",
+        strokeWeight: 3,
+        strokeOpacity: 0.65,
+      },
+    },
+  });
+
+if (!hasWaterMeters)
+  next.push({
+    id: "water006",
+    name: "Water Meters (WCORP-006)",
+    type: "point",
+    visible: false,
+    data: {
+      url: WCORP_006_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      symbol: {
+        path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
+        fillColor: "#4fc3f7",
+        fillOpacity: 1,
+        strokeColor: "#ffffff",
+        strokeWeight: 1,
+        scale: 3.5,
+      },
+      layerTag: "WATER METER",
+      exportable: true,
+      exportFormats: ["csv", "dxf"],
+      idFields: ["id", "metering_point_number", "objectid", "OBJECTID", "fid"],
+      nameFields: ["id", "metering_point_number"],
+      dxfLabelFields: [],
+      exportFieldOrder: [
+        "id",
+        "metering_point_number",
+        "address",
+        "street_name",
+        "suburb_name",
+        "objectid",
+      ],
+      label: null,
+      filterFn: (feature) => !isDestroyed(feature?.properties || {}),
+      cluster: false,
+    },
+  });
+
       return next;
     });
   }, []);
@@ -6078,20 +6219,43 @@ onBlur={() => {
 <div className="maps-layer-section">
   <div className="maps-layer-section-title">Services</div>
   <div className="layers-list">
-    {layers
-      .filter((l) => ["sewer068", "sewer026"].includes(l.id))
-      .map((l) => (
-        <div key={l.id} className="layer-row layer-row-compact">
-          <label className="layer-left">
-            <input
-              type="checkbox"
-              checked={l.visible}
-              onChange={() => toggleLayer(l.id)}
-            />
-            <span className="layer-name">{l.name}</span>
-          </label>
-        </div>
-      ))}
+{/* Sewer */}
+<div className="layer-subheading">Sewer</div>
+{["sewer026", "sewer068", "sewer083", "sewer084"]
+  .map((id) => layers.find((l) => l.id === id))
+  .filter(Boolean)
+  .map((l) => (
+    <div key={l.id} className="layer-row layer-row-compact">
+      <label className="layer-left">
+        <input
+          type="checkbox"
+          checked={l.visible}
+          onChange={() => toggleLayer(l.id)}
+        />
+        <span className="layer-name">{l.name}</span>
+      </label>
+    </div>
+  ))}
+
+{/* Water */}
+<div className="layer-subheading" style={{ marginTop: 8 }}>
+  Water
+</div>
+{["water002", "water006"]
+  .map((id) => layers.find((l) => l.id === id))
+  .filter(Boolean)
+  .map((l) => (
+    <div key={l.id} className="layer-row layer-row-compact">
+      <label className="layer-left">
+        <input
+          type="checkbox"
+          checked={l.visible}
+          onChange={() => toggleLayer(l.id)}
+        />
+        <span className="layer-name">{l.name}</span>
+      </label>
+    </div>
+  ))}
   </div>
 </div>
                 <div className="maps-layer-section">
@@ -6448,6 +6612,57 @@ title={
     <div className="maps-legend-sub">WCORP-026 (pink point)</div>
   </div>
 </div>
+
+<div className="maps-legend-row">
+  <span
+    className="maps-legend-line"
+    style={{ background: "#ff4da6", height: 3 }}
+  />
+  <div>
+    <div className="maps-legend-title">Sewer Connections</div>
+    <div className="maps-legend-sub">WCORP-084 (pink sewer connection line)</div>
+  </div>
+</div>
+
+<div className="maps-legend-row">
+  <span
+    className="maps-legend-line"
+    style={{ background: "#ff4da6", height: 3 }}
+  />
+  <div>
+    <div className="maps-legend-title">Sewer Pressure Main</div>
+    <div className="maps-legend-sub">WCORP-083 (pink dashed line)</div>
+  </div>
+</div>
+
+<div className="maps-legend-row">
+  <span
+    className="maps-legend-line"
+    style={{ background: "#4fc3f7", height: 3 }}
+  />
+  <div>
+    <div className="maps-legend-title">Water Pipes</div>
+    <div className="maps-legend-sub">WCORP-002 (light blue line)</div>
+  </div>
+</div>
+
+<div className="maps-legend-row">
+  <span
+    className="maps-legend-swatch"
+    style={{
+      background: "#4fc3f7",
+      width: 8,
+      height: 8,
+      borderRadius: "50%",
+      border: "1px solid #ffffff",
+    }}
+  />
+  <div>
+    <div className="maps-legend-title">Water Meters</div>
+    <div className="maps-legend-sub">WCORP-006 (small light blue point)</div>
+  </div>
+</div>
+
                   <div className="maps-legend-row">
                     <span
                       className="maps-legend-line"

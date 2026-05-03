@@ -4371,3 +4371,12 @@ body,
   backdrop-filter: blur(6px);
   background: rgba(255,255,255,0.9);
 }
+
+.layer-subheading {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #888;
+  margin: 6px 0 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
