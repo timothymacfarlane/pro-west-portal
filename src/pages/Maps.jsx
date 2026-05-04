@@ -4761,6 +4761,7 @@ if (!hasWaterMeters)
       where: "1=1",
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: MAX_FEATURES_PER_VIEW,
+      clickable: false,
       symbol: {
         path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
         fillColor: "#4fc3f7",
@@ -4967,19 +4968,21 @@ const syncClusterer = () => {
               optimized: true,
             });
 
-   marker.addListener("click", () => {
-  const html =
-    typeof layer.data?.popupBuilder === "function"
-      ? layer.data.popupBuilder({ name, props, lat, lng })
-      : `<div data-pw-drag-handle="1" style="font-weight:800;">${name || layer.name}</div>`;
+if (layer.data?.clickable !== false) {
+  marker.addListener("click", () => {
+    const html =
+      typeof layer.data?.popupBuilder === "function"
+        ? layer.data.popupBuilder({ name, props, lat, lng })
+        : `<div data-pw-drag-handle="1" style="font-weight:800;">${name || layer.name}</div>`;
 
-  openMainInfoWindow({
-    html,
-    marker,
-    markerId: id,
-    layerId: layer.id,
+    openMainInfoWindow({
+      html,
+      marker,
+      markerId: id,
+      layerId: layer.id,
+    });
   });
-});
+}
 
             store.index.set(id, marker);
           } else {

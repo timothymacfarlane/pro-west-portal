@@ -303,11 +303,16 @@ function drawRiskRow(doc, label, result, x, y, rowWidth) {
 /* -------------- Component ---------------- */
 
 function Take5() {
-  const { user } = useAuth();
+  const { user, profile, displayName } = useAuth();
   const derivedDisplayName = useMemo(
-    () => user?.user_metadata?.full_name || user?.email || "",
-    [user]
-  );
+  () =>
+    profile?.display_name ||
+    displayName ||
+    user?.user_metadata?.full_name ||
+    user?.email ||
+    "",
+  [profile?.display_name, displayName, user]
+);
 
   const [step, setStep] = useState(1);
   const totalSteps = 5;
@@ -338,10 +343,12 @@ function Take5() {
   const [employeeOptions, setEmployeeOptions] = useState([]);
 
   const getLoggedInEmployeeName = useCallback(() => {
-  const loggedInEmail = user?.email;
-  const matchedUser = employeeOptions.find((emp) => emp.email === loggedInEmail);
+  const matchedUser =
+    employeeOptions.find((emp) => emp.id === user?.id) ||
+    employeeOptions.find((emp) => emp.email === user?.email);
+
   return matchedUser?.name || derivedDisplayName || "";
-}, [employeeOptions, user?.email, derivedDisplayName]);
+}, [employeeOptions, user?.id, user?.email, derivedDisplayName]);
 
   // ✅ Job number autosuggest (copied pattern from Jobs.jsx)
   const [jobNoQuery, setJobNoQuery] = useState("");
@@ -625,16 +632,23 @@ useEffect(() => {
       // 🔥 THIS IS THE KEY PART
    const loggedInEmail = user?.email;
 
-const matchedUser = options.find(
-  (emp) => emp.email === loggedInEmail
-);
+const matchedUser =
+  options.find((emp) => emp.id === user?.id) ||
+  options.find((emp) => emp.email === loggedInEmail);
 
-if (matchedUser) {
-  setEmployeeName((prev) => prev || matchedUser.name);
-  setSignatureName((prev) => prev || matchedUser.name);
-} else if (derivedDisplayName) {
-  setEmployeeName((prev) => prev || derivedDisplayName);
-  setSignatureName((prev) => prev || derivedDisplayName);
+const defaultName = matchedUser?.name || derivedDisplayName || "";
+
+if (defaultName) {
+  setEmployeeName((prev) => {
+    // replace blank, email fallback, or bad restored value
+    if (!prev || prev === user?.email) return defaultName;
+    return prev;
+  });
+
+  setSignatureName((prev) => {
+    if (!prev || prev === user?.email) return defaultName;
+    return prev;
+  });
 }
     } catch (err) {
       console.error("Failed to load employee profiles", err);
@@ -647,7 +661,7 @@ if (matchedUser) {
   return () => {
     isMounted = false;
   };
-}, [user, derivedDisplayName]);
+}, [user?.id, user?.email, derivedDisplayName]);
 
 const getPerthDayRangeUtc = useCallback(() => {
   const now = new Date();

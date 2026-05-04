@@ -55,7 +55,7 @@ async function fetchProfile(currentUser) {
     const { data, error } = await withTimeout(
       supabase
         .from("profiles")
-        .select("id, role, display_name, is_active")
+        .select("id, role, display_name, mobile, job_title, is_active")
         .eq("id", currentUser.id)
         .maybeSingle(),
       2000,

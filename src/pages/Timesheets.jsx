@@ -138,10 +138,31 @@ const [lockMeta, setLockMeta] = useState(null);
     if (!isAppVisible) return;
 
     if (!isAdmin) {
-      setSelectedUserId(user.id);
-      setSelectedName(user?.user_metadata?.full_name || user?.email || "");
-      return;
+  setSelectedUserId(user.id);
+  setSelectedName(user?.user_metadata?.full_name || user?.email || "");
+
+  // 👇 STILL load colleagues list
+  const loadStaff = async () => {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, display_name")
+      .eq("is_active", true)
+      .eq("show_in_timesheets", true)
+      .order("display_name", { ascending: true });
+
+    if (!error && data) {
+      setStaff(
+        data.map((p) => ({
+          id: p.id,
+          name: p.display_name || "Unnamed",
+        }))
+      );
     }
+  };
+
+  loadStaff();
+  return;
+}
 
     const loadStaff = async () => {
       const { data, error } = await supabase
