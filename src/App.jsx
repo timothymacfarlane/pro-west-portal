@@ -42,7 +42,21 @@ function App() {
   const navigate = useNavigate();
 
   // Updated: rely on AuthContext canonical flags rather than "ADMIN" string checks
-const { isAdmin, user } = useAuth();
+const { isAdmin, user, profile, displayName } = useAuth();
+
+const sidebarUserName =
+  [
+    profile?.first_name || profile?.firstName,
+    profile?.last_name || profile?.lastName || profile?.surname,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim() ||
+  profile?.full_name ||
+  profile?.fullName ||
+  profile?.display_name ||
+  displayName ||
+  "";
 
  const isAuthPage = ["/login", "/reset-password"].includes(location.pathname);
 
@@ -181,7 +195,16 @@ const handleLogout = async () => {
                 {sidebarCollapsed ? "»" : "«"}
               </button>
 
-              {!sidebarCollapsed && <h2 className="sidebar-title">Pages</h2>}
+              {!sidebarCollapsed && (
+                <>
+                  <h2 className="sidebar-title">Pages</h2>
+                  {sidebarUserName && (
+                    <div className="sidebar-user-name" title={sidebarUserName}>
+                      {sidebarUserName}
+                    </div>
+                  )}
+                </>
+              )}
 
               <ul className="nav-list">
                 <li>

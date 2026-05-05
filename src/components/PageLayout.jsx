@@ -1,4 +1,4 @@
-const APP_VERSION = "0.12.6-beta";
+const APP_VERSION = "v0.12.7-beta";
 
 function HeaderActions({ extraActions }) {
   return (
@@ -26,7 +26,7 @@ function PageLayout({ icon, title, subtitle, actions, children }) {
             <div className="page-body">{children}</div>
 
       <footer className="page-footer" role="contentinfo" aria-label="Footer">
-        <span className="page-footer-version">v{APP_VERSION}</span>
+        <span className="page-footer-version">{APP_VERSION}</span>
       </footer>
     </div>
   );

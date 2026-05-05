@@ -26,8 +26,8 @@ dist-ssr
 node_modules/
 dist/
 .vite/
+supabase/.temp/
 
 # env files
 .env
 .env.*
-

@@ -160,7 +160,19 @@
 
 .sidebar-title {
   font-size: 1rem;
-  margin: 0 0 0.5rem;
+  margin: 0;
+}
+
+.sidebar-user-name {
+  margin: 0.15rem 0 0.65rem;
+  padding: 0 0.1rem;
+  color: #666;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar-toggle {
@@ -222,6 +234,10 @@
 /* Collapsed: hide labels, centre icons */
 
 .sidebar.collapsed .sidebar-title {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-user-name {
   display: none;
 }
 
