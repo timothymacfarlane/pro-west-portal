@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
-import { jsPDF } from "jspdf";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const yesNoOptions = ["Yes", "No"];
@@ -1347,7 +1346,8 @@ const hasUnreducedHazardRisk = useCallback(() => {
   };
 
   // ---------- POLISHED PDF ----------
-  const generatePdf = (data) => {
+  const generatePdf = async (data) => {
+    const { jsPDF } = await import("jspdf");
     const doc = new jsPDF({ unit: "mm", format: "a4" });
     let y = 18;
 
@@ -1717,7 +1717,7 @@ const { data: inserted, error: insertError } = await supabase
     if (insertError) throw insertError;
     const take5Id = inserted.id;
 
-    const pdfDoc = generatePdf(formData);
+    const pdfDoc = await generatePdf(formData);
 
 const appendImagePage = (title, docNumber, imageDataUrl) => {
   if (!imageDataUrl) return;

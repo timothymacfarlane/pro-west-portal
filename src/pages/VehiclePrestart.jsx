@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext.jsx";
-import { jsPDF } from "jspdf";
 
 // Reuse the Yes/No toggle behaviour from Take5
 const yesNoOptions = ["Yes", "No"];
@@ -398,7 +397,8 @@ function VehiclePrestart() {
   });
 
   // PDF generator – styled like Take 5, but simplified for vehicle checklist
-  const generatePdf = (data) => {
+  const generatePdf = async (data) => {
+    const { jsPDF } = await import("jspdf");
     const doc = new jsPDF({ unit: "mm", format: "a4" });
     let y = 18;
     const lineH = 6.5;
@@ -565,7 +565,7 @@ function VehiclePrestart() {
 
       const prestartId = inserted.id;
 
-      const pdfDoc = generatePdf(formData);
+      const pdfDoc = await generatePdf(formData);
 
       let pdfBlob;
       try {

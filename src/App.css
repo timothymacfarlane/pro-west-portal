@@ -158,18 +158,26 @@
   padding-right: 0.6rem;
 }
 
-.sidebar-title {
-  font-size: 1rem;
-  margin: 0;
+.sidebar-heading-group {
+  margin: 0 0 0.75rem;
+  padding: 0 0.15rem 0.65rem;
+  border-bottom: 1px solid var(--pw-border-soft);
 }
 
-.sidebar-user-name {
-  margin: 0.15rem 0 0.65rem;
-  padding: 0 0.1rem;
-  color: #666;
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1.25;
+.sidebar-title {
+  margin: 0;
+  color: var(--pw-primary-dark);
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.sidebar-user-heading {
+  margin: 0 0 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--pw-primary-dark);
+  opacity: 0.95;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -233,11 +241,7 @@
 
 /* Collapsed: hide labels, centre icons */
 
-.sidebar.collapsed .sidebar-title {
-  display: none;
-}
-
-.sidebar.collapsed .sidebar-user-name {
+.sidebar.collapsed .sidebar-heading-group {
   display: none;
 }
 

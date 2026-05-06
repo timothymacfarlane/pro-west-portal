@@ -45,17 +45,14 @@ function App() {
 const { isAdmin, user, profile, displayName } = useAuth();
 
 const sidebarUserName =
-  [
-    profile?.first_name || profile?.firstName,
-    profile?.last_name || profile?.lastName || profile?.surname,
-  ]
+  profile?.display_name ||
+  displayName ||
+  profile?.full_name ||
+  [profile?.first_name, profile?.last_name]
     .filter(Boolean)
     .join(" ")
     .trim() ||
-  profile?.full_name ||
-  profile?.fullName ||
-  profile?.display_name ||
-  displayName ||
+  user?.email ||
   "";
 
  const isAuthPage = ["/login", "/reset-password"].includes(location.pathname);
@@ -195,16 +192,11 @@ const handleLogout = async () => {
                 {sidebarCollapsed ? "»" : "«"}
               </button>
 
-              {!sidebarCollapsed && (
-                <>
-                  <h2 className="sidebar-title">Pages</h2>
-                  {sidebarUserName && (
-                    <div className="sidebar-user-name" title={sidebarUserName}>
-                      {sidebarUserName}
-                    </div>
-                  )}
-                </>
-              )}
+              <div className="sidebar-heading-group">
+                <div className="sidebar-user-heading">
+                  {sidebarUserName || "Signed in"}
+                </div>
+              </div>
 
               <ul className="nav-list">
                 <li>
