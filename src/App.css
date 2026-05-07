@@ -4567,7 +4567,7 @@ body,
 
 @media (max-width: 900px) {
   .maps-rightpanel .panel-content {
-    padding-bottom: calc(110px + env(safe-area-inset-bottom)) !important;
+    padding-bottom: calc(70px + env(safe-area-inset-bottom)) !important;
   }
 }
 
