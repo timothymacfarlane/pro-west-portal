@@ -56,6 +56,7 @@ const sidebarUserName =
   "";
 
  const isAuthPage = ["/login", "/reset-password"].includes(location.pathname);
+ const isMapsPage = location.pathname === "/maps";
 
   const toggleSidebar = () => {
     // Desktop collapse toggle (existing behaviour)
@@ -162,7 +163,7 @@ const handleLogout = async () => {
       </header>
 
       {/* ---------- LAYOUT WRAPPER ---------- */}
-      <div className="app-layout">
+      <div className={`app-layout ${isMapsPage ? "app-layout-maps" : ""}`}>
         {/* ---------- SIDEBAR (DESKTOP + MOBILE) ---------- */}
         {!isAuthPage && (
           <>
@@ -412,7 +413,7 @@ const handleLogout = async () => {
         )}
 
         {/* ---------- MAIN CONTENT ---------- */}
-<main className="main-content">
+<main className={`main-content ${isMapsPage ? "main-content-maps" : ""}`}>
   <Suspense fallback={<div className="page-loading">Loading portal...</div>}>
     <Routes>
       <Route path="/login" element={<Login />} />

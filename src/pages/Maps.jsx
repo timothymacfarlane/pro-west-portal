@@ -5402,6 +5402,34 @@ useEffect(() => {
   }
 }, [isAppVisible]);
 
+useEffect(() => {
+  const node = mapDivRef.current;
+  if (!node) return;
+
+  let frame = null;
+  const resizeMap = () => {
+    if (frame) cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => {
+      const map = mapRef.current;
+      if (!map || !window.google?.maps) return;
+      window.google.maps.event.trigger(map, "resize");
+    });
+  };
+
+  const observer =
+    typeof ResizeObserver !== "undefined" ? new ResizeObserver(resizeMap) : null;
+
+  observer?.observe(node);
+  window.addEventListener("resize", resizeMap);
+  resizeMap();
+
+  return () => {
+    if (frame) cancelAnimationFrame(frame);
+    observer?.disconnect();
+    window.removeEventListener("resize", resizeMap);
+  };
+}, []);
+
 return (
     <div className="maps-fullscreen">
       <div className="maps-topbar" style={{ height: TOP_BAR_HEIGHT }}>
@@ -5411,11 +5439,8 @@ return (
             Search jobs or any street address, zoom, and navigate
           </span>
         </div>
-        <a href="/" className="maps-back-link">
-          ← Back to Portal
-        </a>
 
-<button
+	<button
   type="button"
   className="maps-header-menu-btn"
   onClick={toggleMapsDrawer}
@@ -5430,7 +5455,6 @@ return (
       <div
         className="maps-mapwrap"
         style={{
-          height: `calc(100vh - ${TOP_BAR_HEIGHT}px)`,
           position: "relative",
         }}
       >
