@@ -171,6 +171,20 @@ const WCORP_002_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer/20/query"; // Water Pipes (WCORP-002)
 const WCORP_006_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer/0/query"; // Water Meters (WCORP-006)  
+const WP_034_QUERY =
+  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/8/query"; // Distribution Underground Cables (WP-034)
+const WP_031_QUERY =
+  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/10/query"; // Distribution Overhead Powerlines (WP-031)
+const WP_029_QUERY =
+  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/2/query"; // Distribution Poles (WP-029)
+const WP_035_QUERY =
+  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/9/query"; // Transmission Underground Cable (WP-035)
+const WP_032_QUERY =
+  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/11/query"; // Transmission Overhead Powerlines (WP-032)
+const WP_030_QUERY =
+  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/1/query"; // Transmission Pole (WP-030)
+const WP_051_QUERY =
+  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/NCMT_Public_Secure_Services/MapServer/2/query"; // NCMT High Voltage Overhead Transmission Lines (WP-051)
 
 
   // ---- Speed knobs ----
@@ -4249,6 +4263,13 @@ if (pointSets.length) {
       const hasSewerPressure = prev.some((l) => l.id === "sewer083");
       const hasWaterPipes = prev.some((l) => l.id === "water002");
       const hasWaterMeters = prev.some((l) => l.id === "water006");
+      const hasPowerDistUnderground = prev.some((l) => l.id === "power034");
+      const hasPowerDistOverhead = prev.some((l) => l.id === "power031");
+      const hasPowerDistPoles = prev.some((l) => l.id === "power029");
+      const hasPowerTransmissionUnderground = prev.some((l) => l.id === "power035");
+      const hasPowerTransmissionOverhead = prev.some((l) => l.id === "power032");
+      const hasPowerTransmissionPoles = prev.some((l) => l.id === "power030");
+      const hasPowerNcmt = prev.some((l) => l.id === "power051");
       const next = [...prev];
 
     if (!hasSSM)
@@ -4432,6 +4453,249 @@ exportFieldOrder: [
 ],
     },
   });
+
+if (!hasPowerDistUnderground)
+  next.push({
+    id: "power034",
+    name: "Distribution Underground Cables (WP-034)",
+    type: "line",
+    visible: false,
+    data: {
+      url: WP_034_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      exportable: true,
+      exportFormats: ["dxf"],
+      dxfLabelFields: [],
+      outputLayerName: "Distribution_Underground_Cables",
+      style: {
+        clickable: false,
+        strokeColor: "#d32f2f",
+        strokeWeight: 3,
+        strokeOpacity: 0,
+        icons: [
+          {
+            icon: {
+              path: "M 0,-1 0,1",
+              strokeColor: "#d32f2f",
+              strokeOpacity: 1,
+              scale: 3,
+            },
+            offset: "0",
+            repeat: "20px",
+          },
+        ],
+      },
+    },
+  });
+
+if (!hasPowerDistOverhead)
+  next.push({
+    id: "power031",
+    name: "Distribution Overhead Powerlines (WP-031)",
+    type: "line",
+    visible: false,
+    data: {
+      url: WP_031_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      exportable: true,
+      exportFormats: ["dxf"],
+      dxfLabelFields: [],
+      outputLayerName: "Distribution_Overhead_Powerlines",
+      style: {
+        clickable: false,
+        strokeColor: "#d32f2f",
+        strokeWeight: 3,
+        strokeOpacity: 0.65,
+      },
+    },
+  });
+
+if (!hasPowerDistPoles)
+  next.push({
+    id: "power029",
+    name: "Distribution Poles (WP-029)",
+    type: "point",
+    visible: false,
+    data: {
+      url: WP_029_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      symbol: {
+        path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
+        fillColor: "#d32f2f",
+        fillOpacity: 1,
+        strokeColor: "#ffffff",
+        strokeWeight: 1.5,
+        scale: 4.5,
+      },
+      layerTag: "POWER POLE",
+      exportable: true,
+      exportFormats: ["csv", "dxf"],
+      idFields: ["assetid", "asset_id", "poleid", "pole_id", "objectid", "OBJECTID", "fid"],
+      nameFields: ["assetid", "asset_id", "poleid", "pole_id", "objectid", "OBJECTID"],
+      zFields: [],
+      dxfLabelFields: ["assetid", "asset_id", "poleid", "pole_id"],
+      exportFieldOrder: ["assetid", "asset_id", "poleid", "pole_id", "objectid", "OBJECTID", "fid"],
+      label: null,
+      filterFn: (feature) => !isDestroyed(feature?.properties || {}),
+      popupBuilder: ({ props }) => {
+        const id =
+          props?.assetid ||
+          props?.asset_id ||
+          props?.poleid ||
+          props?.pole_id ||
+          props?.objectid ||
+          props?.OBJECTID;
+
+        return `
+          <div style="min-width:160px; font-family:Inter,sans-serif; font-size:13px;">
+            <div style="font-weight:800; margin-bottom:6px;">Distribution Pole</div>
+            <div><b>ID:</b> ${id ?? "-"}</div>
+          </div>
+        `;
+      },
+      cluster: false,
+    },
+  });
+
+if (!hasPowerTransmissionUnderground)
+  next.push({
+    id: "power035",
+    name: "Transmission Underground Cable (WP-035)",
+    type: "line",
+    visible: false,
+    data: {
+      url: WP_035_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      exportable: true,
+      exportFormats: ["dxf"],
+      dxfLabelFields: [],
+      outputLayerName: "Transmission_Underground_Cable",
+      style: {
+        clickable: false,
+        strokeColor: "#f57c00",
+        strokeWeight: 3,
+        strokeOpacity: 0,
+        icons: [
+          {
+            icon: {
+              path: "M 0,-1 0,1",
+              strokeColor: "#f57c00",
+              strokeOpacity: 1,
+              scale: 3,
+            },
+            offset: "0",
+            repeat: "20px",
+          },
+        ],
+      },
+    },
+  });
+
+if (!hasPowerTransmissionOverhead)
+  next.push({
+    id: "power032",
+    name: "Transmission Overhead Powerlines (WP-032)",
+    type: "line",
+    visible: false,
+    data: {
+      url: WP_032_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      exportable: true,
+      exportFormats: ["dxf"],
+      dxfLabelFields: [],
+      outputLayerName: "Transmission_Overhead_Powerlines",
+      style: {
+        clickable: false,
+        strokeColor: "#f57c00",
+        strokeWeight: 3,
+        strokeOpacity: 0.65,
+      },
+    },
+  });
+
+if (!hasPowerTransmissionPoles)
+  next.push({
+    id: "power030",
+    name: "Transmission Pole (WP-030)",
+    type: "point",
+    visible: false,
+    data: {
+      url: WP_030_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      symbol: {
+        path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
+        fillColor: "#f57c00",
+        fillOpacity: 1,
+        strokeColor: "#ffffff",
+        strokeWeight: 1.5,
+        scale: 4.5,
+      },
+      layerTag: "TRANSMISSION POLE",
+      exportable: true,
+      exportFormats: ["csv", "dxf"],
+      idFields: ["assetid", "asset_id", "poleid", "pole_id", "objectid", "OBJECTID", "fid"],
+      nameFields: ["assetid", "asset_id", "poleid", "pole_id", "objectid", "OBJECTID"],
+      zFields: [],
+      dxfLabelFields: ["assetid", "asset_id", "poleid", "pole_id"],
+      exportFieldOrder: ["assetid", "asset_id", "poleid", "pole_id", "objectid", "OBJECTID", "fid"],
+      label: null,
+      filterFn: (feature) => !isDestroyed(feature?.properties || {}),
+      popupBuilder: ({ props }) => {
+        const id =
+          props?.assetid ||
+          props?.asset_id ||
+          props?.poleid ||
+          props?.pole_id ||
+          props?.objectid ||
+          props?.OBJECTID;
+
+        return `
+          <div style="min-width:160px; font-family:Inter,sans-serif; font-size:13px;">
+            <div style="font-weight:800; margin-bottom:6px;">Transmission Pole</div>
+            <div><b>ID:</b> ${id ?? "-"}</div>
+          </div>
+        `;
+      },
+      cluster: false,
+    },
+  });
+
+if (!hasPowerNcmt)
+  next.push({
+    id: "power051",
+    name: "NCMT High Voltage Overhead Transmission Lines (WP-051)",
+    type: "line",
+    visible: false,
+    data: {
+      url: WP_051_QUERY,
+      where: "1=1",
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      exportable: true,
+      exportFormats: ["dxf"],
+      dxfLabelFields: [],
+      outputLayerName: "NCMT_High_Voltage_Overhead_Transmission_Lines",
+      style: {
+        clickable: false,
+        strokeColor: "#795548",
+        strokeWeight: 3,
+        strokeOpacity: 0.7,
+      },
+    },
+  });
+
   if (!hasSewerMh)
   next.push({
     id: "sewer026",
@@ -6246,8 +6510,34 @@ onBlur={() => {
 <div className="maps-layer-section">
   <div className="maps-layer-section-title">Services</div>
   <div className="layers-list">
+{/* Power */}
+<div className="layer-subheading">Power</div>
+{[
+  "power034",
+  "power031",
+  "power029",
+  "power035",
+  "power032",
+  "power030",
+  "power051",
+]
+  .map((id) => layers.find((l) => l.id === id))
+  .filter(Boolean)
+  .map((l) => (
+    <div key={l.id} className="layer-row layer-row-compact">
+      <label className="layer-left">
+        <input
+          type="checkbox"
+          checked={l.visible}
+          onChange={() => toggleLayer(l.id)}
+        />
+        <span className="layer-name">{l.name}</span>
+      </label>
+    </div>
+  ))}
+
 {/* Sewer */}
-<div className="layer-subheading">Sewer</div>
+<div className="layer-subheading" style={{ marginTop: 8 }}>Sewer</div>
 {["sewer026", "sewer068", "sewer083", "sewer084"]
   .map((id) => layers.find((l) => l.id === id))
   .filter(Boolean)
@@ -6611,6 +6901,97 @@ title={
                       <div className="maps-legend-sub">LGATE-199 (cross)</div>
                     </div>
                   </div>
+
+<div className="maps-legend-row">
+  <span
+    className="maps-legend-line"
+    style={{ background: "transparent", borderTop: "3px dashed #d32f2f", height: 0 }}
+  />
+  <div>
+    <div className="maps-legend-title">Distribution Underground Cables</div>
+    <div className="maps-legend-sub">WP-034 (red dashed line)</div>
+  </div>
+</div>
+
+<div className="maps-legend-row">
+  <span
+    className="maps-legend-line"
+    style={{ background: "#d32f2f", height: 3 }}
+  />
+  <div>
+    <div className="maps-legend-title">Distribution Overhead Powerlines</div>
+    <div className="maps-legend-sub">WP-031 (red line)</div>
+  </div>
+</div>
+
+<div className="maps-legend-row">
+  <span
+    className="maps-legend-swatch"
+    style={{
+      display: "inline-block",
+      width: 10,
+      height: 10,
+      borderRadius: "50%",
+      background: "#d32f2f",
+      border: "1.5px solid #ffffff",
+    }}
+  />
+  <div>
+    <div className="maps-legend-title">Distribution Poles</div>
+    <div className="maps-legend-sub">WP-029 (red point)</div>
+  </div>
+</div>
+
+<div className="maps-legend-row">
+  <span
+    className="maps-legend-line"
+    style={{ background: "transparent", borderTop: "3px dashed #f57c00", height: 0 }}
+  />
+  <div>
+    <div className="maps-legend-title">Transmission Underground Cable</div>
+    <div className="maps-legend-sub">WP-035 (orange dashed line)</div>
+  </div>
+</div>
+
+<div className="maps-legend-row">
+  <span
+    className="maps-legend-line"
+    style={{ background: "#f57c00", height: 3 }}
+  />
+  <div>
+    <div className="maps-legend-title">Transmission Overhead Powerlines</div>
+    <div className="maps-legend-sub">WP-032 (orange line)</div>
+  </div>
+</div>
+
+<div className="maps-legend-row">
+  <span
+    className="maps-legend-swatch"
+    style={{
+      display: "inline-block",
+      width: 10,
+      height: 10,
+      borderRadius: "50%",
+      background: "#f57c00",
+      border: "1.5px solid #ffffff",
+    }}
+  />
+  <div>
+    <div className="maps-legend-title">Transmission Pole</div>
+    <div className="maps-legend-sub">WP-030 (orange point)</div>
+  </div>
+</div>
+
+<div className="maps-legend-row">
+  <span
+    className="maps-legend-line"
+    style={{ background: "#795548", height: 3 }}
+  />
+  <div>
+    <div className="maps-legend-title">NCMT High Voltage Overhead Transmission Lines</div>
+    <div className="maps-legend-sub">WP-051 (brown line)</div>
+  </div>
+</div>
 
                   <div className="maps-legend-row">
   <span
