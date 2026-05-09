@@ -3,6 +3,7 @@ import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 import { supabase } from "../lib/supabaseClient.js";
+import { cleanDisplayAddress } from "../lib/displayFormatters.js";
 import { useNavigate, useLocation } from "react-router-dom";
 
 import proj4 from "proj4";
@@ -193,7 +194,7 @@ function addressSummaryFromRow(r) {
     [r?.street_number, r?.street_name, r?.suburb].filter(Boolean).join(" ").trim() ||
     (r?.suburb || "").trim() ||
     "—";
-  return a;
+  return cleanDisplayAddress(a) || "—";
 }
 
 function jobClientText(row) {
@@ -3624,7 +3625,7 @@ useEffect(() => {
   </div>
 
   <div className="contacts-suggestion-role">
-    {`${safeText(j.address)}${jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}`}
+    {`${safeText(cleanDisplayAddress(j.address))}${jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}`}
   </div>
 
   {jobClientText(j) && (
@@ -3760,7 +3761,7 @@ onClick={() => {
   </div>
 
   <div className="contacts-suggestion-role">
-    {`${safeText(j.address)}${jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}`}
+    {`${safeText(cleanDisplayAddress(j.address))}${jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}`}
   </div>
 
   {jobClientText(j) && (
@@ -3974,8 +3975,8 @@ onClick={() => {
                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
   {jobClientDisplayLiveFirst(r)}
 </td>
-                  <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", minWidth: 260 }}>
-  {stripAustralia(r.full_address) || "—"}
+<td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", minWidth: 260 }}>
+  {cleanDisplayAddress(r.full_address) || "—"}
 </td>
 <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
   {jobLotPlanRegisterText(r)}
@@ -4294,7 +4295,7 @@ onClick={() => {
 <div style={{ gridColumn: "1 / -1" }}>
   <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Address</div>
   <div style={{ marginTop: 4 }}>
-    {stripAustralia(selected.full_address) || addressSummaryFromRow(selected)}
+    {cleanDisplayAddress(selected.full_address) || addressSummaryFromRow(selected)}
   </div>
   <div style={{ marginTop: 6 }}><b>Lot / Plan:</b> {jobLotPlanSummaryText(selected)}</div>
   <div style={{ marginTop: 4 }}><b>LGA:</b> {selected.local_authority || "—"}</div>

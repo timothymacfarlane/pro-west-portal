@@ -3,6 +3,7 @@ import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 import { supabase } from "../lib/supabaseClient";
+import { cleanDisplayAddress } from "../lib/displayFormatters.js";
 
 // --- Statuses & colours ---
 const STATUSES = ["FIELD", "OFFICE", "AWAY", "LEAVE", "COURSE", "HOLD", "NON-WORK"];
@@ -965,7 +966,7 @@ const handleJobKeyDown = (e) => {
           <div style={{ fontWeight: 600 }}>{job.job_number}</div>
           {job.full_address && (
             <div style={{ fontSize: "0.75rem", opacity: 0.75 }}>
-              {job.full_address}
+              {cleanDisplayAddress(job.full_address)}
             </div>
           )}
         </button>

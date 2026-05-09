@@ -3,6 +3,7 @@ import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 import { supabase } from "../lib/supabaseClient";
+import { cleanDisplayAddress } from "../lib/displayFormatters.js";
 
 // ---------- Date helpers ----------
 function getMonday(date) {
@@ -781,7 +782,7 @@ function addressSummaryFromRow(r) {
     [r?.street_number, r?.street_name, r?.suburb].filter(Boolean).join(" ").trim() ||
     (r?.suburb || "").trim() ||
     "—";
-  return a;
+  return cleanDisplayAddress(a) || "—";
 }
 
 function jobLotPlanText(row) {
@@ -3056,7 +3057,7 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
     </div>
 
     <div style={{ marginBottom: "0.2rem" }}>
-      {`${safeText(addressSummaryFromRow(jobMeta))}${jobLotPlanText(jobMeta) ? ` ${jobLotPlanText(jobMeta)}` : ""}`}
+      {`${safeText(cleanDisplayAddress(addressSummaryFromRow(jobMeta)))}${jobLotPlanText(jobMeta) ? ` ${jobLotPlanText(jobMeta)}` : ""}`}
     </div>
 
     {jobClientText(jobMeta) && (
@@ -3234,7 +3235,7 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
   <div className="contacts-suggestion-role">
     {job.isNotesOnly
       ? "Notes Only"
-      : `${safeText(job.address || job.full_address)}${jobLotPlanText(job) ? ` ${jobLotPlanText(job)}` : ""}`}
+      : `${safeText(cleanDisplayAddress(job.address || job.full_address))}${jobLotPlanText(job) ? ` ${jobLotPlanText(job)}` : ""}`}
   </div>
 
   {!job.isNotesOnly && jobClientText(job) && (

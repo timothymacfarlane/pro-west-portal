@@ -3,6 +3,7 @@ import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
+import { cleanDisplayAddress } from "../lib/displayFormatters.js";
 
 const STATUS_OPTIONS = ["In progress", "On hold", "Complete"];
 const PAGE_SIZE = 30;
@@ -13,7 +14,7 @@ function addressSummaryFromRow(r) {
     [r?.street_number, r?.street_name, r?.suburb].filter(Boolean).join(" ").trim() ||
     (r?.suburb || "").trim() ||
     "—";
-  return a;
+  return cleanDisplayAddress(a) || "—";
 }
 
 function formatDateAU(v) {

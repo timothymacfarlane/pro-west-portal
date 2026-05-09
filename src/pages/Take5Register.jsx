@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext.jsx";
+import { cleanDisplayAddress } from "../lib/displayFormatters.js";
 
 function addressSummaryFromRow(r) {
   const a =
@@ -9,7 +10,7 @@ function addressSummaryFromRow(r) {
     [r?.street_number, r?.street_name, r?.suburb].filter(Boolean).join(" ").trim() ||
     (r?.suburb || "").trim() ||
     "—";
-  return a;
+  return cleanDisplayAddress(a) || "—";
 }
 
 function Take5Register() {
@@ -332,7 +333,7 @@ className="maps-search-input"
             lineHeight: 1.35,
           }}
         >
-          {j.address}
+          {cleanDisplayAddress(j.address)}
         </div>
       </button>
     ))}
@@ -359,7 +360,7 @@ className="maps-search-input"
         ✓ Job #{selectedJob.job_number} selected
       </div>
       <div style={{ fontSize: "0.75rem", color: "#555" }}>
-        {selectedJob.address}
+        {cleanDisplayAddress(selectedJob.address)}
       </div>
     </div>
 

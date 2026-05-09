@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext.jsx";
+import { cleanDisplayAddress } from "../lib/displayFormatters.js";
 
 const yesNoOptions = ["Yes", "No"];
 const yesNaNoOptions = ["Yes", "NA", "No"]; // Yes | NA | No (NA in middle)
@@ -62,7 +63,7 @@ function computeRiskScore(lCode, cCode) {
 }
 
 function addressSummaryFromRow(r) {
-  let a =
+  const a =
     (r?.full_address || "").trim() ||
     [r?.street_number, r?.street_name, r?.suburb]
       .filter(Boolean)
@@ -71,10 +72,7 @@ function addressSummaryFromRow(r) {
     (r?.suburb || "").trim() ||
     "—";
 
-  // 🔥 Remove trailing ", Australia" (or " Australia")
-  a = a.replace(/,\s*Australia$/i, "").replace(/\s+Australia$/i, "");
-
-  return a;
+  return cleanDisplayAddress(a) || "—";
 }
 
 /**
@@ -1933,7 +1931,7 @@ appendImagePage("JHA Attachment", jhaDocNumber, compressedJhaImage);
             lineHeight: 1.35,
           }}
         >
-          {j.address}
+          {cleanDisplayAddress(j.address)}
         </div>
       </button>
     ))}
@@ -1962,7 +1960,7 @@ appendImagePage("JHA Attachment", jhaDocNumber, compressedJhaImage);
         ✓ Job #{selectedJob.job_number} selected
       </div>
       <div style={{ fontSize: "0.75rem", color: "#555" }}>
-        {selectedJob.address}
+        {cleanDisplayAddress(selectedJob.address)}
       </div>
     </div>
 

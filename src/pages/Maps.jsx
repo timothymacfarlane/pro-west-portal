@@ -15,6 +15,7 @@ import {
 } from "../lib/projections.js";
 import { supabase } from "../lib/supabaseClient.js";
 import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
+import { cleanDisplayAddress } from "../lib/displayFormatters.js";
 
 registerProjectionDefs();
 /**
@@ -297,6 +298,7 @@ function isDestroyed(props = {}) {
     allVals.includes("CANCEL") ||
     allVals.includes("DISCONTINU") ||
     allVals.includes("NOT FOUND") ||
+    allVals.includes("NOT LOCATED") ||
     allVals.includes("MISSING") ||
     allVals.includes("INVALID") ||
     allVals.includes("RETIRED") ||
@@ -350,7 +352,30 @@ function firstProp(props, keys) {
   return "";
 }
 
-function buildPopupRowsForExample(props = {}, nameOverride) {
+function hasPopupValue(value) {
+  return value !== undefined && value !== null && String(value).trim() !== "";
+}
+
+function formatReadableDate(value) {
+  if (!hasPopupValue(value)) return "";
+
+  const raw = String(value).trim();
+  const numeric = Number(raw);
+  const date =
+    Number.isFinite(numeric) && raw.length >= 10
+      ? new Date(numeric)
+      : new Date(raw);
+
+  if (Number.isNaN(date.getTime())) return raw;
+
+  return date.toLocaleDateString("en-AU", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function buildPopupRowsForExample(props = {}, nameOverride, layerTag = "") {
   const pointName =
     nameOverride ||
     props.geodetic_point_name ||
@@ -360,6 +385,7 @@ function buildPopupRowsForExample(props = {}, nameOverride) {
 
   const vertDatum = firstProp(props, ["vert_datum", "vertical_datum"]);
   const rl = firstProp(props, ["reduced_level", "reducedlevel", "height"]);
+  const vertAccuracy = firstProp(props, ["vert_accuracy"]);
 
   const mgaZone = firstProp(props, ["mga2020_zone", "zone"]);
   const mgaE = firstProp(props, ["mga2020_easting", "easting"]);
@@ -371,7 +397,8 @@ function buildPopupRowsForExample(props = {}, nameOverride) {
   const rows = [
     ["GEODETIC POINT NAME", pretty(pointName, 0)],
     ["VERT DATUM", pretty(vertDatum, 0)],
-    ["REDUCED LEVEL (m)", pretty(rl, 4)],
+    ["REDUCED LEVEL (m)", pretty(rl, 3)],
+    ["Vertical accuracy", pretty(vertAccuracy, 4)],
     ["PCG2020 EASTING (m)", pretty(pcgE, 3)],
     ["PCG2020 NORTHING (m)", pretty(pcgN, 3)],
     ["MGA2020 ZONE", pretty(mgaZone, 0)],
@@ -379,11 +406,23 @@ function buildPopupRowsForExample(props = {}, nameOverride) {
     ["MGA2020 NORTHING (m)", pretty(mgaN, 3)],
   ];
 
-  return rows.filter(([, v]) => v !== "");
+  if (layerTag === "SSM" || layerTag === "BM") {
+    const horizAccuracy = firstProp(props, ["horiz_accuracy"]);
+    const latestStatusDate = firstProp(props, ["latest_status_date"]);
+    const latestStatusDescription = firstProp(props, ["latest_status_description"]);
+
+    rows.push(
+      ["Relative horizontal accuracy", pretty(horizAccuracy, 4)],
+      ["Physical status date", formatReadableDate(latestStatusDate)],
+      ["Physical status", pretty(latestStatusDescription, 0)]
+    );
+  }
+
+  return rows.filter(([, v]) => hasPopupValue(v));
 }
 
 function buildPopupHtmlExample({ layerTag, name, props }) {
-  const rows = buildPopupRowsForExample(props, name);
+  const rows = buildPopupRowsForExample(props, name, layerTag);
   const isSummaryLayer = layerTag === "SSM" || layerTag === "BM";
   const directSummaryUrl = isSummaryLayer
     ? buildStationSummaryUrlFromProps(props)
@@ -2178,13 +2217,14 @@ if (!isWA) {
   const openAddressInfo = (addressString, position, marker) => {
   const map = mapRef.current;
   if (!map || !window.google) return;
+  const displayAddress = cleanDisplayAddress(addressString) || "—";
 
   const html = `
     <div style="font-family: Inter, system-ui, sans-serif; font-size: 13px; min-width: 250px;">
       <div data-pw-drag-handle="1" style="font-weight:900; font-size:14px; margin-bottom:6px; color:#111;">
         Address
       </div>
-      <div style="color:#111; margin-top:6px;">${addressString || "—"}</div>
+      <div style="color:#111; margin-top:6px;">${displayAddress}</div>
 
       <div style="display:flex; gap:8px; margin-top:10px;">
         <a href="${buildSearchUrl(addressString)}" target="_blank" rel="noreferrer"
@@ -2367,7 +2407,7 @@ function openMainInfoWindow({ html, marker, markerId, layerId }) {
     if (!map || !window.google) return;
 
     const safeClient = job.client_name || "—";
-    const safeAddr = job.full_address || "—";
+    const safeAddr = cleanDisplayAddress(job.full_address) || "—";
     const safeStatus = job.status || "Planned";
    
     const safeAssigned =
@@ -2435,7 +2475,7 @@ const safeLA =
   if (!map) return;
 
   const safeClient = job.client_name || "—";
-  const safeAddr = job.full_address || "—";
+  const safeAddr = cleanDisplayAddress(job.full_address) || "—";
   const safeJobType = job.job_type_legacy || "—";
 
   const html = `
@@ -2472,13 +2512,13 @@ const safeLA =
     let marker = portalMarkersByIdRef.current.get(id);
     if (!marker) {
  const safeClient = job.client_name || "—";
-const safeAddr = job.full_address || "—";
+const titleAddr = job.full_address || "—";
 const safeJobType = job.job_type_legacy || "—";
 
 marker = new window.google.maps.Marker({
   position: pt,
   map: null,
-  title: `Job #${job.job_number}\n${safeClient}\n${safeAddr}\nType: ${safeJobType}`,
+  title: `Job #${job.job_number}\n${safeClient}\n${titleAddr}\nType: ${safeJobType}`,
   optimized: true,
   icon: getPortalIcon("#d32f2f"),
 });
@@ -4806,7 +4846,7 @@ infoFields: [
           data: {
             url: LGATE_233_QUERY,
             where: "1=1",
-            minZoom: 0,
+            minZoom: 9,
             maxFeatures: MAX_FEATURES_PER_VIEW,
             style: {
               clickable: false,
@@ -4816,7 +4856,7 @@ infoFields: [
               fillOpacity: 0.25,
             },
 labels: {
-  minZoom: 8,
+  minZoom: 12,
   fields: ["name", "lga_name", "local_government_authority"],
   color: "#1b5e20",
   fontWeight: "800",
@@ -4824,6 +4864,10 @@ labels: {
   repeatAtZoom: 15,
   repeatOffset: { lat: 0.006, lng: 0.006 },
   repeatGrid: true,
+  maxLabels: 120,
+  mobileMinZoom: 15,
+  mobileMaxLabels: 35,
+  disableRepeatGridOnMobile: true,
 },
             exportable: true,
 exportFormats: ["dxf"],
@@ -5403,14 +5447,29 @@ const staleTimer = setInterval(() => {
 
           const labelCfg = layer.data?.labels;
           if (!labelCfg) continue;
-          if ((zoom ?? 0) < (labelCfg.minZoom ?? 999)) continue;
+          const isMobileDevice =
+            typeof window !== "undefined" && window.innerWidth <= 900;
+          const labelMinZoom =
+            isMobileDevice && Number.isFinite(labelCfg.mobileMinZoom)
+              ? labelCfg.mobileMinZoom
+              : labelCfg.minZoom ?? 999;
+          const maxLabels =
+            isMobileDevice && Number.isFinite(labelCfg.mobileMaxLabels)
+              ? labelCfg.mobileMaxLabels
+              : labelCfg.maxLabels ?? Infinity;
+          if ((zoom ?? 0) < labelMinZoom) continue;
+          if (maxLabels <= 0) continue;
 
           const nextLabels = [];
+          const polygonFeatures = [];
+          store.polygons.forEach((feature) => polygonFeatures.push(feature));
 
-          store.polygons.forEach((feature) => {
+          for (const feature of polygonFeatures) {
+            if (nextLabels.length >= maxLabels) break;
+
             const text = getPolygonLabelText(feature, labelCfg.fields || []);
             const center = getCentroidFromGoogleGeometry(feature.getGeometry(), googleMaps);
-            if (!center || !text) return;
+            if (!center || !text) continue;
 
             nextLabels.push(
               buildInvisibleLabelMarker({
@@ -5426,10 +5485,15 @@ const staleTimer = setInterval(() => {
                     : labelCfg.fontSize || "10px",
               })
             );
+            if (nextLabels.length >= maxLabels) break;
 
      
 
- if (labelCfg.repeatAtZoom && (zoom ?? 0) >= labelCfg.repeatAtZoom) {
+ if (
+  labelCfg.repeatAtZoom &&
+  (zoom ?? 0) >= labelCfg.repeatAtZoom &&
+  !(isMobileDevice && labelCfg.disableRepeatGridOnMobile)
+) {
   const latOffset = labelCfg.repeatOffset?.lat ?? 0;
   const lngOffset = labelCfg.repeatOffset?.lng ?? 0;
 
@@ -5462,6 +5526,8 @@ const staleTimer = setInterval(() => {
 
       for (let lat = sw.lat() + latOffset; lat < ne.lat(); lat += latOffset) {
         for (let lng = sw.lng() + lngOffset; lng < ne.lng(); lng += lngOffset) {
+          if (nextLabels.length >= maxLabels) break;
+
           const pos = new googleMaps.LatLng(lat, lng);
 
           if (
@@ -5484,9 +5550,12 @@ const staleTimer = setInterval(() => {
             );
           }
         }
+        if (nextLabels.length >= maxLabels) break;
       }
     }
   } else {
+    if (nextLabels.length >= maxLabels) continue;
+
     const pos = new googleMaps.LatLng(
       center.lat() + latOffset,
       center.lng() + lngOffset
@@ -5508,7 +5577,7 @@ const staleTimer = setInterval(() => {
     );
   }
 }
-          });
+          }
 
           store.labels = nextLabels;
         } catch (err) {
@@ -6401,7 +6470,7 @@ onBlur={() => {
                                 marginTop: 2,
                               }}
                             >
-                              {(job.client_name || "—") + " · " + (job.full_address || "—")}
+                              {(job.client_name || "—") + " · " + (cleanDisplayAddress(job.full_address) || "—")}
                             </div>
                           </button>
                         ))}
