@@ -4955,10 +4955,10 @@ labels: {
             style: () => ({
               clickable: true,
               cursor: infoModeRef.current ? "help" : "default",
-              strokeColor: "#c62828",
+              strokeColor: "#ef6c00",
               strokeWeight: 1.1,
               strokeOpacity: 0.75,
-              fillColor: "#ef5350",
+              fillColor: "#ff9800",
               fillOpacity: 0.16,
             }),
             labels: null,
@@ -7281,11 +7281,11 @@ title={
                   <div className="maps-legend-row">
                     <span
                       className="maps-legend-line"
-                      style={{ background: "#c62828", height: 2 }}
+                      style={{ background: "#ef6c00", height: 2 }}
                     />
                     <div>
                       <div className="maps-legend-title">Bush Fire Prone Areas</div>
-                      <div className="maps-legend-sub">OBRM-001 (red boundary, light red transparent fill)</div>
+                      <div className="maps-legend-sub">OBRM-001 (orange boundary, light orange transparent fill)</div>
                     </div>
                   </div>
 

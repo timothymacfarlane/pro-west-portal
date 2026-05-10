@@ -1931,11 +1931,11 @@ table {
     align-items: center;
     justify-content: center;
     flex: 0 0 42px;
-    width: 42px;
-    height: 42px;
-    min-width: 42px;
-    min-height: 42px;
-    border-radius: 999px;
+width: 42px;
+height: 42px;
+min-width: 42px;
+min-height: 42px;
+border-radius: 999px;
     border: 1px solid rgba(255, 255, 255, 0.62);
     background: rgba(255, 255, 255, 0.96);
     color: var(--pw-primary-dark);
@@ -4657,5 +4657,21 @@ body,
   .maps-tabs {
     margin-top: -8px !important;
     padding-top: 14px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .sidebar-toggle {
+    width: 28px !important;
+    height: 24px !important;
+    min-height: 24px !important;
+    max-height: 24px !important;
+
+    padding: 0 !important;
+    border-radius: 50% !important;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 }
