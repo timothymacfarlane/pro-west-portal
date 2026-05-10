@@ -158,6 +158,7 @@ const LGATE_233_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Boundaries/MapServer/14/query"; // LGA Boundaries (LGATE-233)
 const LGATE_234_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Boundaries/MapServer/16/query"; // Localities (LGATE-234)
+const OBRM_001_QUERY = "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Bush_Fire_Prone_Areas/MapServer/17/query"; // Bush Fire Prone Areas (OBRM-001)
   const DPLH_070_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Property_and_Planning/MapServer/111/query"; // R-Codes Zoning (DPLH-070)
 const WCORP_068_QUERY =
@@ -252,12 +253,13 @@ async function fetchArcgisGeojsonInView(url, bounds, where = "1=1") {
     t: Date.now().toString(),
   });
 
-  const res = await fetch(`${url}?${params.toString()}`);
+  const requestUrl = `${url}?${params.toString()}`;
+  const res = await fetch(requestUrl);
   const json = await res.json();
 
   if (json?.error) throw new Error(json.error.message || "ArcGIS query error");
 
-  return { type: "FeatureCollection", features: json?.features || [] };
+  return { type: "FeatureCollection", features: json?.features || [], requestUrl };
 }
 
 function isDestroyed(props = {}) {
@@ -1995,15 +1997,7 @@ const infoCloseListener = window.google.maps.event.addListener(infoWindowRef.cur
   if (!infoModeRef.current) return;
   if (!e?.latLng) return;
 
-  const html = buildMapInfoPopupHtml(e.latLng);
-
-  infoWindowRef.current?.setContent(html);
-  infoWindowRef.current?.setPosition(e.latLng);
-  infoWindowRef.current?.open({ map });
-
-  window.google.maps.event.addListenerOnce(infoWindowRef.current, "domready", () => {
-    setTimeout(makeLatestInfoWindowDraggable, 0);
-  });
+  openMapInfoPopupAtLatLng(e.latLng);
 });
  
     // Persist view/type on idle + tick
@@ -2408,12 +2402,36 @@ const rows = infoFields
   `;
 }
 
+function openMapInfoPopupAtLatLng(latLng) {
+  const map = mapRef.current;
+  if (!map || !latLng) return;
+
+  const html = buildMapInfoPopupHtml(latLng);
+
+  infoWindowRef.current?.setContent(html);
+  infoWindowRef.current?.setPosition(latLng);
+  infoWindowRef.current?.open({ map });
+
+  window.google.maps.event.addListenerOnce(infoWindowRef.current, "domready", () => {
+    setTimeout(makeLatestInfoWindowDraggable, 0);
+  });
+}
+
+function refreshBushfireLayerStyle() {
+  const store = polygonLayersRef.current.get("bushfire001");
+  const layer = (layersRef.current || []).find((l) => l.id === "bushfire001");
+  if (!store?.polygons || !layer?.data?.style) return;
+
+  store.polygons.setStyle(layer.data.style);
+}
+
 function stopInfoMode() {
   infoModeRef.current = false;
   setInfoMode(false);
 
   try {
     mapRef.current?.setOptions({ draggableCursor: null });
+    refreshBushfireLayerStyle();
   } catch {
     // ignore
   }
@@ -2430,6 +2448,7 @@ function toggleInfoMode() {
 
   try {
     mapRef.current?.setOptions({ draggableCursor: next ? "help" : null });
+    refreshBushfireLayerStyle();
   } catch {
     // ignore
   }
@@ -4304,6 +4323,7 @@ if (pointSets.length) {
       const hasCad = prev.some((l) => l.id === "cad001");
       const hasLGA = prev.some((l) => l.id === "lga233");
       const hasLocalities = prev.some((l) => l.id === "localities234");
+      const hasBushfire = prev.some((l) => l.id === "bushfire001");
       const hasZoning = prev.some((l) => l.id === "zoning070");
       const hasSewer = prev.some((l) => l.id === "sewer068");
       const hasSewerMh = prev.some((l) => l.id === "sewer026");
@@ -4921,6 +4941,36 @@ labels: {
       ],
     },
   });
+      if (!hasBushfire)
+        next.push({
+          id: "bushfire001",
+          name: "Bush Fire Prone Areas (OBRM-001)",
+          type: "polygon",
+          visible: false,
+          data: {
+            url: OBRM_001_QUERY,
+            where: "1=1",
+            minZoom: 8,
+            maxFeatures: MAX_FEATURES_PER_VIEW,
+            style: () => ({
+              clickable: true,
+              cursor: infoModeRef.current ? "help" : "default",
+              strokeColor: "#c62828",
+              strokeWeight: 1.1,
+              strokeOpacity: 0.75,
+              fillColor: "#ef5350",
+              fillOpacity: 0.16,
+            }),
+            labels: null,
+            exportable: true,
+            exportFormats: ["dxf"],
+            dxfLabelFields: ["designation"],
+            outputLayerName: "Bush_Fire_Prone_Areas",
+            infoFields: [
+              { key: "designation", label: "Bush fire prone classification" },
+            ],
+          },
+        });
       if (!hasZoning)
         next.push({
           id: "zoning070",
@@ -5399,6 +5449,13 @@ const staleTimer = setInterval(() => {
           labels: [],
         };
 
+        if (layer.id === "bushfire001") {
+          polygons.addListener("click", (e) => {
+            if (!infoModeRef.current) return;
+            openMapInfoPopupAtLatLng(e?.latLng);
+          });
+        }
+
         polygonLayersRef.current.set(layer.id, store);
       } else {
         store.polygons.setMap(map);
@@ -5453,6 +5510,16 @@ const staleTimer = setInterval(() => {
             layer.data.where || "1=1"
           );
           if (cancelled) return;
+
+          if (layer.id === "bushfire001") {
+            const firstFeature = geojson.features?.[0];
+            console.log("Bush Fire layer fetch", {
+              requestUrl: geojson.requestUrl || layer.data.url,
+              featureCount: geojson.features?.length || 0,
+              firstFeatureAttributes: firstFeature?.properties || null,
+              firstFeatureHasGeometry: !!firstFeature?.geometry,
+            });
+          }
 
           const maxFeatures = layer.data?.maxFeatures ?? MAX_FEATURES_PER_VIEW;
           if ((geojson.features?.length || 0) > maxFeatures) {
@@ -6718,7 +6785,7 @@ onBlur={() => {
   <div className="maps-layer-section-title">Planning</div>
   <div className="layers-list">
     {layers
-      .filter((l) => l.id === "zoning070")
+      .filter((l) => ["bushfire001", "zoning070"].includes(l.id))
       .map((l) => (
         <div key={l.id} className="layer-row layer-row-compact">
           <label className="layer-left">
@@ -7212,15 +7279,26 @@ title={
   </div>
 </div>
                   <div className="maps-legend-row">
-  <span
-    className="maps-legend-line"
-    style={{ background: "#c62828", height: 2 }}
-  />
-  <div>
-    <div className="maps-legend-title">R-Codes Zoning</div>
-    <div className="maps-legend-sub">DPLH-070 (red boundary, light red fill + zoning labels)</div>
-  </div>
-</div>
+                    <span
+                      className="maps-legend-line"
+                      style={{ background: "#c62828", height: 2 }}
+                    />
+                    <div>
+                      <div className="maps-legend-title">Bush Fire Prone Areas</div>
+                      <div className="maps-legend-sub">OBRM-001 (red boundary, light red transparent fill)</div>
+                    </div>
+                  </div>
+
+                  <div className="maps-legend-row">
+                    <span
+                      className="maps-legend-line"
+                      style={{ background: "#c62828", height: 2 }}
+                    />
+                    <div>
+                      <div className="maps-legend-title">R-Codes Zoning</div>
+                      <div className="maps-legend-sub">DPLH-070 (red boundary, light red fill + zoning labels)</div>
+                    </div>
+                  </div>
 
                   <div className="maps-legend-row">
                     <span

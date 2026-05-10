@@ -44,22 +44,25 @@
 }
 
 .logo-mark {
-  width: 42px;
-  height: 42px;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
   border-radius: 50%;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.15); /* soft frosted effect */
+  background: rgba(255, 255, 255, 0.94);
   display: flex;
   align-items: center;
   justify-content: center;
-  border: none; /* removes the orange border completely */
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
 }
 
 .logo-img {
-  width: 100%;
-  height: 100%;
+  width: 92%;
+  height: 92%;
   object-fit: contain;
   display: block;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.12));
 }
 
 .header-text h1 {
@@ -1879,6 +1882,13 @@ table {
   .header-text h1 { font-size: 1.1rem; }
   .header-text p { font-size: 0.8rem; }
 
+  .logo-mark {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+    box-shadow: 0 5px 14px rgba(0, 0, 0, 0.2);
+  }
+
   /* LAYOUT */
   .app-layout {
     position: relative;
@@ -1920,13 +1930,39 @@ table {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 38px;
-    height: 38px;
-    border-radius: 50%;
-    background: #ffffff;
-    font-size: 1.3rem;
-    border: none;
+    flex: 0 0 42px;
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+    min-height: 42px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.62);
+    background: rgba(255, 255, 255, 0.96);
+    color: var(--pw-primary-dark);
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
     cursor: pointer;
+    font-size: 1.28rem;
+    font-weight: 900;
+    line-height: 1;
+    transform: translateZ(0);
+    transition:
+      background-color 0.16s ease,
+      box-shadow 0.16s ease,
+      transform 0.12s ease,
+      border-color 0.16s ease;
+  }
+
+  .mobile-hamburger:hover,
+  .mobile-hamburger:focus-visible {
+    background: #fff;
+    border-color: rgba(183, 28, 28, 0.22);
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.22);
+  }
+
+  .mobile-hamburger:active {
+    transform: translateY(1px) scale(0.96);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
+    background: #fff6f6;
   }
 
   /* NAV ITEMS */

@@ -17,6 +17,7 @@ const TABLES = [
   "job_reassign_log",
   "jobs_legacy_raw",
   "notifications",
+  "shopping_list_items",
   "take5_submissions",
   "timesheet_locks",
   "vehicle_prestart_submissions",

@@ -23,12 +23,14 @@ const [surveyorMode, setSurveyorMode] = useState("__my__"); // __my__ | __all__ 
   const [pdfMap, setPdfMap] = useState({}); // { [rowId]: signedUrl }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // ✅ Job filter with autosuggest (same approach as Jobs.jsx / Take5.jsx)
  const [jobFilter, setJobFilter] = useState("");
 const [selectedJob, setSelectedJob] = useState(null);
 const [jobFilterSuggestions, setJobFilterSuggestions] = useState([]);
 const [jobFilterLoading, setJobFilterLoading] = useState(false);
+const [dateFilter, setDateFilter] = useState("");
 const debounceJobFilterRef = useRef(null);
 
 const selectedSurveyor = useMemo(() => {
@@ -41,8 +43,6 @@ const surveyorDropdownOptions = useMemo(() => {
   const list = (staff || []).map((p) => p.name).filter(Boolean);
   return Array.from(new Set(list)).sort((a, b) => a.localeCompare(b));
 }, [staff]);
-
-  const [expandedJobs, setExpandedJobs] = useState({}); // { [jobNumber]: bool }
 
  useEffect(() => {
   if (!user) return;
@@ -116,8 +116,7 @@ const surveyorDropdownOptions = useMemo(() => {
     return () => debounceJobFilterRef.current && clearTimeout(debounceJobFilterRef.current);
   }, [jobFilter, runJobFilterSuggest]);
 
-  useEffect(() => {
-    const fetchData = async () => {
+  const fetchData = useCallback(async () => {
       setLoading(true);
       setError("");
       setPdfMap({});
@@ -133,6 +132,16 @@ const surveyorDropdownOptions = useMemo(() => {
         if (jobFilter.trim()) {
           // keep your existing flexible filter behaviour
           query = query.ilike("job_number", `%${jobFilter.trim()}%`);
+        }
+
+        if (dateFilter) {
+          const start = new Date(`${dateFilter}T00:00:00`);
+          const end = new Date(start);
+          end.setDate(end.getDate() + 1);
+
+          query = query
+            .gte("created_at", start.toISOString())
+            .lt("created_at", end.toISOString());
         }
 
 if (selectedSurveyor !== "__all__") {
@@ -179,34 +188,26 @@ if (selectedSurveyor !== "__all__") {
       } finally {
         setLoading(false);
       }
-    };
+    }, [jobFilter, selectedSurveyor, dateFilter]);
 
+  useEffect(() => {
     fetchData();
-  }, [jobFilter, selectedSurveyor]);
+  }, [fetchData, refreshKey]);
 
-  // Group rows by job number (so PDFs sit under job number)
-  const groupedByJob = useMemo(() => {
-    const groups = {};
-    rows.forEach((r) => {
-      const job = r.job_number || "Unknown Job";
-      if (!groups[job]) groups[job] = [];
-      groups[job].push(r);
-    });
-    return groups;
-  }, [rows]);
+  const handleRefresh = useCallback(() => {
+    if (debounceJobFilterRef.current) {
+      clearTimeout(debounceJobFilterRef.current);
+      debounceJobFilterRef.current = null;
+    }
 
-const expandSelectedJob = (jobNumber) => {
-  if (!jobNumber) return;
-
-  setExpandedJobs((prev) => ({
-    ...prev,
-    [String(jobNumber)]: true,
-  }));
-};
-
-  const toggleJob = (job) => {
-    setExpandedJobs((prev) => ({ ...prev, [job]: !prev[job] }));
-  };
+    setJobFilter("");
+    setSelectedJob(null);
+    setJobFilterSuggestions([]);
+    setJobFilterLoading(false);
+    setDateFilter("");
+    setSurveyorMode("__my__");
+    setRefreshKey((key) => key + 1);
+  }, []);
 
   return (
     <PageLayout
@@ -214,11 +215,22 @@ const expandSelectedJob = (jobNumber) => {
       icon="📋"
       title="Take 5 Register"
       subtitle="List of submitted Take 5s with links to PDFs"
+      actions={
+        <button
+          className="btn-pill"
+          type="button"
+          onClick={handleRefresh}
+          disabled={loading}
+          title="Refresh Take 5 register"
+        >
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
+      }
     >
       <div className="card">
         <h3 className="card-title">Filter</h3>
         <p className="card-subtitle">
-          Filter by job number and surveyor. Defaults to your Take 5s.
+          Filter by job number, surveyor, and submission date. Defaults to your Take 5s.
         </p>
 
         <div className="card-row" style={{ marginTop: "0.4rem", alignItems: "flex-start" }}>
@@ -246,12 +258,11 @@ onKeyDown={(e) => {
       (j) => String(j.job_number) === String(jobFilter).trim()
     );
 
-    if (matched) {
+  if (matched) {
   const selectedJobNumber = String(matched.job_number);
 
   setSelectedJob(matched);
   setJobFilter(selectedJobNumber);
-  expandSelectedJob(selectedJobNumber);
 }
 
     setJobFilterSuggestions([]);
@@ -292,7 +303,6 @@ className="maps-search-input"
   setJobFilter(selectedJobNumber);
   setSelectedJob(j);
   setJobFilterSuggestions([]);
-  expandSelectedJob(selectedJobNumber);
 }}
         style={{
           width: "100%",
@@ -382,6 +392,32 @@ className="maps-search-input"
           </div>
         </div>
         <div className="card-row" style={{ marginTop: "0.6rem" }}>
+  <span className="card-row-label">Date</span>
+
+  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+    <input
+      type="date"
+      className="maps-search-input"
+      aria-label="Filter by submission date"
+      value={dateFilter}
+      onChange={(e) => setDateFilter(e.target.value)}
+      disabled={loading}
+      style={{ maxWidth: "180px" }}
+    />
+    {dateFilter && (
+      <button
+        type="button"
+        className="btn-pill"
+        onClick={() => setDateFilter("")}
+        disabled={loading}
+        style={{ fontSize: "0.75rem", padding: "0.2rem 0.6rem" }}
+      >
+        Clear date
+      </button>
+    )}
+  </div>
+</div>
+<div className="card-row" style={{ marginTop: "0.6rem" }}>
   <span className="card-row-label">Surveyor</span>
 
   <select
@@ -391,7 +427,6 @@ className="maps-search-input"
     value={surveyorMode}
     onChange={(e) => {
   setSurveyorMode(e.target.value);
-  setExpandedJobs({});
 }}
     disabled={!user || loading}
   >
@@ -412,6 +447,7 @@ className="maps-search-input"
     <b>{rows.length}</b> Take 5{rows.length === 1 ? "" : "s"}
     {selectedSurveyor !== "__all__" && selectedSurveyor ? ` for ${selectedSurveyor}` : ""}
     {jobFilter.trim() ? ` • Job #${jobFilter.trim()}` : ""}
+    {dateFilter ? ` • ${new Date(`${dateFilter}T00:00:00`).toLocaleDateString("en-AU")}` : ""}
   </span>
 </div>
       </div>
@@ -421,7 +457,7 @@ className="maps-search-input"
       <div className="card">
         <h3 className="card-title">Submissions</h3>
         <p className="card-subtitle">
-          Expand a job to see its Take 5s. Click View PDF to open the summary.
+          Newest submissions are shown first. Click View PDF to open the summary.
         </p>
 
         {loading && (
@@ -452,178 +488,148 @@ className="maps-search-input"
           <div
             style={{
               marginTop: "0.8rem",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.6rem",
+              overflowX: "auto",
+              WebkitOverflowScrolling: "touch",
             }}
           >
-            {Object.entries(groupedByJob).map(([jobNumber, jobRows]) => {
-              const expanded = !!expandedJobs[jobNumber];
-
-              return (
-                <div
-                  key={jobNumber}
-                  style={{
-                    border: "1px solid #f3e1e1",
-                    borderRadius: 8,
-                    overflow: "hidden",
-                  }}
-                >
-                  {/* Job header */}
-                  <button
-                    type="button"
-                    aria-label={`Toggle job ${jobNumber}`}
-                    onClick={() => toggleJob(jobNumber)}
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: "0.8rem",
+              }}
+            >
+              <thead>
+                <tr>
+                  <th
                     style={{
-                      width: "100%",
+                      borderBottom: "1px solid #f3e1e1",
                       textAlign: "left",
-                      padding: "0.6rem 0.8rem",
-                      background: "#fff",
-                      border: "none",
-                      cursor: "pointer",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      fontWeight: 700,
-                      color: "var(--pw-primary-dark)",
+                      padding: "0.35rem",
                     }}
                   >
-                    <span>{jobNumber}</span>
-                    <span style={{ fontSize: "0.8rem", color: "#777" }}>
-                      {jobRows.length} Take 5{jobRows.length > 1 ? "s" : ""}{" "}
-                      {expanded ? "▲" : "▼"}
-                    </span>
-                  </button>
+                    Job #
+                  </th>
+                  <th
+                    style={{
+                      borderBottom: "1px solid #f3e1e1",
+                      textAlign: "left",
+                      padding: "0.35rem",
+                    }}
+                  >
+                    Take 5 #
+                  </th>
+                  <th
+                    style={{
+                      borderBottom: "1px solid #f3e1e1",
+                      textAlign: "left",
+                      padding: "0.35rem",
+                    }}
+                  >
+                    Employee
+                  </th>
+                  <th
+                    style={{
+                      borderBottom: "1px solid #f3e1e1",
+                      textAlign: "left",
+                      padding: "0.35rem",
+                    }}
+                  >
+                    Date
+                  </th>
+                  <th
+                    style={{
+                      borderBottom: "1px solid #f3e1e1",
+                      textAlign: "left",
+                      padding: "0.35rem",
+                    }}
+                  >
+                    PDF
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const submittedAt = row.form_data?.submittedAt || row.created_at;
+                  const dateStr = submittedAt
+                    ? new Date(submittedAt).toLocaleString("en-AU", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: false,
+                      })
+                    : "-";
 
-                  {/* Job body */}
-                  {expanded && (
-                    <div style={{ padding: "0.6rem 0.8rem", background: "#fafafa" }}>
-                      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-                        <table
-                          style={{
-                            width: "100%",
-                            borderCollapse: "collapse",
-                            fontSize: "0.8rem",
-                          }}
-                        >
-                          <thead>
-                            <tr>
-                              <th
-                                style={{
-                                  borderBottom: "1px solid #f3e1e1",
-                                  textAlign: "left",
-                                  padding: "0.35rem",
-                                }}
-                              >
-                                Take 5 #
-                              </th>
-                              <th
-                                style={{
-                                  borderBottom: "1px solid #f3e1e1",
-                                  textAlign: "left",
-                                  padding: "0.35rem",
-                                }}
-                              >
-                                Employee
-                              </th>
-                              <th
-                                style={{
-                                  borderBottom: "1px solid #f3e1e1",
-                                  textAlign: "left",
-                                  padding: "0.35rem",
-                                }}
-                              >
-                                Date
-                              </th>
-                              <th
-                                style={{
-                                  borderBottom: "1px solid #f3e1e1",
-                                  textAlign: "left",
-                                  padding: "0.35rem",
-                                }}
-                              >
-                                PDF
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {jobRows.map((row) => {
-                              const submittedAt = row.form_data?.submittedAt || row.created_at;
-                              const dateStr = submittedAt
-                                ? new Date(submittedAt).toLocaleString("en-AU", {
-                                    day: "2-digit",
-                                    month: "2-digit",
-                                    year: "numeric",
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                    hour12: false,
-                                  })
-                                : "-";
+                  const signedUrl = pdfMap[row.id];
 
-                              const signedUrl = pdfMap[row.id];
-
-                              return (
-                                <tr key={row.id}>
-                                  <td
-                                    style={{
-                                      borderBottom: "1px solid #f8e0e0",
-                                      padding: "0.35rem",
-                                    }}
-                                  >
-                                    {row.take5_number || "-"}
-                                  </td>
-                                  <td
-                                    style={{
-                                      borderBottom: "1px solid #f8e0e0",
-                                      padding: "0.35rem",
-                                    }}
-                                  >
-                                    {row.employee_name}
-                                  </td>
-                                  <td
-                                    style={{
-                                      borderBottom: "1px solid #f8e0e0",
-                                      padding: "0.35rem",
-                                    }}
-                                  >
-                                    {dateStr}
-                                  </td>
-                                  <td
-                                    style={{
-                                      borderBottom: "1px solid #f8e0e0",
-                                      padding: "0.35rem",
-                                    }}
-                                  >
-                                    {signedUrl ? (
-                                      <a
-                                        href={signedUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="btn-pill"
-                                        style={{
-                                          textDecoration: "none",
-                                          fontSize: "0.75rem",
-                                        }}
-                                      >
-                                        View PDF
-                                      </a>
-                                    ) : row.pdf_path ? (
-                                      <span style={{ color: "#999" }}>Generating…</span>
-                                    ) : (
-                                      <span style={{ color: "#999" }}>No PDF</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                  return (
+                    <tr key={row.id}>
+                      <td
+                        style={{
+                          borderBottom: "1px solid #f8e0e0",
+                          padding: "0.35rem",
+                          fontWeight: 700,
+                          color: "var(--pw-primary-dark)",
+                        }}
+                      >
+                        {row.job_number || "-"}
+                      </td>
+                      <td
+                        style={{
+                          borderBottom: "1px solid #f8e0e0",
+                          padding: "0.35rem",
+                        }}
+                      >
+                        {row.take5_number || "-"}
+                      </td>
+                      <td
+                        style={{
+                          borderBottom: "1px solid #f8e0e0",
+                          padding: "0.35rem",
+                        }}
+                      >
+                        {row.employee_name}
+                      </td>
+                      <td
+                        style={{
+                          borderBottom: "1px solid #f8e0e0",
+                          padding: "0.35rem",
+                        }}
+                      >
+                        {dateStr}
+                      </td>
+                      <td
+                        style={{
+                          borderBottom: "1px solid #f8e0e0",
+                          padding: "0.35rem",
+                        }}
+                      >
+                        {signedUrl ? (
+                          <a
+                            href={signedUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn-pill"
+                            style={{
+                              textDecoration: "none",
+                              fontSize: "0.75rem",
+                            }}
+                          >
+                            View PDF
+                          </a>
+                        ) : row.pdf_path ? (
+                          <span style={{ color: "#999" }}>Generating…</span>
+                        ) : (
+                          <span style={{ color: "#999" }}>No PDF</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

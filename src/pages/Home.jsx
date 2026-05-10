@@ -34,6 +34,7 @@ function Home() {
           <li><strong>Safety Forms</strong> – Complete Take 5 assessments and vehicle pre-start checks digitally in the field. With the ability to view historic information via the register.</li>
           <li><strong>Schedule</strong> – Plan and view upcoming work/leave for you and your team members.</li>
           <li><strong>Timesheets</strong> – Record time sheets daily with ease.</li>
+          <li><strong>Shopping List</strong> – For anyone to add to, running low on anything, add it to the list. This helps maintain inventory.</li>
           <li><strong>Weather</strong> - Rain, hail or shine, check the forecast right before you head to site.</li>
           <br />
           <strong>Built for Office and Field</strong>
