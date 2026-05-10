@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import {
@@ -448,7 +448,7 @@ function buildPopupHtmlExample({ layerTag, name, props }) {
         .join("")}
 
       <div style="display:flex; gap:8px; margin-top:10px;">
-        <a href="${buildLatLngSearchUrl(
+        <a onclick="window.__pwMapsPrepareExternalNav && window.__pwMapsPrepareExternalNav()" href="${buildLatLngSearchUrl(
           props.lat ?? props.latitude ?? "",
           props.lng ?? props.longitude ?? ""
         )}" target="_blank" rel="noreferrer"
@@ -456,7 +456,7 @@ function buildPopupHtmlExample({ layerTag, name, props }) {
                   border:1px solid #ccc; color:#111; background:#fff; font-weight:700; font-size:12px;">
           🔍 Open in Google Maps
         </a>
-        <a href="${buildDirectionsUrl(
+        <a onclick="window.__pwMapsPrepareExternalNav && window.__pwMapsPrepareExternalNav()" href="${buildDirectionsUrl(
           props.lat ?? props.latitude ?? "",
           props.lng ?? props.longitude ?? ""
         )}" rel="noreferrer"
@@ -855,6 +855,7 @@ function Maps() {
   const toolsControlDivRef = useRef(null);
   const idleDebounceRef = useRef(null);
   const viewRef = useRef({ bounds: null, zoom: null });
+  const mapRuntimeListenersRef = useRef([]);
 
 useEffect(() => {
   layersRef.current = layers;
@@ -1099,6 +1100,42 @@ const toggleMapsDrawer = () => setMobilePanelCollapsed((prev) => !prev);
 
   // Address card
   const [selectedAddress, setSelectedAddress] = useState(null);
+
+  const stopLocationTracking = useCallback(() => {
+    if (locationWatchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(locationWatchIdRef.current);
+      locationWatchIdRef.current = null;
+    }
+    setIsFollowingLocation(false);
+  }, []);
+
+  const pauseMapActivity = useCallback(() => {
+    stopLocationTracking();
+
+    if (idleDebounceRef.current) {
+      clearTimeout(idleDebounceRef.current);
+      idleDebounceRef.current = null;
+    }
+
+    try {
+      hoverInfoWindowRef.current?.close();
+    } catch {
+      // ignore
+    }
+  }, [stopLocationTracking]);
+
+  const openExternalNav = useCallback(
+    (url) => {
+      if (!url) return;
+      pauseMapActivity();
+
+      const opened = window.open(url, "_blank", "noopener,noreferrer");
+      if (!opened) {
+        window.location.href = url;
+      }
+    },
+    [pauseMapActivity]
+  );
 
   const fetchNotesFromSupabase = async () => {
     try {
@@ -1426,13 +1463,13 @@ const mgaLine = mga
             safeText || ""
           }</textarea>
                   <div style="display:flex; gap:8px; margin-top:10px;">
-          <a href="${buildLatLngSearchUrl(note.lat, note.lng)}"
+          <a onclick="window.__pwMapsPrepareExternalNav && window.__pwMapsPrepareExternalNav()" href="${buildLatLngSearchUrl(note.lat, note.lng)}"
              target="_blank" rel="noreferrer"
              style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:10px;
                     border:2px solid #111; color:#111; background:#fff; font-weight:900; font-size:12px;">
             📍 Go To
           </a>
-          <a href="${buildDirectionsUrl(note.lat, note.lng)}"
+          <a onclick="window.__pwMapsPrepareExternalNav && window.__pwMapsPrepareExternalNav()" href="${buildDirectionsUrl(note.lat, note.lng)}"
              rel="noreferrer"
              style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:10px;
                     border:2px solid #111; color:#fff; background:#111; font-weight:900; font-size:12px;">
@@ -1925,7 +1962,7 @@ const notePayload = {
     mapRef.current = map;
     map.setTilt(0);
 
-    map.addListener("tilt_changed", () => {
+    const tiltListener = map.addListener("tilt_changed", () => {
   if (map.getTilt() !== 0) {
     map.setTilt(0);
   }
@@ -1935,7 +1972,7 @@ infoWindowRef.current = new window.google.maps.InfoWindow({
   disableAutoPan: true,
 });
 
-window.google.maps.event.addListener(infoWindowRef.current, "closeclick", () => {
+const infoCloseListener = window.google.maps.event.addListener(infoWindowRef.current, "closeclick", () => {
   mainInfoOpenRef.current = false;
   activeMainInfoKeyRef.current = null;
   activeMainInfoLayerRef.current = null;
@@ -1954,7 +1991,7 @@ window.google.maps.event.addListener(infoWindowRef.current, "closeclick", () => 
       // ignore
     }
 
-    map.addListener("click", (e) => {
+    const mapClickListener = map.addListener("click", (e) => {
   if (!infoModeRef.current) return;
   if (!e?.latLng) return;
 
@@ -1970,7 +2007,7 @@ window.google.maps.event.addListener(infoWindowRef.current, "closeclick", () => 
 });
  
     // Persist view/type on idle + tick
-map.addListener("idle", () => {
+const idleListener = map.addListener("idle", () => {
   if (idleDebounceRef.current) clearTimeout(idleDebounceRef.current);
 
   idleDebounceRef.current = setTimeout(() => {
@@ -1993,6 +2030,26 @@ map.addListener("idle", () => {
     setViewTick((t) => t + 1);
   }, REFRESH_DEBOUNCE_MS);
 });
+mapRuntimeListenersRef.current = [
+  tiltListener,
+  infoCloseListener,
+  mapClickListener,
+  idleListener,
+];
+return () => {
+  mapRuntimeListenersRef.current.forEach((listener) => {
+    try {
+      window.google?.maps?.event?.removeListener(listener);
+    } catch {
+      // ignore
+    }
+  });
+  mapRuntimeListenersRef.current = [];
+  if (idleDebounceRef.current) {
+    clearTimeout(idleDebounceRef.current);
+    idleDebounceRef.current = null;
+  }
+};
   }, []);
   // Pause Google Maps interaction when app is backgrounded (mobile battery saver)
 useEffect(() => {
@@ -2227,12 +2284,12 @@ if (!isWA) {
       <div style="color:#111; margin-top:6px;">${displayAddress}</div>
 
       <div style="display:flex; gap:8px; margin-top:10px;">
-        <a href="${buildSearchUrl(addressString)}" target="_blank" rel="noreferrer"
+        <a onclick="window.__pwMapsPrepareExternalNav && window.__pwMapsPrepareExternalNav()" href="${buildSearchUrl(addressString)}" target="_blank" rel="noreferrer"
            style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:8px;
                   border:1px solid #ccc; color:#111; background:#fff; font-weight:900; font-size:12px;">
           🔍 Maps
         </a>
-        <a href="${buildDirectionsUrl(position.lat, position.lng)}" rel="noreferrer"
+        <a onclick="window.__pwMapsPrepareExternalNav && window.__pwMapsPrepareExternalNav()" href="${buildDirectionsUrl(position.lat, position.lng)}" rel="noreferrer"
            style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:8px;
                   border:1px solid #111; color:#fff; background:#111; font-weight:900; font-size:12px;">
           🚗 Directions
@@ -2438,12 +2495,12 @@ const safeLA =
 </div>
 
         <div style="display:flex; gap:8px; margin-top:10px;">
-          <a href="${buildLatLngSearchUrl(pt.lat, pt.lng)}" target="_blank" rel="noreferrer"
+          <a onclick="window.__pwMapsPrepareExternalNav && window.__pwMapsPrepareExternalNav()" href="${buildLatLngSearchUrl(pt.lat, pt.lng)}" target="_blank" rel="noreferrer"
              style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:8px;
                     border:1px solid #ccc; color:#111; background:#fff; font-weight:900; font-size:12px;">
             🔍 Maps
           </a>
-          <a href="${buildDirectionsUrl(pt.lat, pt.lng)}" rel="noreferrer"
+          <a onclick="window.__pwMapsPrepareExternalNav && window.__pwMapsPrepareExternalNav()" href="${buildDirectionsUrl(pt.lat, pt.lng)}" rel="noreferrer"
              style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:8px;
                     border:1px solid #111; color:#fff; background:#111; font-weight:900; font-size:12px;">
             🚗 Directions
@@ -2768,16 +2825,6 @@ const handleSelectPortalJob = (job) => {
     }
   }, [location.search, portalJobs]);
 
-const stopFollowingLocation = () => {
-  if (locationWatchIdRef.current !== null) {
-    navigator.geolocation.clearWatch(locationWatchIdRef.current);
-    locationWatchIdRef.current = null;
-  }
-  setIsFollowingLocation(false);
-};
-
-
-
 const handleMyLocation = () => {
   if (!navigator.geolocation) {
     alert("Geolocation is not supported by your device.");
@@ -2789,7 +2836,7 @@ const handleMyLocation = () => {
 
   // Toggle off if already following
   if (locationWatchIdRef.current !== null) {
-    stopFollowingLocation();
+    stopLocationTracking();
     return;
   }
 
@@ -2830,7 +2877,7 @@ const handleMyLocation = () => {
       }
     },
         (err) => {
-      stopFollowingLocation();
+      stopLocationTracking();
 
       if (err?.code === 1) {
         alert("Location permission was denied on this device/browser.");
@@ -3757,16 +3804,6 @@ function getPreferredPointXY(coord, props, projectionCode) {
 
   const reprojectFromGeometry = (targetCode, source) => {
     const [x, y] = projectCoords(lng, lat, "EPSG:4326", targetCode);
-
-    console.log(`EXPORT DEBUG ${source}`, {
-      projectionCode: targetCode,
-      id,
-      lng,
-      lat,
-      x,
-      y,
-    });
-
     return { x, y, source };
   };
 
@@ -3776,15 +3813,6 @@ function getPreferredPointXY(coord, props, projectionCode) {
     const n = getFirstNumericProp(props, ["pcg2020_northing"]);
 
     if (Number.isFinite(e) && Number.isFinite(n)) {
-      console.log("EXPORT DEBUG native-pcg2020", {
-        projectionCode,
-        id,
-        x: e,
-        y: n,
-        pcg2020_easting: props?.pcg2020_easting,
-        pcg2020_northing: props?.pcg2020_northing,
-      });
-
       return { x: e, y: n, source: "native-pcg2020" };
     }
 
@@ -3805,15 +3833,6 @@ function getPreferredPointXY(coord, props, projectionCode) {
     ]);
 
     if (Number.isFinite(e) && Number.isFinite(n)) {
-      console.log("EXPORT DEBUG native-pcg94", {
-        projectionCode,
-        id,
-        x: e,
-        y: n,
-        pcg94_easting: props?.pcg94_easting,
-        pcg94_northing: props?.pcg94_northing,
-      });
-
       return { x: e, y: n, source: "native-pcg94" };
     }
 
@@ -3833,16 +3852,6 @@ function getPreferredPointXY(coord, props, projectionCode) {
       Number.isFinite(n) &&
       Number(zone) === expectedZone
     ) {
-      console.log("EXPORT DEBUG native-mga2020", {
-        projectionCode,
-        id,
-        x: e,
-        y: n,
-        mga2020_zone: props?.mga2020_zone,
-        mga2020_easting: props?.mga2020_easting,
-        mga2020_northing: props?.mga2020_northing,
-      });
-
       return { x: e, y: n, source: "native-mga2020" };
     }
   }
@@ -4140,7 +4149,6 @@ if (pointSets.length) {
   }
 
   async function executeExport() {
-    console.log("EXPORT DEBUG selected projection", exportProjection);
     if (!exportGeometryRef.current) {
       setExportWarning("Draw a fence first.");
       return;
@@ -5140,6 +5148,7 @@ useEffect(() => {
   const googleMaps = window.google?.maps;
   if (!map || !googleMaps) return;
   if (!isAppVisible) return;
+  let cancelled = false;
 
   const pointLayers = layers.filter((l) => l.type === "point");
   if (!pointLayers.length) return;
@@ -5227,6 +5236,7 @@ const syncClusterer = () => {
           bounds,
           layer.data.where || "1=1"
         );
+        if (cancelled) return;
 
         let features = geojson.features || [];
 
@@ -5326,10 +5336,13 @@ if (layer.data?.clickable !== false) {
         store.markers = Array.from(store.index.values());
         totalVisible += store.markers.length;
       } catch (err) {
+        if (cancelled) return;
         console.warn(`${layer.name} fetch failed:`, err);
         clearLayer(store);
       }
     }
+
+    if (cancelled) return;
 
     if (totalVisible === 0 && pointLayers.some((l) => l.visible && (zoom ?? 0) < (l.data?.minZoom ?? 0))) {
       setGeodeticNotice(`Zoom to ${MIN_GEODETIC_ZOOM}+ to see geodetic marks.`);
@@ -5343,6 +5356,7 @@ if (layer.data?.clickable !== false) {
   run();
 
 const staleTimer = setInterval(() => {
+  if (cancelled) return;
   const anyVisible = pointLayers.some((l) => l.visible);
   if (!anyVisible) return;
 
@@ -5352,7 +5366,10 @@ const staleTimer = setInterval(() => {
   setViewTick((t) => t + 1);
 }, STALE_REFRESH_MS);
 
-  return () => clearInterval(staleTimer);
+  return () => {
+    cancelled = true;
+    clearInterval(staleTimer);
+  };
 }, [layers, viewTick, isAppVisible]);
 
     // ✅ Shared polygon layer loader (cadastre, LGA, zoning, future polygon layers)
@@ -5361,6 +5378,7 @@ const staleTimer = setInterval(() => {
     const googleMaps = window.google?.maps;
     if (!map || !googleMaps) return;
     if (!isAppVisible) return;
+    let cancelled = false;
 
     const polygonLayers = layers.filter((l) => l.type === "polygon");
     if (!polygonLayers.length) return;
@@ -5434,6 +5452,7 @@ const staleTimer = setInterval(() => {
             bounds,
             layer.data.where || "1=1"
           );
+          if (cancelled) return;
 
           const maxFeatures = layer.data?.maxFeatures ?? MAX_FEATURES_PER_VIEW;
           if ((geojson.features?.length || 0) > maxFeatures) {
@@ -5443,6 +5462,7 @@ const staleTimer = setInterval(() => {
           }
 
           clearLayer(store);
+          if (cancelled) return;
           store.polygons.addGeoJson(geojson);
 
           const labelCfg = layer.data?.labels;
@@ -5581,6 +5601,7 @@ const staleTimer = setInterval(() => {
 
           store.labels = nextLabels;
         } catch (err) {
+          if (cancelled) return;
           console.warn(`${layer.name} fetch failed:`, err);
           clearLayer(store);
         }
@@ -5588,6 +5609,9 @@ const staleTimer = setInterval(() => {
     };
 
     run();
+    return () => {
+      cancelled = true;
+    };
   }, [layers, viewTick, isAppVisible]);
   
 // ---------- Shared line layer loader ----------
@@ -5596,6 +5620,7 @@ useEffect(() => {
   const googleMaps = window.google?.maps;
   if (!map || !googleMaps) return;
   if (!isAppVisible) return;
+  let cancelled = false;
 
   const lineLayers = layers.filter((l) => l.type === "line");
   if (!lineLayers.length) return;
@@ -5653,6 +5678,7 @@ useEffect(() => {
           bounds,
           layer.data.where || "1=1"
         );
+        if (cancelled) return;
 
         const maxFeatures = layer.data?.maxFeatures ?? MAX_FEATURES_PER_VIEW;
         if ((geojson.features?.length || 0) > maxFeatures) {
@@ -5662,8 +5688,10 @@ useEffect(() => {
         }
 
         clearLayer(store);
+        if (cancelled) return;
         store.lines.addGeoJson(geojson);
       } catch (err) {
+        if (cancelled) return;
         console.warn(`${layer.name} fetch failed:`, err);
         clearLayer(store);
       }
@@ -5671,6 +5699,9 @@ useEffect(() => {
   };
 
   run();
+  return () => {
+    cancelled = true;
+  };
 }, [layers, viewTick, isAppVisible]);
 
   const toggleLayer = (id) => {
@@ -5720,20 +5751,40 @@ useEffect(() => {
 // Step 3: stop tracking when Maps unmounts / page closes
 useEffect(() => {
   return () => {
-    if (locationWatchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(locationWatchIdRef.current);
-      locationWatchIdRef.current = null;
-    }
+    pauseMapActivity();
   };
-}, []);
+}, [pauseMapActivity]);
 
 // Stop tracking when app goes into background
 useEffect(() => {
-  if (!isAppVisible && locationWatchIdRef.current !== null) {
-    navigator.geolocation.clearWatch(locationWatchIdRef.current);
-    locationWatchIdRef.current = null;
+  if (!isAppVisible) {
+    pauseMapActivity();
   }
-}, [isAppVisible]);
+}, [isAppVisible, pauseMapActivity]);
+
+useEffect(() => {
+  if (typeof window === "undefined") return undefined;
+
+  const handleVisibilityPause = () => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      pauseMapActivity();
+    }
+  };
+
+  window.__pwMapsPrepareExternalNav = pauseMapActivity;
+  document.addEventListener("visibilitychange", handleVisibilityPause);
+  window.addEventListener("pagehide", pauseMapActivity);
+  window.addEventListener("blur", pauseMapActivity);
+
+  return () => {
+    if (window.__pwMapsPrepareExternalNav === pauseMapActivity) {
+      delete window.__pwMapsPrepareExternalNav;
+    }
+    document.removeEventListener("visibilitychange", handleVisibilityPause);
+    window.removeEventListener("pagehide", pauseMapActivity);
+    window.removeEventListener("blur", pauseMapActivity);
+  };
+}, [pauseMapActivity]);
 
 useEffect(() => {
   const node = mapDivRef.current;
