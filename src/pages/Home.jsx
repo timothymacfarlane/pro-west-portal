@@ -13,9 +13,9 @@ function Home() {
           Portal fixes and updates will be listed here. The current version of the portal is shown in the footer of the of every page.
         </p>
         <ul style={{ fontSize: "0.85rem", marginTop: "0.3rem", paddingLeft: "1.1rem" }}>
-          <strong>vX.X.X-beta</strong>
+          <strong>Current - v1.0.0</strong>
           <br />
-          Current beta testing versions.
+          Initial release after beta testing.
           </ul>
       </div>
 
