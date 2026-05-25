@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
+import proj4 from "proj4";
 import {
   DEFAULT_PROJECTION_CODE,
   PROJECTION_GROUPS,
@@ -377,7 +378,7 @@ function formatReadableDate(value) {
   });
 }
 
-function buildPopupRowsForExample(props = {}, nameOverride, layerTag = "") {
+function buildPopupRowsForExample(props = {}, nameOverride, layerTag = "", options = {}) {
   const pointName =
     nameOverride ||
     props.geodetic_point_name ||
@@ -393,20 +394,22 @@ function buildPopupRowsForExample(props = {}, nameOverride, layerTag = "") {
   const mgaE = firstProp(props, ["mga2020_easting", "easting"]);
   const mgaN = firstProp(props, ["mga2020_northing", "northing"]);
 
-   const pcgE = firstProp(props, ["pcg2020_easting"]);
-  const pcgN = firstProp(props, ["pcg2020_northing"]);
-
   const rows = [
     ["GEODETIC POINT NAME", pretty(pointName, 0)],
     ["VERT DATUM", pretty(vertDatum, 0)],
     ["REDUCED LEVEL (m)", pretty(rl, 3)],
     ["Vertical accuracy", pretty(vertAccuracy, 4)],
-    ["PCG2020 EASTING (m)", pretty(pcgE, 3)],
-    ["PCG2020 NORTHING (m)", pretty(pcgN, 3)],
     ["MGA2020 ZONE", pretty(mgaZone, 0)],
     ["MGA2020 EASTING (m)", pretty(mgaE, 3)],
     ["MGA2020 NORTHING (m)", pretty(mgaN, 3)],
   ];
+
+  if (options?.pcg2020) {
+    rows.push(
+      ["PCG2020 EASTING (m)", pretty(options.pcg2020.easting, 3)],
+      ["PCG2020 NORTHING (m)", pretty(options.pcg2020.northing, 3)]
+    );
+  }
 
   if (layerTag === "SSM" || layerTag === "BM") {
     const horizAccuracy = firstProp(props, ["horiz_accuracy"]);
@@ -423,8 +426,8 @@ function buildPopupRowsForExample(props = {}, nameOverride, layerTag = "") {
   return rows.filter(([, v]) => hasPopupValue(v));
 }
 
-function buildPopupHtmlExample({ layerTag, name, props }) {
-  const rows = buildPopupRowsForExample(props, name, layerTag);
+function buildPopupHtmlExample({ layerTag, name, props, pcg2020 }) {
+  const rows = buildPopupRowsForExample(props, name, layerTag, { pcg2020 });
   const isSummaryLayer = layerTag === "SSM" || layerTag === "BM";
   const directSummaryUrl = isSummaryLayer
     ? buildStationSummaryUrlFromProps(props)
@@ -484,6 +487,18 @@ function buildPopupHtmlExample({ layerTag, name, props }) {
       }
     </div>
   `;
+}
+
+function hasMga2020PopupCoords(props = {}) {
+  return (
+    hasPopupValue(firstProp(props, ["mga2020_zone", "zone"])) &&
+    hasPopupValue(firstProp(props, ["mga2020_easting", "easting"])) &&
+    hasPopupValue(firstProp(props, ["mga2020_northing", "northing"]))
+  );
+}
+
+function isGeodeticPopupLayer(layerTag) {
+  return ["SSM", "BM", "RM"].includes(String(layerTag || "").toUpperCase());
 }
 
 /* --------- Measurement fallbacks (if geometry lib missing) ---------- */
@@ -925,6 +940,7 @@ const [infoMode, setInfoMode] = useState(false);
   const mainInfoOpenRef = useRef(false);
   const activeMainInfoKeyRef = useRef(null);   // `${layerId}::${markerId}`
   const activeMainInfoLayerRef = useRef(null);
+  const geodeticPcg2020CacheRef = useRef(new Map());
 
     // Export
   const exportModeRef = useRef(null); // "rectangle" | "polygon" | null
@@ -939,11 +955,15 @@ const [infoMode, setInfoMode] = useState(false);
   const [exportSummary, setExportSummary] = useState(null);
   const [exportCountSummary, setExportCountSummary] = useState(null);
   const [exportLargeConfirmArmed, setExportLargeConfirmArmed] = useState(false);
+  const [exportDialogPosition, setExportDialogPosition] = useState(null);
+  const [exportDialogDragging, setExportDialogDragging] = useState(false);
 
   const exportListenersRef = useRef([]);
   const exportFenceRef = useRef(null);      // rectangle or polygon overlay
   const exportPathRef = useRef([]);         // polygon path points
   const exportGeometryRef = useRef(null);   // cached geometry for ArcGIS query
+  const exportDialogRef = useRef(null);
+  const exportDialogDragRef = useRef(null);
 
   // ✅ Map Notes (synced via Supabase, cached locally for fast startup/offline)
   const MAP_NOTES_CACHE_KEY = "pw_maps_notes_cache_v1";
@@ -1071,6 +1091,19 @@ const toggleMapsDrawer = () => setMobilePanelCollapsed((prev) => !prev);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  useEffect(() => {
+    if (!exportDialogOpen || isMobile || !exportDialogPosition) return;
+
+    const onResize = () => {
+      setExportDialogPosition((pos) =>
+        pos ? clampExportDialogPosition(pos.left, pos.top) : pos
+      );
+    };
+
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [exportDialogOpen, exportDialogPosition, isMobile]);
 
   useEffect(() => {
     // Default to collapsed on mobile so the map is usable immediately in the field
@@ -2454,6 +2487,92 @@ function toggleInfoMode() {
   }
 }
 
+async function getPopupPcg2020Coordinate({ cacheKey, lng, lat }) {
+  const lo = Number(lng);
+  const la = Number(lat);
+  if (!EXPORT_TRANSFORM_SERVICE_ENDPOINT || !Number.isFinite(lo) || !Number.isFinite(la)) {
+    return null;
+  }
+
+  const cache = geodeticPcg2020CacheRef.current;
+  const cached = cache.get(cacheKey);
+  if (cached?.status === "ready") return cached.value;
+  if (cached?.status === "pending") return cached.promise;
+
+  const promise = (async () => {
+    const endpoint = getExportTransformServiceUrl(EXPORT_TRANSFORM_SERVICE_ENDPOINT);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+    const headers = { "Content-Type": "application/json" };
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        sourceDatumFamily: "GDA94",
+        targetProjection: "PCG2020",
+        points: [{ lng: lo, lat: la }],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`PCG2020 popup transform failed (${response.status})`);
+    }
+
+    const payload = await response.json();
+    if (payload?.accuracyStatus !== "official-grid") return null;
+
+    const point = payload?.points?.[0];
+    const x = Array.isArray(point) ? Number(point[0]) : Number(point?.x);
+    const y = Array.isArray(point) ? Number(point[1]) : Number(point?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+    return { easting: x, northing: y };
+  })();
+
+  cache.set(cacheKey, { status: "pending", promise });
+
+  try {
+    const value = await promise;
+    if (value) {
+      cache.set(cacheKey, { status: "ready", value });
+    } else {
+      cache.delete(cacheKey);
+    }
+    return value;
+  } catch (error) {
+    cache.delete(cacheKey);
+    console.warn("[Maps popup] PCG2020 transform unavailable", { cacheKey, error });
+    return null;
+  }
+}
+
+function maybeLoadPopupPcg2020({ layer, name, props, lat, lng, markerId }) {
+  const layerTag = layer?.data?.layerTag;
+  if (!isGeodeticPopupLayer(layerTag) || !hasMga2020PopupCoords(props)) return;
+
+  const markerKey = `${layer.id}::${markerId}`;
+  const cacheKey = `${markerKey}::PCG2020`;
+
+  getPopupPcg2020Coordinate({ cacheKey, lng, lat }).then((pcg2020) => {
+    if (!pcg2020) return;
+    if (!mainInfoOpenRef.current || activeMainInfoKeyRef.current !== markerKey) return;
+
+    const html = buildPopupHtmlExample({
+      layerTag,
+      name,
+      props: { ...props, lat, lng },
+      pcg2020,
+    });
+
+    infoWindowRef.current?.setContent(html);
+    window.google?.maps?.event?.addListenerOnce?.(infoWindowRef.current, "domready", () => {
+      setTimeout(makeLatestInfoWindowDraggable, 0);
+    });
+  });
+}
+
 function openMainInfoWindow({ html, marker, markerId, layerId }) {
   const map = mapRef.current;
   if (!map || !window.google || !infoWindowRef.current) return;
@@ -3798,92 +3917,488 @@ function sanitizeDxfText(text = "") {
     return null;
   }
 
-  function getExpectedMga2020ZoneForProjection(projectionCode) {
-    const map = {
-      "EPSG:7849": 49,
-      "EPSG:7850": 50,
-      "EPSG:7851": 51,
-      "EPSG:7852": 52,
-    };
-    return map[projectionCode] ?? null;
+  function resolveExportProjectionCode(projectionCode) {
+    if (!projectionCode) {
+      console.warn(
+        `[Maps export] No projection selected; falling back to ${DEFAULT_PROJECTION_CODE} (${getProjectionLabel(DEFAULT_PROJECTION_CODE)}).`
+      );
+      return DEFAULT_PROJECTION_CODE;
+    }
+
+    if (!PROJECTION_OPTIONS.some((opt) => opt.code === projectionCode)) {
+      throw new Error(`Unknown export projection: ${projectionCode}`);
+    }
+
+    return projectionCode;
   }
 
-function getPreferredPointXY(coord, props, projectionCode) {
-  const id =
-    props?.geodetic_point_pid ||
-    props?.reference_mark_pid ||
-    props?.point_number ||
-    props?.rm_point_number ||
-    "";
+  function getProjectionDatumFamily(projectionCode) {
+    const selectedProjectionCode = resolveExportProjectionCode(projectionCode);
+    const option = PROJECTION_OPTIONS.find((opt) => opt.code === selectedProjectionCode);
 
-  const lng = Number(coord?.[0]);
-  const lat = Number(coord?.[1]);
+    if (option?.group === "GDA2020") return "GDA2020";
+    if (option?.group === "GDA94") return "GDA94";
+    if (option?.group === "AGD84") return "AGD84";
+    if (selectedProjectionCode === "EPSG:4326" || selectedProjectionCode === "CIG92" || selectedProjectionCode === "CKIG92") {
+      return "WGS84";
+    }
+    if (selectedProjectionCode === "EPSG:3857") return "Web Mercator";
+    return "Other/unknown";
+  }
 
-  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  function getExportTransformRoute(projectionCode) {
+    const selectedProjectionCode = resolveExportProjectionCode(projectionCode);
+    const datumFamily = getProjectionDatumFamily(selectedProjectionCode);
 
-  const reprojectFromGeometry = (targetCode, source) => {
-    const [x, y] = projectCoords(lng, lat, "EPSG:4326", targetCode);
-    return { x, y, source };
+    if (datumFamily === "GDA94") {
+      return {
+        datumFamily,
+        route:
+          "geometry lon/lat/GDA2020 -> GDA94 datum transformation placeholder -> selected GDA94 projection",
+        currentBrowserRoute:
+          "geometry lon/lat -> current browser projection path; official GDA2020->GDA94 datum/grid transformation not yet implemented",
+        usesValidatedDatumGrid: false,
+      };
+    }
+
+    if (datumFamily === "AGD84") {
+      return {
+        datumFamily,
+        route:
+          "geometry lon/lat/GDA2020 -> AGD84 datum transformation placeholder -> selected AGD84 projection",
+        currentBrowserRoute:
+          "geometry lon/lat -> current browser projection path; official GDA2020->AGD84 datum/grid transformation not yet implemented",
+        usesValidatedDatumGrid: false,
+      };
+    }
+
+    return {
+      datumFamily,
+      route: "geometry lon/lat -> selected projection",
+      currentBrowserRoute: "geometry lon/lat -> selected projection",
+      usesValidatedDatumGrid: datumFamily === "GDA2020" || datumFamily === "WGS84" || datumFamily === "Web Mercator",
+    };
+  }
+
+  function getLayerExportSourceDatumFamily(layer) {
+    return layer?.data?.exportSourceDatum || "GDA94";
+  }
+
+  function isDesktopPointerDevice() {
+    if (isMobile || typeof window === "undefined") return false;
+    return window.matchMedia?.("(pointer: fine)")?.matches !== false;
+  }
+
+  function clampExportDialogPosition(left, top, rect = null) {
+    if (typeof window === "undefined") return { left, top };
+    const dialogRect = rect || exportDialogRef.current?.getBoundingClientRect();
+    const width = dialogRect?.width || 560;
+    const height = dialogRect?.height || 400;
+    const margin = 12;
+    const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - height - margin);
+
+    return {
+      left: Math.min(Math.max(left, margin), maxLeft),
+      top: Math.min(Math.max(top, margin), maxTop),
+    };
+  }
+
+  function handleExportDialogHeaderPointerDown(e) {
+    if (!isDesktopPointerDevice() || e.button !== 0) return;
+    if (e.target?.closest?.("button, input, select, textarea, label, a")) return;
+
+    const dialog = exportDialogRef.current;
+    if (!dialog) return;
+
+    const rect = dialog.getBoundingClientRect();
+    const currentPosition = exportDialogPosition || { left: rect.left, top: rect.top };
+
+    exportDialogDragRef.current = {
+      pointerId: e.pointerId,
+      offsetX: e.clientX - currentPosition.left,
+      offsetY: e.clientY - currentPosition.top,
+    };
+
+    setExportDialogPosition(clampExportDialogPosition(currentPosition.left, currentPosition.top, rect));
+    setExportDialogDragging(true);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+  }
+
+  function handleExportDialogHeaderPointerMove(e) {
+    const drag = exportDialogDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId || !isDesktopPointerDevice()) return;
+
+    setExportDialogPosition(
+      clampExportDialogPosition(e.clientX - drag.offsetX, e.clientY - drag.offsetY)
+    );
+  }
+
+  function endExportDialogDrag(e) {
+    const drag = exportDialogDragRef.current;
+    if (drag && e?.pointerId === drag.pointerId) {
+      e.currentTarget.releasePointerCapture?.(e.pointerId);
+    }
+    exportDialogDragRef.current = null;
+    setExportDialogDragging(false);
+  }
+
+  const EXPORT_GDA94_GEOGRAPHIC = "EXPORT:GDA94_GEOGRAPHIC";
+  const EXPORT_GDA94_TO_GDA2020_GEOGRAPHIC = "EXPORT:GDA94_TO_GDA2020_GEOGRAPHIC";
+  const EXPORT_AGD84_GEOGRAPHIC = "EXPORT:AGD84_GEOGRAPHIC";
+  const GDA2020_GRID_FALLBACK_WARNING =
+    "Approximate only — official NTv2 grid transformation not applied.";
+  const EXPORT_TRANSFORM_SERVICE_ENDPOINT =
+    import.meta.env.VITE_EXPORT_TRANSFORM_SERVICE_ENDPOINT || "";
+
+  const MGA_ZONE_PROJECTIONS = {
+    GDA94: { 49: "EPSG:28349", 50: "EPSG:28350", 51: "EPSG:28351", 52: "EPSG:28352" },
+    GDA2020: { 49: "EPSG:7849", 50: "EPSG:7850", 51: "EPSG:7851", 52: "EPSG:7852" },
+    AGD84: { 49: "EPSG:20349", 50: "EPSG:20350", 51: "EPSG:20351", 52: "EPSG:20352" },
   };
 
-  // 1) Only trust EXPLICIT PCG2020 fields for PCG2020
-  if (projectionCode === "PCG2020") {
-    const e = getFirstNumericProp(props, ["pcg2020_easting"]);
-    const n = getFirstNumericProp(props, ["pcg2020_northing"]);
-
-    if (Number.isFinite(e) && Number.isFinite(n)) {
-      return { x: e, y: n, source: "native-pcg2020" };
+  function ensureExportDatumTransformDefs() {
+    // Projection TM settings stay in projections.js. These aliases only provide datum transforms.
+    if (!proj4.defs(EXPORT_GDA94_GEOGRAPHIC)) {
+      proj4.defs(EXPORT_GDA94_GEOGRAPHIC, "+proj=longlat +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +no_defs");
     }
-
-    return reprojectFromGeometry("PCG2020", "reprojected-to-pcg2020");
-  }
-
-  // 2) Only trust EXPLICIT PCG94 fields for PCG94
-  if (projectionCode === "PCG94") {
-    const e = getFirstNumericProp(props, [
-      "pcg94_easting",
-      "pcg1994_easting",
-      "project_grid_94_easting",
-    ]);
-    const n = getFirstNumericProp(props, [
-      "pcg94_northing",
-      "pcg1994_northing",
-      "project_grid_94_northing",
-    ]);
-
-    if (Number.isFinite(e) && Number.isFinite(n)) {
-      return { x: e, y: n, source: "native-pcg94" };
+    if (!proj4.defs(EXPORT_GDA94_TO_GDA2020_GEOGRAPHIC)) {
+      proj4.defs(
+        EXPORT_GDA94_TO_GDA2020_GEOGRAPHIC,
+        "+proj=longlat +ellps=GRS80 +towgs84=-0.06155,0.01087,0.04019,0.0394924,0.0327221,0.0328979,0.009994 +no_defs"
+      );
     }
-
-    return reprojectFromGeometry("PCG94", "reprojected-to-pcg94");
-  }
-
-  // 3) Native MGA2020 zone fields for MGA2020 exports
-  const expectedZone = getExpectedMga2020ZoneForProjection(projectionCode);
-  if (expectedZone !== null) {
-    const zone = getFirstNumericProp(props, ["mga2020_zone", "zone"]);
-    const e = getFirstNumericProp(props, ["mga2020_easting", "easting"]);
-    const n = getFirstNumericProp(props, ["mga2020_northing", "northing"]);
-
-    if (
-      Number.isFinite(zone) &&
-      Number.isFinite(e) &&
-      Number.isFinite(n) &&
-      Number(zone) === expectedZone
-    ) {
-      return { x: e, y: n, source: "native-mga2020" };
+    if (!proj4.defs(EXPORT_AGD84_GEOGRAPHIC)) {
+      proj4.defs(
+        EXPORT_AGD84_GEOGRAPHIC,
+        "+proj=longlat +ellps=aust_SA +towgs84=-117.763,-51.510,139.061,-0.292,-0.443,-0.277,-0.191 +no_defs"
+      );
     }
   }
 
-  // 4) Everything else: reproject from geometry
-  return reprojectFromGeometry(projectionCode, "reprojected-geometry");
-}
-  function collectCsvRowsFromCollections(collections, projectionCode) {
+  function inferMgaZoneFromLng(lng) {
+    const lon = Number(lng);
+    if (!Number.isFinite(lon)) return null;
+    const zone = Math.floor((lon + 180) / 6) + 1;
+    return zone >= 49 && zone <= 52 ? zone : null;
+  }
+
+  function getSelectedMgaZone(projectionCode) {
+    const selectedProjectionCode = resolveExportProjectionCode(projectionCode);
+    for (const zoneMap of Object.values(MGA_ZONE_PROJECTIONS)) {
+      const match = Object.entries(zoneMap).find(([, code]) => code === selectedProjectionCode);
+      if (match) return Number(match[0]);
+    }
+    return null;
+  }
+
+  function getTargetProjection(projectionCode, lng) {
+    const selectedProjectionCode = resolveExportProjectionCode(projectionCode);
+    const selectedZone = getSelectedMgaZone(selectedProjectionCode);
+    if (selectedZone) return selectedProjectionCode;
+
+    const inferredZone = inferMgaZoneFromLng(lng);
+    if (!inferredZone) return selectedProjectionCode;
+
+    if (selectedProjectionCode === "MGA94") return MGA_ZONE_PROJECTIONS.GDA94[inferredZone];
+    if (selectedProjectionCode === "MGA2020") return MGA_ZONE_PROJECTIONS.GDA2020[inferredZone];
+    if (selectedProjectionCode === "AMG84") return MGA_ZONE_PROJECTIONS.AGD84[inferredZone];
+    return selectedProjectionCode;
+  }
+
+  function getEffectiveSourceDatumFamily(sourceDatumFamily) {
+    return sourceDatumFamily === "WGS84" ? "WGS84" : "GDA94";
+  }
+
+  function getSourceProjection(sourceDatumFamily, targetDatumFamily) {
+    const effectiveSourceDatum = getEffectiveSourceDatumFamily(sourceDatumFamily);
+    if (effectiveSourceDatum === "WGS84") return "EPSG:4326";
+    if (targetDatumFamily === "GDA2020") return EXPORT_GDA94_TO_GDA2020_GEOGRAPHIC;
+    return EXPORT_GDA94_GEOGRAPHIC;
+  }
+
+  function shouldUseServerDatumTransform(sourceDatumFamily, targetDatumFamily) {
+    return (
+      getEffectiveSourceDatumFamily(sourceDatumFamily) === "GDA94" &&
+      targetDatumFamily === "GDA2020"
+    );
+  }
+
+  function getExportCoordinateKey(lng, lat, projectionCode, sourceDatumFamily) {
+    const lo = Number(lng);
+    const la = Number(lat);
+    const selectedProjectionCode = getTargetProjection(projectionCode, lo);
+    return `${getEffectiveSourceDatumFamily(sourceDatumFamily)}|${selectedProjectionCode}|${lo}|${la}`;
+  }
+
+  function addExportCoordinateRequest(requests, coord, projectionCode, sourceDatumFamily) {
+    const lng = Number(coord?.[0]);
+    const lat = Number(coord?.[1]);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+
+    const selectedProjectionCode = getTargetProjection(projectionCode, lng);
+    const targetDatumFamily = getProjectionDatumFamily(selectedProjectionCode);
+    if (!shouldUseServerDatumTransform(sourceDatumFamily, targetDatumFamily)) return;
+
+    requests.push({
+      key: getExportCoordinateKey(lng, lat, projectionCode, sourceDatumFamily),
+      lng,
+      lat,
+    });
+  }
+
+  function collectExportTransformRequests(collections, projectionCode, format) {
+    const requests = [];
+
+    for (const { featureCollection, sourceDatumFamily = "GDA94" } of collections || []) {
+      (featureCollection?.features || []).forEach((feature) => {
+        const geometry = feature?.geometry;
+
+        getPointCoordinateSets(geometry).forEach((coord) => {
+          addExportCoordinateRequest(requests, coord, projectionCode, sourceDatumFamily);
+        });
+
+        if (format !== "dxf") return;
+
+        const lineSets = getLineCoordinateSets(geometry);
+        lineSets.forEach((coords) => {
+          coords.forEach((coord) => addExportCoordinateRequest(requests, coord, projectionCode, sourceDatumFamily));
+        });
+
+        if (lineSets[0]?.length) {
+          const anchor = getLineLabelCoord(lineSets[0]);
+          if (anchor) addExportCoordinateRequest(requests, anchor, projectionCode, sourceDatumFamily);
+        }
+
+        const ringSets = getPolygonRingSets(geometry);
+        ringSets.forEach((ring) => {
+          ring.forEach((coord) => addExportCoordinateRequest(requests, coord, projectionCode, sourceDatumFamily));
+        });
+
+        if (ringSets[0]?.length) {
+          const anchor = getPolygonLabelCoord(ringSets[0]);
+          if (anchor) addExportCoordinateRequest(requests, anchor, projectionCode, sourceDatumFamily);
+        }
+      });
+    }
+
+    return requests;
+  }
+
+  function getExportTransformServiceUrl(baseEndpoint) {
+    const base = String(baseEndpoint || "").trim();
+    if (!base) return "";
+    return `${base.replace(/\/+$/, "")}/transform/export-coordinates`;
+  }
+
+  async function requestOfficialGridTransforms(transformContext) {
+    const endpoint = getExportTransformServiceUrl(transformContext?.serverEndpoint);
+    const requests = transformContext?.requests || [];
+    if (!endpoint || !requests.length) return false;
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+    if (!accessToken) {
+      throw new Error("No Supabase access token available for export transform service.");
+    }
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        sourceDatumFamily: "GDA94",
+        targetProjection: transformContext.selectedProjectionCode,
+        points: requests.map(({ lng, lat }) => ({ lng, lat })),
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Export transform service failed (${response.status}): ${detail || response.statusText}`);
+    }
+
+    const payload = await response.json();
+    if (payload?.accuracyStatus !== "official-grid") {
+      throw new Error(`Export transform service did not return official-grid status: ${payload?.accuracyStatus || "unknown"}`);
+    }
+    if (!Array.isArray(payload?.points) || payload.points.length !== requests.length) {
+      throw new Error("Export transform service returned an unexpected point count.");
+    }
+
+    payload.points.forEach((point, index) => {
+      const [x, y] = point || [];
+      if (!Number.isFinite(Number(x)) || !Number.isFinite(Number(y))) {
+        throw new Error(`Export transform service returned invalid coordinate at index ${index}.`);
+      }
+      transformContext.serverCoordinates.set(requests[index].key, { x: Number(x), y: Number(y) });
+    });
+
+    transformContext.transformSource = "official-grid";
+    transformContext.usingBrowserFallback = false;
+    transformContext.fallbackWarning = "";
+    return true;
+  }
+
+  function createExportTransformContext(collections, projectionCode, format = null) {
+    const selectedProjectionCode = resolveExportProjectionCode(projectionCode);
+    const targetDatumFamily = getProjectionDatumFamily(selectedProjectionCode);
+    const shouldBatchTransform = format === "csv" || format === "dxf";
+    const requests = shouldBatchTransform
+      ? collectExportTransformRequests(collections, selectedProjectionCode, format)
+      : [];
+    const needsGridTransform = requests.length > 0;
+
+    return {
+      selectedProjectionCode,
+      targetDatumFamily,
+      needsServerGridTransform: needsGridTransform,
+      serverEndpoint: EXPORT_TRANSFORM_SERVICE_ENDPOINT,
+      serverCoordinates: new Map(),
+      transformSource: needsGridTransform && EXPORT_TRANSFORM_SERVICE_ENDPOINT ? "pending" : "fallback",
+      usingBrowserFallback: needsGridTransform && !EXPORT_TRANSFORM_SERVICE_ENDPOINT,
+      fallbackWarning:
+        needsGridTransform && !EXPORT_TRANSFORM_SERVICE_ENDPOINT
+          ? GDA2020_GRID_FALLBACK_WARNING
+          : "",
+      requests,
+    };
+  }
+
+  async function prepareExportTransformContext(collections, projectionCode, format = null) {
+    const transformContext = createExportTransformContext(collections, projectionCode, format);
+
+    if (!transformContext.needsServerGridTransform) {
+      return transformContext;
+    }
+
+    try {
+      await requestOfficialGridTransforms(transformContext);
+    } catch (error) {
+      transformContext.transformSource = "fallback";
+      transformContext.usingBrowserFallback = true;
+      transformContext.fallbackWarning = GDA2020_GRID_FALLBACK_WARNING;
+      console.warn("[Maps export] " + GDA2020_GRID_FALLBACK_WARNING, {
+        selectedProjection: transformContext.selectedProjectionCode,
+        targetDatum: transformContext.targetDatumFamily,
+        endpoint: transformContext.serverEndpoint,
+        error,
+      });
+    }
+
+    console.info("[Maps export] Export transform source:", transformContext.transformSource, {
+      selectedProjection: transformContext.selectedProjectionCode,
+      requestedCoordinateCount: transformContext.requests.length,
+      transformedCoordinateCount: transformContext.serverCoordinates.size,
+    });
+
+    return transformContext;
+  }
+
+  function transformExportPoint(lng, lat, projectionCode, sourceDatumFamily = "GDA94", transformContext = null) {
+    ensureExportDatumTransformDefs();
+
+    const lo = Number(lng);
+    const la = Number(lat);
+    if (!Number.isFinite(lo) || !Number.isFinite(la)) return null;
+
+    const selectedProjectionCode = getTargetProjection(projectionCode, lo);
+    const targetDatumFamily = getProjectionDatumFamily(selectedProjectionCode);
+    const effectiveSourceDatum = getEffectiveSourceDatumFamily(sourceDatumFamily);
+    const sourceProjection = getSourceProjection(effectiveSourceDatum, targetDatumFamily);
+    const serverCoordinate = transformContext?.serverCoordinates?.get(
+      getExportCoordinateKey(lo, la, selectedProjectionCode, effectiveSourceDatum)
+    );
+    if (serverCoordinate) {
+      return {
+        x: serverCoordinate.x,
+        y: serverCoordinate.y,
+        source: "official-grid-service",
+        destination: selectedProjectionCode,
+        routeUsed: `GDA94 geographic -> official NTv2 grid service -> ${selectedProjectionCode}`,
+        accuracyWarning: "",
+      };
+    }
+
+    const usingApproximateFallback =
+      transformContext?.usingBrowserFallback &&
+      shouldUseServerDatumTransform(effectiveSourceDatum, targetDatumFamily);
+    let output = null;
+    let routeUsed = effectiveSourceDatum + " geographic -> " + selectedProjectionCode;
+
+    try {
+      if (targetDatumFamily === "AGD84" && effectiveSourceDatum === "GDA94") {
+        const [agdLng, agdLat] = proj4(EXPORT_GDA94_GEOGRAPHIC, EXPORT_AGD84_GEOGRAPHIC, [lo, la]);
+        output = projectCoords(agdLng, agdLat, EXPORT_AGD84_GEOGRAPHIC, selectedProjectionCode);
+        routeUsed = "GDA94 geographic -> AGD84 geographic -> " + selectedProjectionCode;
+      } else {
+        output = projectCoords(lo, la, sourceProjection, selectedProjectionCode);
+        if (targetDatumFamily === "GDA2020" && effectiveSourceDatum === "GDA94") {
+          routeUsed = usingApproximateFallback
+            ? "GDA94 geographic -> approximate 7-parameter GDA2020 fallback -> " + selectedProjectionCode
+            : "GDA94 geographic -> GDA2020 geographic -> " + selectedProjectionCode;
+        } else if (targetDatumFamily === "GDA94" && effectiveSourceDatum === "GDA94") {
+          routeUsed = "GDA94 geographic -> " + selectedProjectionCode;
+        }
+      }
+    } catch (error) {
+      console.warn("[Maps export] Projection transform failed", {
+        selectedProjection: selectedProjectionCode,
+        sourceDatum: effectiveSourceDatum,
+        targetDatum: targetDatumFamily,
+        sourceProjection,
+        inputLngLat: { lng: lo, lat: la },
+        error,
+      });
+      return null;
+    }
+
+    const [x, y] = output || [];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+    const debugKey = selectedProjectionCode + "|" + effectiveSourceDatum + "|" + targetDatumFamily;
+    if (!transformExportPoint.loggedDebugKeys) transformExportPoint.loggedDebugKeys = new Set();
+    if (!transformExportPoint.loggedDebugKeys.has(debugKey)) {
+      transformExportPoint.loggedDebugKeys.add(debugKey);
+      console.info("[Maps export] final coordinate", {
+        selectedProjection: selectedProjectionCode,
+        selectedProjectionName: getProjectionLabel(selectedProjectionCode),
+        sourceDatum: effectiveSourceDatum,
+        targetDatum: targetDatumFamily,
+        sourceProjection,
+        targetProjection: selectedProjectionCode,
+        inputLngLat: { lng: lo, lat: la },
+        outputCoordinate: { x, y },
+        routeUsed,
+        accuracyWarning: usingApproximateFallback ? GDA2020_GRID_FALLBACK_WARNING : "",
+      });
+    }
+
+    return {
+      x,
+      y,
+      source: sourceProjection,
+      destination: selectedProjectionCode,
+      routeUsed,
+      accuracyWarning: usingApproximateFallback ? GDA2020_GRID_FALLBACK_WARNING : "",
+    };
+  }
+
+  function getPreferredPointXY(coord, projectionCode, sourceDatumFamily = "GDA94", transformContext = null) {
+    const lng = Number(coord?.[0]);
+    const lat = Number(coord?.[1]);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+    return transformExportPoint(lng, lat, projectionCode, sourceDatumFamily, transformContext);
+  }
+  function collectCsvRowsFromCollections(collections, projectionCode, transformContext = null) {
     const rows = [];
     const preferredOrder = [];
     const attrKeySet = new Set();
 
-    for (const { layer, featureCollection } of collections) {
+    for (const { layer, featureCollection, sourceDatumFamily = "unknown" } of collections) {
       (layer?.data?.exportFieldOrder || []).forEach((key) => {
         if (!preferredOrder.includes(key)) preferredOrder.push(key);
       });
@@ -3898,21 +4413,23 @@ function getPreferredPointXY(coord, props, projectionCode) {
 
         const pointSets = getPointCoordinateSets(feature?.geometry);
 pointSets.forEach((coord, pointIndex) => {
-  const preferredXY = getPreferredPointXY(coord, props, projectionCode);
-  if (!preferredXY) return;
-
-  const { x, y } = preferredXY;
-
-  const geomZ = Number(coord?.[2]);
-  const attrZ = getFeatureZValue(props, layer);
-  const zValue = Number.isFinite(geomZ) ? geomZ : attrZ;
+	  const preferredXY = getPreferredPointXY(coord, projectionCode, sourceDatumFamily, transformContext);
+	  if (!preferredXY) return;
+	
+	  const { x, y } = preferredXY;
+	  const csvX = formatExportNumber(x, projectionCode, "xy");
+	  const csvY = formatExportNumber(y, projectionCode, "xy");
+	
+	  const geomZ = Number(coord?.[2]);
+	  const attrZ = getFeatureZValue(props, layer);
+	  const zValue = Number.isFinite(geomZ) ? geomZ : attrZ;
 
           Object.keys(props).forEach((key) => attrKeySet.add(key));
 
-          rows.push({
-            feature_id: pointSets.length > 1 ? `${baseId}_${pointIndex + 1}` : baseId,
-            x: formatExportNumber(x, projectionCode, "xy"),
-            y: formatExportNumber(y, projectionCode, "xy"),
+	          rows.push({
+	            feature_id: pointSets.length > 1 ? `${baseId}_${pointIndex + 1}` : baseId,
+	            x: csvX,
+	            y: csvY,
             z:
               zValue !== "" && zValue !== null && zValue !== undefined
                 ? formatExportNumber(zValue, projectionCode, "z")
@@ -3934,8 +4451,8 @@ pointSets.forEach((coord, pointIndex) => {
     return { rows, orderedAttrKeys };
   }
 
-  function buildCombinedPointCsv(collections, projectionCode) {
-    const { rows, orderedAttrKeys } = collectCsvRowsFromCollections(collections, projectionCode);
+  function buildCombinedPointCsv(collections, projectionCode, transformContext = null) {
+    const { rows, orderedAttrKeys } = collectCsvRowsFromCollections(collections, projectionCode, transformContext);
 
     if (!rows.length) {
       throw new Error("No point features found inside the fence for CSV export.");
@@ -4041,27 +4558,27 @@ pointSets.forEach((coord, pointIndex) => {
     return out;
   }
 
-  function buildDxfFromCollections(collections, projectionCode) {
+  function buildDxfFromCollections(collections, projectionCode, transformContext = null) {
     const layerNames = [];
     let entities = "";
 
     const textHeight = isGeographicProjectionCode(projectionCode) ? 0.00015 : 1.5;
 
-    for (const { layer, featureCollection } of collections) {
+    for (const { layer, featureCollection, sourceDatumFamily = "unknown" } of collections) {
       const layerName = getLayerExportName(layer);
       layerNames.push(layerName);
 
-      (featureCollection?.features || []).forEach((feature) => {
+      (featureCollection?.features || []).forEach((feature, featureIndex) => {
         const props = feature?.properties || {};
         const geometry = feature?.geometry;
         const labelText = getFeatureLabelText(props, layer);
 
-const pointSets = getPointCoordinateSets(geometry);
+	const pointSets = getPointCoordinateSets(geometry);
 if (pointSets.length) {
   const pointTrueColor = getPointLayerDxfTrueColor(layer);
 
   pointSets.forEach((coord) => {
-    const preferredXY = getPreferredPointXY(coord, props, projectionCode);
+    const preferredXY = getPreferredPointXY(coord, projectionCode, sourceDatumFamily, transformContext);
     if (!preferredXY) return;
 
     const { x, y } = preferredXY;
@@ -4100,8 +4617,7 @@ if (pointSets.length) {
                 const lng = Number(coord?.[0]);
                 const lat = Number(coord?.[1]);
                 if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
-                const [x, y] = projectCoords(lng, lat, "EPSG:4326", projectionCode);
-                return { x, y };
+                return transformExportPoint(lng, lat, projectionCode, sourceDatumFamily, transformContext);
               })
               .filter(Boolean);
 
@@ -4113,8 +4629,16 @@ if (pointSets.length) {
           if (labelText && lineSets[0]?.length) {
             const anchor = getLineLabelCoord(lineSets[0]);
             if (anchor) {
-              const [x, y] = projectCoords(anchor[0], anchor[1], "EPSG:4326", projectionCode);
-              entities += buildDxfTextEntity(layerName, x, y, labelText, textHeight);
+              const anchorXY = transformExportPoint(anchor[0], anchor[1], projectionCode, sourceDatumFamily, transformContext);
+              if (anchorXY) {
+                entities += buildDxfTextEntity(
+                  layerName,
+                  anchorXY.x,
+                  anchorXY.y,
+                  labelText,
+                  textHeight
+                );
+              }
             }
           }
           return;
@@ -4128,8 +4652,7 @@ if (pointSets.length) {
                 const lng = Number(coord?.[0]);
                 const lat = Number(coord?.[1]);
                 if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
-                const [x, y] = projectCoords(lng, lat, "EPSG:4326", projectionCode);
-                return { x, y };
+                return transformExportPoint(lng, lat, projectionCode, sourceDatumFamily, transformContext);
               })
               .filter(Boolean);
 
@@ -4145,8 +4668,16 @@ if (pointSets.length) {
           if (labelText && ringSets[0]?.length) {
             const anchor = getPolygonLabelCoord(ringSets[0]);
             if (anchor) {
-              const [x, y] = projectCoords(anchor[0], anchor[1], "EPSG:4326", projectionCode);
-              entities += buildDxfTextEntity(layerName, x, y, labelText, textHeight);
+              const anchorXY = transformExportPoint(anchor[0], anchor[1], projectionCode, sourceDatumFamily, transformContext);
+              if (anchorXY) {
+                entities += buildDxfTextEntity(
+                  layerName,
+                  anchorXY.x,
+                  anchorXY.y,
+                  labelText,
+                  textHeight
+                );
+              }
             }
           }
         }
@@ -4248,28 +4779,34 @@ if (pointSets.length) {
 
           return {
             layer,
+            sourceDatumFamily: getLayerExportSourceDatumFamily(layer),
             featureCollection: applyLayerExportFilter(raw, layer),
           };
         })
       );
 
       const filename = buildExportFilename(exportFormat, exportProjection);
+      const transformContext = await prepareExportTransformContext(collections, exportProjection, exportFormat);
 
       if (exportFormat === "csv") {
-        const csvText = buildCombinedPointCsv(collections, exportProjection);
+        const csvText = buildCombinedPointCsv(collections, exportProjection, transformContext);
         downloadBlob(
           new Blob([csvText], { type: "text/csv;charset=utf-8;" }),
           filename
         );
       } else {
-        const dxfText = buildDxfFromCollections(collections, exportProjection);
+        const dxfText = buildDxfFromCollections(collections, exportProjection, transformContext);
         downloadBlob(
           new Blob([dxfText], { type: "application/dxf;charset=utf-8;" }),
           filename
         );
       }
 
-            setExportWarning(`Export complete: ${filename}`);
+            setExportWarning(
+              transformContext.usingBrowserFallback
+                ? `Export complete: ${filename}. ${transformContext.fallbackWarning || GDA2020_GRID_FALLBACK_WARNING}`
+                : `Export complete: ${filename}`
+            );
 //    clearExportInteraction();
     } catch (e) {
       console.error("Export failed:", e);
@@ -4307,6 +4844,9 @@ if (pointSets.length) {
     setExportCountSummary(null);
     setExportLargeConfirmArmed(false);
     setExportWarning("");
+    setExportDialogPosition(null);
+    exportDialogDragRef.current = null;
+    setExportDialogDragging(false);
     setExportDialogOpen(true);
   }
 
@@ -4350,8 +4890,9 @@ if (pointSets.length) {
       url: LGATE_076_QUERY,
       where: "1=1",
       minZoom: MIN_GEODETIC_ZOOM,
-      maxFeatures: MAX_FEATURES_PER_VIEW,
-      symbol: ssmTriangleSymbol,
+	      maxFeatures: MAX_FEATURES_PER_VIEW,
+	      exportSourceDatum: "GDA94",
+	      symbol: ssmTriangleSymbol,
       layerTag: "SSM",
       idFields: [
         "geodetic_point_pid",
@@ -4415,8 +4956,9 @@ if (!hasBM)
       url: LGATE_076_QUERY,
       where: "1=1",
       minZoom: MIN_GEODETIC_ZOOM,
-      maxFeatures: MAX_FEATURES_PER_VIEW,
-      symbol: bmSquareSymbol,
+	      maxFeatures: MAX_FEATURES_PER_VIEW,
+	      exportSourceDatum: "GDA94",
+	      symbol: bmSquareSymbol,
       layerTag: "BM",
       idFields: [
         "geodetic_point_pid",
@@ -4481,8 +5023,9 @@ if (!hasRM)
       url: LGATE_199_QUERY,
       where: "latest_status NOT LIKE '%DESTROY%' AND latest_status NOT LIKE '%REMOVE%'",
       minZoom: MIN_GEODETIC_ZOOM,
-      maxFeatures: MAX_FEATURES_PER_VIEW,
-      symbol: rmCrossSymbol,
+	      maxFeatures: MAX_FEATURES_PER_VIEW,
+	      exportSourceDatum: "GDA94",
+	      symbol: rmCrossSymbol,
       layerTag: "RM",
       idFields: [
         "reference_mark_pid",
@@ -5349,6 +5892,8 @@ if (layer.data?.clickable !== false) {
       markerId: id,
       layerId: layer.id,
     });
+
+    maybeLoadPopupPcg2020({ layer, name, props, lat, lng, markerId: id });
   });
 }
 
@@ -6107,10 +6652,10 @@ return (
         )}
 
         {exportDialogOpen && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
               zIndex: 15,
               background: "rgba(0,0,0,0.22)",
               display: "flex",
@@ -6120,6 +6665,7 @@ return (
             }}
           >
             <div
+              ref={exportDialogRef}
               style={{
                 width: "min(560px, 100%)",
                 background: "#fff",
@@ -6127,15 +6673,34 @@ return (
                 border: "1px solid rgba(0,0,0,0.12)",
                 boxShadow: "0 18px 36px rgba(0,0,0,0.22)",
                 padding: 16,
+                maxHeight: isMobile ? "calc(100vh - 84px)" : "calc(100vh - 40px)",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                ...(exportDialogPosition && !isMobile
+                  ? {
+                      position: "fixed",
+                      left: exportDialogPosition.left,
+                      top: exportDialogPosition.top,
+                      zIndex: 16,
+                    }
+                  : null),
               }}
             >
               <div
+                onPointerDown={handleExportDialogHeaderPointerDown}
+                onPointerMove={handleExportDialogHeaderPointerMove}
+                onPointerUp={endExportDialogDrag}
+                onPointerCancel={endExportDialogDrag}
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
                   gap: 10,
                   marginBottom: 12,
+                  cursor: isMobile ? "default" : exportDialogDragging ? "grabbing" : "grab",
+                  userSelect: exportDialogDragging ? "none" : undefined,
+                  touchAction: "none",
                 }}
               >
                 <div style={{ fontWeight: 950, fontSize: 15 }}>Export options</div>
@@ -6149,6 +6714,13 @@ return (
                 </button>
               </div>
 
+              <div
+                style={{
+                  overflowY: "auto",
+                  minHeight: 0,
+                  paddingRight: 2,
+                }}
+              >
               <div
                 style={{
                   fontSize: 12,
@@ -6249,6 +6821,11 @@ return (
                       </optgroup>
                     ))}
                   </select>
+                  {getProjectionDatumFamily(exportProjection) === "GDA2020" && !EXPORT_TRANSFORM_SERVICE_ENDPOINT ? (
+                    <span style={{ fontSize: 11, color: "#8a5a00", fontWeight: 750 }}>
+                      {GDA2020_GRID_FALLBACK_WARNING}
+                    </span>
+                  ) : null}
                 </label>
               </div>
 
@@ -6312,10 +6889,13 @@ return (
                   {exportWarning}
                 </div>
               ) : null}
+              </div>
 
               <div
                 style={{
                   marginTop: 14,
+                  paddingTop: 12,
+                  borderTop: "1px solid rgba(0,0,0,0.08)",
                   display: "flex",
                   justifyContent: "flex-end",
                   gap: 8,

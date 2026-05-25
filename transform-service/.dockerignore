@@ -1,0 +1,19 @@
+# Deployment-only dockerignore for Dockerfile.grid.
+# Build with: docker build -f Dockerfile.grid --ignorefile .dockerignore.grid ...
+
+.venv
+__pycache__
+.pytest_cache
+*.pyc
+*.pyo
+.git
+.gitignore
+DEPLOYMENT.md
+README.md
+tests/
+scripts/
+
+# Exclude any accidental grid copies except the intended private staging path.
+*.gsb
+*.gsa
+!private-grid/GDA94_GDA2020_conformal_and_distortion.gsb

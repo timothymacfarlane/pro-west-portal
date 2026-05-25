@@ -11,11 +11,15 @@ function Home() {
         <h3 className="card-title">Portal Updates</h3>
         <p style={{ fontSize: "0.85rem", color: "#555", marginTop: "0.35rem" }}>
           Portal fixes and updates will be listed here. The current version of the portal is shown in the footer of the of every page.
+          <br />
+          To access Pro West Portal: <strong>https://pro-west-portal.netlify.app/</strong>
         </p>
         <ul style={{ fontSize: "0.85rem", marginTop: "0.3rem", paddingLeft: "1.1rem" }}>
-          <strong>Current - v1.0.0</strong>
+          <strong>Current - v1.0.1</strong>
           <br />
-          Initial release after beta testing.
+          v1.0.1 - Maps export layers to different projections corrected, now works with MGA and PCG2020.
+           <br />
+          v1.0.0 - Initial release after beta testing.
           </ul>
       </div>
 

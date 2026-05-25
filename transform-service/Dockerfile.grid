@@ -1,0 +1,19 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TRANSFORM_MAX_POINTS=50000 \
+    TRANSFORM_SURVEY_GRADE_REQUIRED=true \
+    GDA2020_GRID_PATH=/app/proj-data/GDA94_GDA2020_conformal_and_distortion.gsb
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app ./app
+COPY proj-data ./proj-data
+COPY private-grid/GDA94_GDA2020_conformal_and_distortion.gsb /app/proj-data/GDA94_GDA2020_conformal_and_distortion.gsb
+
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
