@@ -15,8 +15,10 @@ function Home() {
           To access Pro West Portal: <strong>https://pro-west-portal.netlify.app/</strong>
         </p>
         <ul style={{ fontSize: "0.85rem", marginTop: "0.3rem", paddingLeft: "1.1rem" }}>
-          <strong>Current - v1.0.1</strong>
+          <strong>Current Version - v1.1.0</strong>
           <br />
+          v1.1.0 - Equipment Register page added.
+           <br />
           v1.0.1 - Maps export layers to different projections corrected, now works with MGA and PCG2020.
            <br />
           v1.0.0 - Initial release after beta testing.

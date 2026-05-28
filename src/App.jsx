@@ -11,6 +11,7 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword.jsx"));
 const Admin = lazy(() => import("./pages/Admin.jsx"));
 const Contacts = lazy(() => import("./pages/Contacts.jsx"));
 const Documents = lazy(() => import("./pages/Documents.jsx"));
+const EquipmentRegister = lazy(() => import("./pages/EquipmentRegister.jsx"));
 const Jobs = lazy(() => import("./pages/Jobs.jsx"));
 const JobPlanning = lazy(() => import("./pages/JobPlanning.jsx"));
 const MyJobs = lazy(() => import("./pages/MyJobs.jsx"));
@@ -259,6 +260,18 @@ const handleLogout = async () => {
                     <span className="nav-label">Documents</span>
                   </NavLink>
                 </li>
+
+                <li>
+                  <NavLink
+                    to="/equipment-register"
+                    className="nav-link"
+                    onClick={closeMobileSidebar}
+                  >
+                    <span className="nav-icon">🧾</span>
+                    <span className="nav-label">Equipment Register</span>
+                  </NavLink>
+                </li>
+
                 {/* ✅ ADDED: My Jobs */}
                 <li>
                   <NavLink
@@ -521,6 +534,15 @@ const handleLogout = async () => {
         element={
           <ProtectedRoute>
             <Take5Register />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/equipment-register"
+        element={
+          <ProtectedRoute>
+            <EquipmentRegister />
           </ProtectedRoute>
         }
       />
