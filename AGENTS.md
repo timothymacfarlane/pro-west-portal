@@ -219,6 +219,22 @@ When changing Supabase logic:
 - Do not expose service-role keys or secrets in frontend code.
 - Do not hard-code Supabase URLs or keys. Use env variables.
 
+When adding public Supabase tables:
+
+- Keep RLS enabled and define the required policies; frontend checks are not a substitute for RLS.
+- Do not grant `anon` access unless the feature explicitly and intentionally requires public unauthenticated Data API access.
+- Add explicit Data API grants in the same migration after `create table` and RLS policy setup:
+
+```sql
+grant usage on schema public to authenticated, service_role;
+
+grant select, insert, update, delete on table public.<table_name> to authenticated;
+grant all privileges on table public.<table_name> to service_role;
+
+grant usage, select on all sequences in schema public to authenticated;
+grant all privileges on all sequences in schema public to service_role;
+```
+
 ## Maps Page Rules
 
 `src/pages/Maps.jsx` is one of the most complex parts of the portal. Treat it carefully.
