@@ -19,7 +19,7 @@ const FOLDER_TEMPLATE = [
   path.join("DOCS", "RECEIVED", "WAPC"),
   path.join("DOCS", "RECEIVED", "WC"),
   path.join("DOCS", "RECEIVED", "WP"),
-  "SARAH",
+  path.join("DOCS", "SARAH"),
   "DWG",
   "MAGNET",
   "PHOTOS",
