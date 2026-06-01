@@ -3,18 +3,13 @@ import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
-import { cleanDisplayAddress } from "../lib/displayFormatters.js";
+import { getJobAddressWarning } from "../lib/jobAddress.js";
 
 const STATUS_OPTIONS = ["In progress", "On hold", "Complete"];
 const PAGE_SIZE = 30;
 
 function addressSummaryFromRow(r) {
-  const a =
-    (r?.full_address || "").trim() ||
-    [r?.street_number, r?.street_name, r?.suburb].filter(Boolean).join(" ").trim() ||
-    (r?.suburb || "").trim() ||
-    "—";
-  return cleanDisplayAddress(a) || "—";
+  return getJobAddressWarning(r).displayAddress;
 }
 
 function formatDateAU(v) {
@@ -102,7 +97,15 @@ function ReassignModal({ open, job, staffOptions, onClose, onConfirm, busy }) {
             <h3 className="card-title" style={{ marginBottom: 4 }}>
               Re-assign job #{job?.job_number ?? "—"}
             </h3>
-            <div style={{ fontSize: 12, opacity: 0.75 }}>{addressSummaryFromRow(job)}</div>
+            {(() => {
+              const addressState = getJobAddressWarning(job);
+              return (
+                <div className={addressState.label ? "manual-address-warning" : ""} style={{ fontSize: 12, opacity: 0.85 }}>
+                  {addressState.displayAddress}
+                  {addressState.label && <span className="manual-address-badge">{addressState.label}</span>}
+                </div>
+              );
+            })()}
           </div>
           <button className="btn-pill" type="button" onClick={onClose} disabled={busy}>
             Close
@@ -563,6 +566,7 @@ function MyJobs() {
         <div style={{ marginTop: 12, display: "grid", gap: 10 }} data-myjobs-list>
           {rows.map((r) => {
             const addr = addressSummaryFromRow(r);
+            const addressState = getJobAddressWarning(r);
             const client = (r.client_company || r.client_name || "—").trim();
 
             return (
@@ -583,8 +587,9 @@ function MyJobs() {
                         • {r.status || "—"}
                       </span>
                     </div>
-                    <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
+                    <div className={addressState.label ? "manual-address-warning" : ""} style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
                       {addr}
+                      {addressState.label && <span className="manual-address-badge">{addressState.label}</span>}
                     </div>
                     <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
                       <b>Client:</b> {client}

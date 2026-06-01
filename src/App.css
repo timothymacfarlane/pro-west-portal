@@ -1161,6 +1161,32 @@
 .maps-selected-suburb { color: #444; margin-top: 0.15rem; }
 .maps-selected-address { color: #666; font-size: 0.8rem; margin-top: 0.1rem; }
 
+.manual-address-warning {
+  color: inherit;
+}
+
+.manual-address-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-left: 0.4rem;
+  padding: 0.08rem 0.36rem;
+  border: 1px solid rgba(183, 28, 28, 0.28);
+  border-radius: 999px;
+  background: rgba(211, 47, 47, 0.08);
+  color: var(--pw-primary-dark);
+  font-size: 0.64rem;
+  font-weight: 400;
+  line-height: 1.2;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.manual-address-badge.block {
+  display: flex;
+  margin: 0.25rem 0 0;
+}
+
 .maps-selected-buttons {
   margin-top: 0.5rem;
   display: flex;

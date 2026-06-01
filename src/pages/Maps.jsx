@@ -17,6 +17,7 @@ import {
 import { supabase } from "../lib/supabaseClient.js";
 import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 import { cleanDisplayAddress } from "../lib/displayFormatters.js";
+import { getJobAddressWarning } from "../lib/jobAddress.js";
 
 registerProjectionDefs();
 /**
@@ -2052,15 +2053,17 @@ const notePayload = {
   }, [currentUserId, currentUserName, currentUserIsAdmin, mapNotes]);
 
 
-// ✅ Suggestions: job_number only
+// ✅ Suggestions: job_number/client name, including jobs without coordinates/address
  const jobNumberSuggestions = useMemo(() => {
   const q = String(jobNumberQuery || "").trim();
   if (!q) return [];
+  const needle = q.toLowerCase();
 
   const results = [];
 
   for (const j of portalJobs || []) {
-    if (String(j.job_number ?? "").includes(q)) {
+    const haystack = [j.job_number, j.client_name].filter(Boolean).join(" ").toLowerCase();
+    if (haystack.includes(needle)) {
       results.push(j);
       if (results.length >= 12) break;
     }
@@ -2407,11 +2410,8 @@ if (!isWA) {
       const { data, error } = await supabase
         .from("jobs")
         .select(
-  "id, job_number, client_name, status, full_address, suburb, local_authority, job_type_legacy, assigned_to, mga_zone, mga_easting, mga_northing, place_id"
+  "id, job_number, client_name, status, full_address, street_number, street_name, suburb, local_authority, job_type_legacy, assigned_to, mga_zone, mga_easting, mga_northing, place_id"
 )
-        .not("mga_zone", "is", null)
-        .not("mga_easting", "is", null)
-        .not("mga_northing", "is", null)
         .order("job_number", { ascending: false })
         .limit(99999);
 
@@ -2778,7 +2778,12 @@ function openMainInfoWindow({ html, marker, markerId, layerId }) {
     if (!map || !window.google) return;
 
     const safeClient = job.client_name || "—";
-    const safeAddr = cleanDisplayAddress(job.full_address) || "—";
+    const addressState = getJobAddressWarning(job);
+    const safeAddr = addressState.displayAddress;
+    const addressStyle = "color:#111;";
+    const addressBadge = addressState.label
+      ? `<span style="display:inline-flex; margin-left:6px; padding:1px 6px; border:1px solid rgba(183,28,28,0.28); border-radius:999px; background:rgba(211,47,47,0.08); color:#b71c1c; font-size:10px; font-weight:400; line-height:1.2; white-space:nowrap;">${addressState.label}</span>`
+      : "";
     const safeStatus = job.status || "Planned";
    
     const safeAssigned =
@@ -2800,7 +2805,7 @@ const safeLA =
   ${safeClient} · ${safeStatus}
 </div>
 
-<div style="color:#111; margin-top:6px;">${safeAddr}</div>
+<div style="${addressStyle} margin-top:6px;">${safeAddr}${addressBadge}</div>
 
 <div style="margin-top:8px; font-size:12px; color:#333;">
   <div><span style="font-weight:900;">Assigned:</span> ${safeAssigned}</div>
@@ -2846,14 +2851,19 @@ const safeLA =
   if (!map) return;
 
   const safeClient = job.client_name || "—";
-  const safeAddr = cleanDisplayAddress(job.full_address) || "—";
+  const addressState = getJobAddressWarning(job);
+  const safeAddr = addressState.displayAddress;
+  const addressStyle = "color:#111;";
+  const addressBadge = addressState.label
+    ? `<span style="display:inline-flex; margin-left:6px; padding:1px 6px; border:1px solid rgba(183,28,28,0.28); border-radius:999px; background:rgba(211,47,47,0.08); color:#b71c1c; font-size:10px; font-weight:400; line-height:1.2; white-space:nowrap;">${addressState.label}</span>`
+    : "";
   const safeJobType = job.job_type_legacy || "—";
 
   const html = `
     <div style="font-family: Inter, system-ui, sans-serif; font-size: 12px; min-width: 230px;">
       <div style="font-weight:900; font-size:13px; color:#111;">Job #${job.job_number}</div>
       <div style="font-weight:800; color:#333; margin-top:2px;">${safeClient}</div>
-      <div style="color:#111; margin-top:2px;">${safeAddr}</div>
+      <div style="${addressStyle} margin-top:2px;">${safeAddr}${addressBadge}</div>
       <div style="color:#333; margin-top:5px; font-weight:800;">
         Type: ${safeJobType}
       </div>
@@ -2883,7 +2893,7 @@ const safeLA =
     let marker = portalMarkersByIdRef.current.get(id);
     if (!marker) {
  const safeClient = job.client_name || "—";
-const titleAddr = job.full_address || "—";
+const titleAddr = getJobAddressWarning(job).displayAddress;
 const safeJobType = job.job_type_legacy || "—";
 
 marker = new window.google.maps.Marker({
@@ -2996,13 +3006,107 @@ marker = new window.google.maps.Marker({
     map.setZoom(Math.max(current, targetZoom));
   };
 
+const showAddressMarker = (addressString, position, title = addressString) => {
+  const map = mapRef.current;
+  if (!map || !window.google || !position) return;
+
+  map.setCenter(position);
+  map.setZoom(17);
+
+  if (!addressMarkerRef.current) {
+    addressMarkerRef.current = new window.google.maps.Marker({
+      position,
+      map,
+      title,
+      icon: {
+        path: window.google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+        fillColor: "#ffb300",
+        fillOpacity: 1,
+        strokeColor: "#ffffff",
+        strokeWeight: 1,
+        scale: 6,
+      },
+    });
+  } else {
+    addressMarkerRef.current.setPosition(position);
+    addressMarkerRef.current.setTitle(title);
+    if (!addressMarkerRef.current.getMap()) addressMarkerRef.current.setMap(map);
+  }
+
+  setSelectedAddress({
+    address: addressString,
+    lat: position.lat,
+    lng: position.lng,
+  });
+  openAddressInfo(addressString, position, addressMarkerRef.current);
+};
+
+const focusPortalJobAddress = (job, addressState) => {
+  const map = mapRef.current;
+  if (!map || !window.google) return false;
+
+  const label = job?.job_number ? `Job #${job.job_number}` : "Selected job";
+
+  if (addressState.hasGoogleAddress && window.google.maps.places?.PlacesService) {
+    const service = new window.google.maps.places.PlacesService(map);
+    service.getDetails(
+      { placeId: String(job.place_id).trim(), fields: ["geometry", "formatted_address", "name"] },
+      (place, status) => {
+        if (status !== window.google.maps.places.PlacesServiceStatus.OK) {
+          setPortalJobsError("Google could not locate this job address. Please verify the job address from the Jobs page.");
+          return;
+        }
+        const loc = place?.geometry?.location;
+        if (!loc) {
+          setPortalJobsError("Google could not locate this job address. Please verify the job address from the Jobs page.");
+          return;
+        }
+
+        const addressString = place.formatted_address || place.name || addressState.displayAddress || label;
+        showAddressMarker(addressString, { lat: loc.lat(), lng: loc.lng() }, addressString);
+      }
+    );
+    return true;
+  }
+
+  if (addressState.fallbackAddress && window.google.maps.Geocoder) {
+    const geocoder = new window.google.maps.Geocoder();
+    geocoder.geocode(
+      { address: addressState.fallbackAddress, componentRestrictions: { country: "AU" } },
+      (results, status) => {
+        if (status !== "OK" || !results?.[0]?.geometry?.location) {
+          setPortalJobsError("Google could not locate this manual address. Please verify the job address from the Jobs page.");
+          return;
+        }
+
+        const loc = results[0].geometry.location;
+        const addressString = results[0].formatted_address || addressState.fallbackAddress;
+        showAddressMarker(addressString, { lat: loc.lat(), lng: loc.lng() }, addressString);
+      }
+    );
+    return true;
+  }
+
+  return false;
+};
+
 const handleSelectPortalJob = (job) => {
+  const addressState = getJobAddressWarning(job);
+  if (addressState.hasNoAddress) {
+    setPortalJobsError("This job does not currently have a searchable address. Please update the job address from the Jobs page.");
+    return;
+  }
   setPortalSelectedJobId(job.id);
+  setPortalJobsError("");
+
+  const pt = portalPointsByIdRef.current.get(job.id);
+  if (addressState.hasGoogleAddress && focusPortalJobAddress(job, addressState)) return;
+  if (!pt && focusPortalJobAddress(job, addressState)) return;
+
   focusPortalJob(job);
 
   // Open the summary popup automatically after the map recentres
   setTimeout(() => {
-    const pt = portalPointsByIdRef.current.get(job.id);
     const marker = getOrCreatePortalMarker(job.id);
 
     if (pt && marker) {
@@ -3040,15 +3144,9 @@ const handleSelectPortalJob = (job) => {
 
       const match = (portalJobs || []).find((j) => Number(j.job_number) === jn);
       if (match) {
-        setPortalSelectedJobId(match.id);
+        handleSelectPortalJob(match);
         setJobNumberQuery(String(match.job_number ?? ""));
         setJobPicked(true);
-
-        // respect current All Jobs toggle:
-        // - if ON -> many markers in view
-        // - if OFF -> only this marker
-        focusPortalJob(match);
-
         deepLinkDoneRef.current = true;
         return true;
       }
@@ -7320,44 +7418,49 @@ onBlur={() => {
                           overflowY: "auto",
                         }}
                       >
-                        {jobNumberSuggestions.map((job, idx) => (
-                          <button
-                            key={job.id}
-                            type="button"
-                            onClick={() => {
-                              // if All Jobs is OFF -> only this job will show
-                              // if All Jobs is ON -> in-view jobs show, and this job goes green
-                              handleSelectPortalJob(job);
-                              setJobNumberQuery(String(job.job_number ?? ""));
-                              setJobPicked(true);
-                            }}
-                            style={{
-                              width: "100%",
-                              border: "none",
-                              background: jobNumberActiveIndex === idx ? "rgba(0,0,0,0.06)" : "#fff",
-                              padding: "10px 10px",
-                              cursor: "pointer",
-                              textAlign: "left",
-                              borderBottom: "1px solid rgba(0,0,0,0.06)",
-                            }}
-                            onMouseEnter={() => setJobNumberActiveIndex(idx)}
-                            onMouseLeave={() => setJobNumberActiveIndex(-1)}
-                          >
-                            <div style={{ fontWeight: 900, fontSize: 13, color: "#111" }}>
-                              Job #{job.job_number}
-                            </div>
-                            <div
-                              style={{
-                                fontWeight: 700,
-                                fontSize: 12,
-                                color: "#444",
-                                marginTop: 2,
+                        {jobNumberSuggestions.map((job, idx) => {
+                          const addressState = getJobAddressWarning(job);
+                          return (
+                            <button
+                              key={job.id}
+                              type="button"
+                              onClick={() => {
+                                // if All Jobs is OFF -> only this job will show
+                                // if All Jobs is ON -> in-view jobs show, and this job goes green
+                                handleSelectPortalJob(job);
+                                setJobNumberQuery(String(job.job_number ?? ""));
+                                setJobPicked(true);
                               }}
+                              style={{
+                                width: "100%",
+                                border: "none",
+                                background: jobNumberActiveIndex === idx ? "rgba(0,0,0,0.06)" : "#fff",
+                                padding: "10px 10px",
+                                cursor: "pointer",
+                                textAlign: "left",
+                                borderBottom: "1px solid rgba(0,0,0,0.06)",
+                              }}
+                              onMouseEnter={() => setJobNumberActiveIndex(idx)}
+                              onMouseLeave={() => setJobNumberActiveIndex(-1)}
                             >
-                              {(job.client_name || "—") + " · " + (cleanDisplayAddress(job.full_address) || "—")}
-                            </div>
-                          </button>
-                        ))}
+                              <div style={{ fontWeight: 900, fontSize: 13, color: "#111" }}>
+                                Job #{job.job_number}
+                              </div>
+                              <div
+                                className={addressState.label ? "manual-address-warning" : ""}
+                                style={{
+                                  fontWeight: 700,
+                                  fontSize: 12,
+                                  color: "#444",
+                                  marginTop: 2,
+                                }}
+                              >
+                                {(job.client_name || "—") + " · " + addressState.displayAddress}
+                                {addressState.label && <span className="manual-address-badge">{addressState.label}</span>}
+                              </div>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                 </div>

@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 import { supabase } from "../lib/supabaseClient.js";
 import { cleanDisplayAddress } from "../lib/displayFormatters.js";
+import { getJobAddressWarning } from "../lib/jobAddress.js";
 import { useNavigate, useLocation } from "react-router-dom";
 
 import proj4 from "proj4";
@@ -189,12 +190,7 @@ function stripAustralia(addr) {
   return (addr || "").toString().replace(/,?\s*Australia\s*$/i, "").trim();
 }
 function addressSummaryFromRow(r) {
-  const a =
-    (r?.full_address || "").trim() ||
-    [r?.street_number, r?.street_name, r?.suburb].filter(Boolean).join(" ").trim() ||
-    (r?.suburb || "").trim() ||
-    "—";
-  return cleanDisplayAddress(a) || "—";
+  return getJobAddressWarning(r).displayAddress;
 }
 
 function jobClientText(row) {
@@ -2900,6 +2896,10 @@ let q = supabase
     client_surname,
     client_name,
     full_address,
+    place_id,
+    street_number,
+    street_name,
+    suburb,
     lot_number,
     plan_number,
     local_authority,
@@ -3041,7 +3041,7 @@ q = q.range(from, to);
     try {
       const { data, error } = await supabase
         .from("jobs")
-        .select("id, job_number, full_address, street_number, street_name, suburb, job_type_legacy, lot_number, plan_number, client_company, client_first_name, client_surname")
+        .select("id, job_number, full_address, street_number, street_name, suburb, job_type_legacy, lot_number, plan_number, client_company, client_first_name, client_surname, place_id")
         .like("job_number_text", `${q}%`)
         .order("job_number", { ascending: false })
         .limit(20);
@@ -3054,6 +3054,7 @@ setJobNoSuggestions(
     job_number: r.job_number,
     job_type_legacy: r.job_type_legacy || "",
     address: addressSummaryFromRow(r),
+    place_id: r.place_id || "",
     lot_number: r.lot_number || "",
     plan_number: r.plan_number || "",
     client_company: r.client_company || "",
@@ -3082,7 +3083,7 @@ async function runGlobalSuggest(query) {
 
     let queryBuilder = supabase
       .from("jobs")
-      .select("id, job_number, full_address, street_number, street_name, suburb, client_company, client_first_name, client_surname, lot_number, plan_number, job_type_legacy, assigned_to")
+      .select("id, job_number, full_address, street_number, street_name, suburb, client_company, client_first_name, client_surname, lot_number, plan_number, job_type_legacy, assigned_to, place_id")
       .order("job_number", { ascending: false })
       .limit(20);
 
@@ -3117,6 +3118,7 @@ async function runGlobalSuggest(query) {
   job_number: r.job_number,
   job_type_legacy: r.job_type_legacy || "",
   address: addressSummaryFromRow(r),
+  place_id: r.place_id || "",
   lot_number: r.lot_number || "",
   plan_number: r.plan_number || "",
   client_company: r.client_company || "",
@@ -3624,9 +3626,15 @@ useEffect(() => {
     {j.job_type_legacy ? ` · ${j.job_type_legacy}` : ""}
   </div>
 
-  <div className="contacts-suggestion-role">
-    {`${safeText(cleanDisplayAddress(j.address))}${jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}`}
-  </div>
+  {(() => {
+    const addressState = getJobAddressWarning(j);
+    return (
+      <div className={`contacts-suggestion-role ${addressState.label ? "manual-address-warning" : ""}`}>
+        {`${safeText(addressState.displayAddress)}${jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}`}
+        {addressState.label && <span className="manual-address-badge">{addressState.label}</span>}
+      </div>
+    );
+  })()}
 
   {jobClientText(j) && (
     <div
@@ -3760,9 +3768,15 @@ onClick={() => {
     {j.job_type_legacy ? ` · ${j.job_type_legacy}` : ""}
   </div>
 
-  <div className="contacts-suggestion-role">
-    {`${safeText(cleanDisplayAddress(j.address))}${jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}`}
-  </div>
+  {(() => {
+    const addressState = getJobAddressWarning(j);
+    return (
+      <div className={`contacts-suggestion-role ${addressState.label ? "manual-address-warning" : ""}`}>
+        {`${safeText(addressState.displayAddress)}${jobLotPlanText(j) ? ` ${jobLotPlanText(j)}` : ""}`}
+        {addressState.label && <span className="manual-address-badge">{addressState.label}</span>}
+      </div>
+    );
+  })()}
 
   {jobClientText(j) && (
     <div
@@ -3976,7 +3990,15 @@ onClick={() => {
   {jobClientDisplayLiveFirst(r)}
 </td>
 <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", minWidth: 260 }}>
-  {cleanDisplayAddress(r.full_address) || "—"}
+  {(() => {
+    const addressState = getJobAddressWarning(r);
+    return (
+      <span className={addressState.label ? "manual-address-warning" : ""}>
+        {addressState.displayAddress}
+        {addressState.label && <span className="manual-address-badge">{addressState.label}</span>}
+      </span>
+    );
+  })()}
 </td>
 <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
   {jobLotPlanRegisterText(r)}
@@ -4294,9 +4316,15 @@ onClick={() => {
 
 <div style={{ gridColumn: "1 / -1" }}>
   <div style={{ fontSize: 12, fontWeight: 900, opacity: 0.85 }}>Address</div>
-  <div style={{ marginTop: 4 }}>
-    {cleanDisplayAddress(selected.full_address) || addressSummaryFromRow(selected)}
-  </div>
+  {(() => {
+    const addressState = getJobAddressWarning(selected);
+    return (
+      <div className={addressState.label ? "manual-address-warning" : ""} style={{ marginTop: 4 }}>
+        {addressState.displayAddress}
+        {addressState.label && <span className="manual-address-badge">{addressState.label}</span>}
+      </div>
+    );
+  })()}
   <div style={{ marginTop: 6 }}><b>Lot / Plan:</b> {jobLotPlanSummaryText(selected)}</div>
   <div style={{ marginTop: 4 }}><b>LGA:</b> {selected.local_authority || "—"}</div>
 </div>
