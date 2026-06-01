@@ -851,6 +851,8 @@ function Maps() {
 
   const addressInputRef = useRef(null);
   const addressAutocompleteRef = useRef(null);
+  const addressAutocompleteInputRef = useRef(null);
+  const addressAutocompleteListenerRef = useRef(null);
   const jobNumberInputRef = useRef(null);
 
   const infoWindowRef = useRef(null);
@@ -868,6 +870,9 @@ function Maps() {
   const layersRef = useRef([]);
   const [geodeticNotice, setGeodeticNotice] = useState("");
   const [viewTick, setViewTick] = useState(0);
+  const [googleMapsReady, setGoogleMapsReady] = useState(
+    () => typeof window !== "undefined" && !!window.google?.maps
+  );
 
   const toolsControlDivRef = useRef(null);
   const idleDebounceRef = useRef(null);
@@ -877,6 +882,35 @@ function Maps() {
 useEffect(() => {
   layersRef.current = layers;
 }, [layers]);
+
+useEffect(() => {
+  if (typeof window === "undefined") return undefined;
+  if (window.google?.maps) {
+    setGoogleMapsReady(true);
+    return undefined;
+  }
+
+  let cancelled = false;
+  let pollId = null;
+  const mapsScript = document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]');
+
+  const markReady = () => {
+    if (!cancelled && window.google?.maps) {
+      setGoogleMapsReady(true);
+      if (pollId) window.clearInterval(pollId);
+    }
+  };
+
+  mapsScript?.addEventListener("load", markReady);
+  pollId = window.setInterval(markReady, 250);
+  markReady();
+
+  return () => {
+    cancelled = true;
+    mapsScript?.removeEventListener("load", markReady);
+    if (pollId) window.clearInterval(pollId);
+  };
+}, []);
 
   // Fetch throttles + caches
 const lastFetchRef = useRef({
@@ -916,7 +950,11 @@ const lineLayersRef = useRef(new Map());
   // Notes markers + info windows
   const noteMarkersByIdRef = useRef(new Map());
   const noteInfoWindowRef = useRef(null);
+  const openNoteInfoRef = useRef(null);
+  const activeNoteInfoIdRef = useRef(null);
   const noteComposerIWRef = useRef(null);
+  const pointInfoWindowRef = useRef(null);
+  const lastMapTapRef = useRef({ at: 0, lat: null, lng: null });
   const noteClickListenerRef = useRef(null);
 
   // Measurement
@@ -983,13 +1021,21 @@ useEffect(() => {
 }, [mapNotes]);
 
   const [noteAddMode, setNoteAddMode] = useState(false);
+  const noteAddModeRef = useRef(false);
   const [notesSyncError, setNotesSyncError] = useState("");
+
+  useEffect(() => {
+    noteAddModeRef.current = noteAddMode;
+  }, [noteAddMode]);
 
   const [currentUserName, setCurrentUserName] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
   const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState(false);
   const [showAllNotes, setShowAllNotes] = useState(() => {
     const s = safeReadState() || {};
+    if (s.notesVisibility && typeof s.notesVisibility.showAllNotes === "boolean") {
+      return s.notesVisibility.showAllNotes;
+    }
     return typeof s.showAllNotes === "boolean" ? s.showAllNotes : false;
   });
 
@@ -1196,6 +1242,10 @@ const toggleMapsDrawer = () => setMobilePanelCollapsed((prev) => !prev);
   // Load + realtime sync for cross-device notes
 useEffect(() => {
   if (!isAppVisible) return;
+  if (!showAllNotes && !portalSelectedJobId) {
+    setNotesSyncError("");
+    return;
+  }
 
   let mounted = true;
 
@@ -1221,7 +1271,7 @@ useEffect(() => {
       supabase.removeChannel(channel);
     } catch {}
   };
-}, [isAppVisible]);
+}, [isAppVisible, portalSelectedJobId, showAllNotes]);
 
 // Persist UI state
   useEffect(() => {
@@ -1232,29 +1282,16 @@ useEffect(() => {
       panelOpen,
       showAllPortalJobs,
       portalSelectedJobId,
-      showAllNotes,
     });
-  }, [jobNumberQuery, jobPicked, activeTab, panelOpen, showAllPortalJobs, portalSelectedJobId, showAllNotes]);
+  }, [jobNumberQuery, jobPicked, activeTab, panelOpen, showAllPortalJobs, portalSelectedJobId]);
 
-
-  // Notes filter default:
-  // - If no job is selected, we must show all notes.
-  // - When a job becomes selected from none, default to showing that job’s notes.
-  const prevSelectedJobRef = useRef(null);
-  useEffect(() => {
-    const prev = prevSelectedJobRef.current;
-    prevSelectedJobRef.current = portalSelectedJobId || null;
-
-    if (!portalSelectedJobId) {
-      setShowAllNotes(true);
-      return;
-    }
-
-    if (!prev) {
-      // first job selection
-      setShowAllNotes(false);
-    }
-  }, [portalSelectedJobId]);
+  const handleShowAllNotesChange = useCallback((checked) => {
+    setShowAllNotes(checked);
+    safeWriteState({
+      showAllNotes: checked,
+      notesVisibility: { showAllNotes: checked },
+    });
+  }, []);
 
     const visibleExportableLayers = useMemo(
     () =>
@@ -1335,7 +1372,7 @@ useEffect(() => {
       });
 
       marker.addListener("click", () => {
-        openNoteInfo(n.id);
+        openNoteInfoRef.current?.(n.id, { source: "marker" });
       });
 
       noteMarkersByIdRef.current.set(n.id, marker);
@@ -1355,6 +1392,11 @@ useEffect(() => {
   };
 
   const deleteNoteById = async (id) => {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this note? This action cannot be undone."
+    );
+    if (!confirmed) return;
+
     // Optimistic UI (feels instant)
     const prevNotes = mapNotes || [];
     setMapNotes((prev) => (prev || []).filter((n) => n.id !== id));
@@ -1372,6 +1414,7 @@ useEffect(() => {
     try {
       noteInfoWindowRef.current?.close();
       noteComposerIWRef.current?.close();
+      if (activeNoteInfoIdRef.current === id) activeNoteInfoIdRef.current = null;
     } catch {
       // ignore
     }
@@ -1394,6 +1437,7 @@ useEffect(() => {
         const note = (mapNotesRef.current || []).find((n) => n.id === id);
     if (!note) return;
 
+    activeNoteInfoIdRef.current = id;
 
     // Show measurement overlay (if this note has one) and hide others
     try {
@@ -1670,6 +1714,65 @@ if (updated) {
       }
     });
   };
+  openNoteInfoRef.current = openNoteInfo;
+
+  const canOpenTemporaryPointPopup = () =>
+    !noteAddModeRef.current &&
+    !measureModeRef.current &&
+    !exportModeRef.current &&
+    !infoModeRef.current;
+
+  const openTemporaryPointInfo = (latLng) => {
+    const map = mapRef.current;
+    if (!map || !window.google?.maps || !pointInfoWindowRef.current || !latLng) return;
+    if (!canOpenTemporaryPointPopup()) return;
+
+    const lat = typeof latLng.lat === "function" ? latLng.lat() : Number(latLng.lat);
+    const lng = typeof latLng.lng === "function" ? latLng.lng() : Number(latLng.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+    const mga = wgs84ToMga2020(lat, lng);
+    const mgaLine = mga
+      ? `MGA2020 (Zone ${mga.zone}) — E ${fmtMGA(mga.easting)}  N ${fmtMGA(mga.northing)}`
+      : "";
+    const position = { lat, lng };
+
+    const html = `
+      <div style="font-family: Inter, system-ui, sans-serif; font-size: 12px; min-width: 220px;">
+        <div data-pw-drag-handle="1" style="display:flex; justify-content:space-between; align-items:center; gap:10px;"></div>
+        <div style="display:flex; gap:8px; margin-top:10px;">
+          <button id="point-goto"
+            style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:10px;
+                   border:2px solid #111; color:#111; background:#fff; font-weight:900; font-size:12px; cursor:pointer;">
+            📍 Go To
+          </button>
+          <a onclick="window.__pwMapsPrepareExternalNav && window.__pwMapsPrepareExternalNav()" href="${buildDirectionsUrl(lat, lng)}"
+             rel="noreferrer"
+             style="flex:1; text-align:center; text-decoration:none; padding:7px 8px; border-radius:10px;
+                    border:2px solid #111; color:#fff; background:#111; font-weight:900; font-size:12px;">
+            🚗 Directions
+          </a>
+        </div>
+        ${mgaLine ? `<div style="margin-top:8px; font-size:11px; color:#444; font-weight:800;">${mgaLine}</div>` : ""}
+      </div>
+    `;
+
+    pointInfoWindowRef.current.setContent(html);
+    pointInfoWindowRef.current.setPosition(position);
+    pointInfoWindowRef.current.open({ map });
+
+    window.google.maps.event.addListenerOnce(pointInfoWindowRef.current, "domready", () => {
+      setTimeout(makeLatestInfoWindowDraggable, 0);
+      const goToBtn = document.getElementById("point-goto");
+      if (goToBtn) {
+        goToBtn.onclick = () => {
+          const z = map.getZoom() || 16;
+          map.panTo(position);
+          map.setZoom(Math.max(z, 18));
+        };
+      }
+    });
+  };
 
   const openNoteComposer = (lat, lng) => {
     const map = mapRef.current;
@@ -1940,6 +2043,14 @@ const notePayload = {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleNotes]);
 
+  useEffect(() => {
+    const id = activeNoteInfoIdRef.current;
+    if (!id || !noteInfoWindowRef.current?.getMap?.()) return;
+    if (!(mapNotesRef.current || []).some((n) => n.id === id)) return;
+    openNoteInfo(id, { zoom: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId, currentUserName, currentUserIsAdmin, mapNotes]);
+
 
 // ✅ Suggestions: job_number only
  const jobNumberSuggestions = useMemo(() => {
@@ -1965,7 +2076,7 @@ const notePayload = {
 
   // Initialise map once
   useEffect(() => {
-    if (!window.google || !mapDivRef.current || mapRef.current) return;
+    if (!googleMapsReady || !window.google?.maps || !mapDivRef.current || mapRef.current) return;
 
   const mobile =
   typeof window !== "undefined" &&
@@ -1991,6 +2102,7 @@ const notePayload = {
   clickableIcons: false,
   controlSize: mobile ? 24 : 28,
   gestureHandling: "greedy",
+  disableDoubleClickZoom: true,
   tilt: 0,
 });
 
@@ -2016,8 +2128,12 @@ const infoCloseListener = window.google.maps.event.addListener(infoWindowRef.cur
       disableAutoPan: true,
     });
     noteInfoWindowRef.current = new window.google.maps.InfoWindow();
+    const noteCloseListener = window.google.maps.event.addListener(noteInfoWindowRef.current, "closeclick", () => {
+      activeNoteInfoIdRef.current = null;
+    });
     noteComposerIWRef.current = new window.google.maps.InfoWindow({ maxWidth: 320 });
     addressInfoWindowRef.current = new window.google.maps.InfoWindow({ maxWidth: 320 });
+    pointInfoWindowRef.current = new window.google.maps.InfoWindow({ maxWidth: 280 });
 
     // ✅ Render saved notes immediately
     try {
@@ -2027,11 +2143,36 @@ const infoCloseListener = window.google.maps.event.addListener(infoWindowRef.cur
     }
 
     const mapClickListener = map.addListener("click", (e) => {
-  if (!infoModeRef.current) return;
-  if (!e?.latLng) return;
+      if (mobile && e?.latLng && canOpenTemporaryPointPopup()) {
+        const now = Date.now();
+        const last = lastMapTapRef.current || {};
+        const lat = e.latLng.lat();
+        const lng = e.latLng.lng();
+        const samePoint =
+          Number.isFinite(last.lat) &&
+          Number.isFinite(last.lng) &&
+          Math.abs(lat - last.lat) < 0.00008 &&
+          Math.abs(lng - last.lng) < 0.00008;
 
-  openMapInfoPopupAtLatLng(e.latLng);
-});
+        if (now - (last.at || 0) < 350 && samePoint) {
+          lastMapTapRef.current = { at: 0, lat: null, lng: null };
+          openTemporaryPointInfo(e.latLng);
+          return;
+        }
+
+        lastMapTapRef.current = { at: now, lat, lng };
+      }
+
+      if (!infoModeRef.current) return;
+      if (!e?.latLng) return;
+
+      openMapInfoPopupAtLatLng(e.latLng);
+    });
+
+    const mapDblClickListener = map.addListener("dblclick", (e) => {
+      if (!e?.latLng) return;
+      openTemporaryPointInfo(e.latLng);
+    });
  
     // Persist view/type on idle + tick
 const idleListener = map.addListener("idle", () => {
@@ -2060,7 +2201,9 @@ const idleListener = map.addListener("idle", () => {
 mapRuntimeListenersRef.current = [
   tiltListener,
   infoCloseListener,
+  noteCloseListener,
   mapClickListener,
+  mapDblClickListener,
   idleListener,
 ];
 return () => {
@@ -2077,7 +2220,7 @@ return () => {
     idleDebounceRef.current = null;
   }
 };
-  }, []);
+  }, [googleMapsReady]);
   // Pause Google Maps interaction when app is backgrounded (mobile battery saver)
 useEffect(() => {
   const map = mapRef.current;
@@ -2099,18 +2242,29 @@ useEffect(() => {
 }, [isAppVisible]);
 
 
-  // ✅ FIX: attach Places Autocomplete whenever the Job Layers tab is visible (input exists)
-  useEffect(() => {
+  const attachAddressAutocomplete = useCallback((force = false) => {
     const map = mapRef.current;
-    if (!map) return;
-    if (activeTab !== "jobLayers") return;
+    if (!map || activeTab !== "jobLayers") return;
 
     const input = addressInputRef.current;
     if (!input) return;
 
     if (!window.google?.maps?.places?.Autocomplete) return;
 
-    if (addressAutocompleteRef.current) return;
+    if (!force && addressAutocompleteRef.current && addressAutocompleteInputRef.current === input) {
+      return;
+    }
+
+    if (addressAutocompleteListenerRef.current) {
+      try {
+        window.google?.maps?.event?.removeListener(addressAutocompleteListenerRef.current);
+      } catch {
+        // ignore
+      }
+    }
+    addressAutocompleteRef.current = null;
+    addressAutocompleteInputRef.current = null;
+    addressAutocompleteListenerRef.current = null;
 
     // WA bounds (rough SW -> NE). Keeps suggestions inside WA.
 const waBounds = new window.google.maps.LatLngBounds(
@@ -2126,7 +2280,7 @@ const waBounds = new window.google.maps.LatLngBounds(
   fields: ["geometry", "formatted_address", "name", "address_components"],
 });
 
-    autocomplete.addListener("place_changed", () => {
+    const placeChangedListener = autocomplete.addListener("place_changed", () => {
       const place = autocomplete.getPlace();
       // Hard-stop if user selects something outside WA (extra safety)
 const isWA = (place?.address_components || []).some((c) =>
@@ -2179,7 +2333,29 @@ if (!isWA) {
     });
     
     addressAutocompleteRef.current = autocomplete;
+    addressAutocompleteInputRef.current = input;
+    addressAutocompleteListenerRef.current = placeChangedListener;
   }, [activeTab]);
+
+  // ✅ FIX: attach Places Autocomplete whenever the Job Layers tab is visible (input exists)
+  useEffect(() => {
+    attachAddressAutocomplete();
+  }, [attachAddressAutocomplete, googleMapsReady]);
+
+  useEffect(() => {
+    return () => {
+      if (addressAutocompleteListenerRef.current) {
+        try {
+          window.google?.maps?.event?.removeListener(addressAutocompleteListenerRef.current);
+        } catch {
+          // ignore
+        }
+      }
+      addressAutocompleteRef.current = null;
+      addressAutocompleteInputRef.current = null;
+      addressAutocompleteListenerRef.current = null;
+    };
+  }, []);
 
    // Keep top tools visual state in sync
   useEffect(() => {
@@ -6380,13 +6556,20 @@ useEffect(() => {
   const handleVisibilityPause = () => {
     if (typeof document !== "undefined" && document.visibilityState === "hidden") {
       pauseMapActivity();
+    } else {
+      attachAddressAutocomplete(true);
     }
+  };
+  const handleResume = () => {
+    attachAddressAutocomplete(true);
   };
 
   window.__pwMapsPrepareExternalNav = pauseMapActivity;
   document.addEventListener("visibilitychange", handleVisibilityPause);
   window.addEventListener("pagehide", pauseMapActivity);
+  window.addEventListener("pageshow", handleResume);
   window.addEventListener("blur", pauseMapActivity);
+  window.addEventListener("focus", handleResume);
 
   return () => {
     if (window.__pwMapsPrepareExternalNav === pauseMapActivity) {
@@ -6394,9 +6577,11 @@ useEffect(() => {
     }
     document.removeEventListener("visibilitychange", handleVisibilityPause);
     window.removeEventListener("pagehide", pauseMapActivity);
+    window.removeEventListener("pageshow", handleResume);
     window.removeEventListener("blur", pauseMapActivity);
+    window.removeEventListener("focus", handleResume);
   };
-}, [pauseMapActivity]);
+}, [attachAddressAutocomplete, pauseMapActivity]);
 
 useEffect(() => {
   const node = mapDivRef.current;
@@ -7032,6 +7217,7 @@ return (
                     className="maps-search-input"
                     style={{ marginTop: 6, ...panelInputStyle }}
                     autoComplete="off"
+                    onFocus={() => attachAddressAutocomplete(true)}
                   />
 
                   <div
@@ -7451,7 +7637,7 @@ title={
                     <input
                       type="checkbox"
                       checked={!!showAllNotes}
-                      onChange={(e) => setShowAllNotes(e.target.checked)}
+                      onChange={(e) => handleShowAllNotesChange(e.target.checked)}
                       style={{ transform: "scale(1.05)" }}
                     />
                     Show All Notes
@@ -7462,7 +7648,7 @@ title={
                       ? "Showing all notes"
                       : portalSelectedJobId
                       ? `Showing notes for job #${selectedPortalJobNumber || "—"}`
-                      : "No job selected — showing all notes"}
+                      : "No job selected — notes hidden"}
                   </div>
                 </div>
 

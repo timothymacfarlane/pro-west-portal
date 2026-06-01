@@ -15,7 +15,9 @@ function Home() {
           To access Pro West Portal: <strong>https://pro-west-portal.netlify.app/</strong>
         </p>
         <ul style={{ fontSize: "0.85rem", marginTop: "0.3rem", paddingLeft: "1.1rem" }}>
-          <strong>Current Version - v1.1.1</strong>
+          <strong>Current Version - v1.1.2</strong>
+          <br />
+          v1.1.2 - Numerous map improvements.
           <br />
           v1.1.1 - Automatically creates new job folders on server.
           <br />
