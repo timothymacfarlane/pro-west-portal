@@ -11,13 +11,14 @@ const EQUIPMENT_TYPES = [
   "GNSS Antenna",
   "Metal Detector",
   "Phone",
+  "Prism",
   "Radio Handle",
   "Total Station",
   "Vehicle",
 ];
 
-const SET_NUMBER_TYPES = new Set(["Controller", "Total Station"]);
-const SET_NUMBERS = ["5", "6", "7", "8"];
+const SET_NUMBER_TYPES = new Set(["Controller", "Prism", "Radio Handle", "Total Station"]);
+const SET_NUMBERS = ["-", "5", "6", "7", "8"];
 const MAX_ATTACHMENT_SIZE_BYTES = 15 * 1024 * 1024;
 const ALLOWED_ATTACHMENT_EXTENSIONS = new Set([
   "csv",
@@ -79,6 +80,16 @@ function hasRegistration(type) {
 
 function hasSetNumber(type) {
   return SET_NUMBER_TYPES.has(type);
+}
+
+function setNumberFormValue(value) {
+  return value == null || value === "-" ? "" : String(value);
+}
+
+function setNumberPayloadValue(type, value) {
+  if (!hasSetNumber(type)) return null;
+  const normalized = setNumberFormValue(value);
+  return normalized ? Number(normalized) : null;
 }
 
 function safeFileName(name = "attachment") {
@@ -228,7 +239,7 @@ function EquipmentRegister() {
         item.year,
         item.serial_number,
         item.registration_number,
-        item.set_number,
+        String(item.set_number ?? "-"),
         item.notes,
         displayProfile(profileMap, item.assigned_to),
       ]
@@ -340,7 +351,7 @@ function EquipmentRegister() {
       serial_number: item.serial_number || "",
       registration_number: item.registration_number || "",
       assigned_to: item.assigned_to || "",
-      set_number: item.set_number || "",
+      set_number: setNumberFormValue(item.set_number),
       notes: item.notes || "",
     });
     setEquipmentModal({ open: true, mode: "edit", item });
@@ -357,8 +368,6 @@ function EquipmentRegister() {
     if (hasYear(type)) required.push(["year", "Year"]);
     if (hasSerial(type)) required.push(["serial_number", "Serial number"]);
     if (hasRegistration(type)) required.push(["registration_number", "Registration number"]);
-    if (hasSetNumber(type)) required.push(["set_number", "Set number"]);
-
     const missing = required.filter(([key]) => !String(equipmentForm[key] || "").trim());
     if (missing.length) {
       setError(`Please complete: ${missing.map(([, label]) => label).join(", ")}.`);
@@ -386,7 +395,7 @@ function EquipmentRegister() {
         serial_number: hasSerial(type) ? equipmentForm.serial_number.trim() : null,
         registration_number: hasRegistration(type) ? equipmentForm.registration_number.trim() : null,
         assigned_to: equipmentForm.assigned_to || null,
-        set_number: hasSetNumber(type) ? Number(equipmentForm.set_number) : null,
+        set_number: setNumberPayloadValue(type, equipmentForm.set_number),
         notes: equipmentForm.notes.trim() || null,
         updated_by: user?.id || null,
         updated_at: new Date().toISOString(),
@@ -620,7 +629,7 @@ function EquipmentRegister() {
       year: hasYear(type) ? prev.year : "",
       serial_number: hasSerial(type) ? prev.serial_number : "",
       registration_number: hasRegistration(type) ? prev.registration_number : "",
-      set_number: hasSetNumber(type) ? prev.set_number : "",
+      set_number: hasSetNumber(type) ? setNumberFormValue(prev.set_number) : "",
     }));
   };
 
@@ -937,10 +946,9 @@ function EquipmentRegister() {
               {hasSetNumber(equipmentForm.equipment_type) && (
                 <label>
                   <span>Set number</span>
-                  <select className="maps-search-input" value={equipmentForm.set_number} onChange={(e) => setEquipmentForm((f) => ({ ...f, set_number: e.target.value }))} required>
-                    <option value="">Select set…</option>
+                  <select className="maps-search-input" value={setNumberFormValue(equipmentForm.set_number)} onChange={(e) => setEquipmentForm((f) => ({ ...f, set_number: e.target.value }))}>
                     {SET_NUMBERS.map((n) => (
-                      <option key={n} value={n}>
+                      <option key={n} value={n === "-" ? "" : n}>
                         {n}
                       </option>
                     ))}
