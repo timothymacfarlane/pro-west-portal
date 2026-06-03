@@ -156,6 +156,10 @@ const LGATE_199_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Property_and_Planning/MapServer/62/query"; // RM
 const LGATE_001_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Property_and_Planning/MapServer/2/query"; // Cadastre (LGATE-001)
+const LGATE_002_ADDRESS_LARGE_QUERY =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Places_and_Addresses/MapServer/4/query"; // Cadastre Address (LGATE-002) - Large Scale
+const LGATE_002_ADDRESS_SMALL_QUERY =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Places_and_Addresses/MapServer/3/query"; // Cadastre Address (LGATE-002) - Small Scale
 const LGATE_233_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Boundaries/MapServer/14/query"; // LGA Boundaries (LGATE-233)
 const LGATE_234_QUERY =
@@ -262,6 +266,156 @@ async function fetchArcgisGeojsonInView(url, bounds, where = "1=1") {
   if (json?.error) throw new Error(json.error.message || "ArcGIS query error");
 
   return { type: "FeatureCollection", features: json?.features || [], requestUrl };
+}
+
+function cleanInfoPart(value) {
+  const text = String(value ?? "").trim();
+  if (!text || /^null$/i.test(text) || /^undefined$/i.test(text)) return "";
+  return text.replace(/\s+/g, " ");
+}
+
+function formatLgate002RoadNumber(attrs = {}) {
+  const first = cleanInfoPart(attrs.road_number_1);
+  const second = cleanInfoPart(attrs.road_number_2);
+  if (first && second && first !== second) return `${first}-${second}`;
+  return first || second;
+}
+
+function formatLgate002Address(attrs = {}) {
+  const roadNumber = formatLgate002RoadNumber(attrs);
+  const roadName = cleanInfoPart(attrs.road_name);
+  const roadType = cleanInfoPart(attrs.road_type);
+  const roadSuffix = cleanInfoPart(attrs.road_suffix);
+  const locality = cleanInfoPart(attrs.locality);
+
+  const streetLine = [roadNumber, roadName, roadType, roadSuffix].filter(Boolean).join(" ");
+  const localityLine = [locality, locality ? "WA" : ""].filter(Boolean).join(" ");
+
+  return [streetLine, localityLine].filter(Boolean).join("\n");
+}
+
+function getCadastreValue(props = {}, keys = []) {
+  for (const key of keys) {
+    const direct = cleanInfoPart(props[key]);
+    if (direct) return direct;
+
+    const foundKey = Object.keys(props).find((candidate) => candidate.toLowerCase() === key.toLowerCase());
+    if (foundKey) {
+      const value = cleanInfoPart(props[foundKey]);
+      if (value) return value;
+    }
+  }
+
+  const matcher = keys.some((key) => key.toLowerCase().includes("lot"))
+    ? "lot"
+    : keys.some((key) => key.toLowerCase().includes("plan") || key.toLowerCase().includes("diagram"))
+    ? "plan"
+    : "";
+
+  if (matcher) {
+    const foundKey = Object.keys(props).find((candidate) => {
+      const key = candidate.toLowerCase();
+      if (key.includes("objectid") || key === "fid" || key.includes("feature")) return false;
+      return key.includes(matcher);
+    });
+    if (foundKey) {
+      const value = cleanInfoPart(props[foundKey]);
+      if (value) return value;
+    }
+  }
+
+  return "";
+}
+
+function buildCadastreLotPlanRowsFromProps(props = {}, existingRows = []) {
+  const existingText = existingRows.join(" ").toLowerCase();
+  const rows = [];
+
+  if (!existingText.includes("lot")) {
+    const lot = getCadastreValue(props, [
+      "lot_number",
+      "lot_no",
+      "lot",
+      "lotnumber",
+      "lot_num",
+      "parcel_lot_number",
+    ]);
+    if (lot) {
+      rows.push(`
+        <div style="margin-top:5px; color:#111; word-break:break-word;">
+          <span style="font-weight:900; color:#333;">Lot:</span> ${escapeHtml(lot)}
+        </div>
+      `);
+    }
+  }
+
+  if (!existingText.includes("plan")) {
+    const plan = getCadastreValue(props, [
+      "plan_number",
+      "plan_no",
+      "plan",
+      "plannumber",
+      "survey_plan",
+      "survey_plan_number",
+      "document_number",
+      "diagram_number",
+    ]);
+    if (plan) {
+      rows.push(`
+        <div style="margin-top:5px; color:#111; word-break:break-word;">
+          <span style="font-weight:900; color:#333;">Plan:</span> ${escapeHtml(plan)}
+        </div>
+      `);
+    }
+  }
+
+  return rows;
+}
+
+async function fetchLgate002AddressAtLatLng(latLng) {
+  if (!latLng) return { address: "", lotNumber: "" };
+
+  const lat = typeof latLng.lat === "function" ? latLng.lat() : latLng.lat;
+  const lng = typeof latLng.lng === "function" ? latLng.lng() : latLng.lng;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { address: "", lotNumber: "" };
+  }
+
+  const queryLayer = async (url) => {
+    const params = new URLSearchParams({
+      f: "json",
+      where: "1=1",
+      outFields: "lot_number,road_number_1,road_number_2,road_name,road_type,road_suffix,locality",
+      returnGeometry: "false",
+      geometry: `${lng},${lat}`,
+      geometryType: "esriGeometryPoint",
+      spatialRel: "esriSpatialRelIntersects",
+      inSR: "4326",
+      outSR: "4326",
+      resultRecordCount: "1",
+    });
+
+    const response = await fetch(`${url}?${params.toString()}`);
+    const json = await response.json();
+    if (json?.error) throw new Error(json.error.message || "LGATE-002 query error");
+    return json?.features?.[0]?.attributes || null;
+  };
+
+  try {
+    const attrs =
+      (await queryLayer(LGATE_002_ADDRESS_LARGE_QUERY)) ||
+      (await queryLayer(LGATE_002_ADDRESS_SMALL_QUERY));
+
+    if (!attrs) return { address: "", lotNumber: "" };
+
+    return {
+      address: formatLgate002Address(attrs),
+      lotNumber: cleanInfoPart(attrs.lot_number),
+    };
+  } catch (err) {
+    console.warn("LGATE-002 address query failed:", err);
+    return { address: "", lotNumber: "" };
+  }
 }
 
 function isDestroyed(props = {}) {
@@ -934,6 +1088,7 @@ const lastFetchRef = useRef({
 
    // Polygon layers (cadastre, LGA, zoning, future planning layers)
   const polygonLayersRef = useRef(new Map());
+  const lgate002AddressCacheRef = useRef(new Map());
 
   // Point layers (SSM, BM, RM, future point layers)
 const pointLayersRef = useRef(new Map());
@@ -2509,7 +2664,7 @@ if (!isWA) {
   });
 };
 
-function buildMapInfoPopupHtml(latLng) {
+function buildMapInfoPopupHtml(latLng, lgate002Info = null) {
   const googleMaps = window.google?.maps;
   if (!googleMaps) return "";
 
@@ -2571,14 +2726,38 @@ const rows = infoFields
   })
   .filter(Boolean);
 
+const lgate002LotRow =
+  layer.id === "cad001" && cleanInfoPart(lgate002Info?.lotNumber)
+    ? `
+      <div style="margin-top:5px; color:#111; word-break:break-word;">
+        <span style="font-weight:900; color:#333;">Lot:</span> ${escapeHtml(cleanInfoPart(lgate002Info.lotNumber))}
+      </div>
+    `
+    : "";
+const cadastreRows =
+  layer.id === "cad001" && !lgate002LotRow ? buildCadastreLotPlanRowsFromProps(props, rows) : [];
+const addressRow =
+  layer.id === "cad001" && lgate002Info
+    ? `
+      <div style="margin-top:5px; color:#111; white-space:pre-line; word-break:break-word;">
+        <span style="font-weight:900; color:#333;">Address:</span> ${escapeHtml(lgate002Info.address || "No registered address")}
+      </div>
+    `
+    : "";
+const visibleRows = layer.id === "cad001" ? `${lgate002LotRow}${cadastreRows.join("")}${addressRow}` : rows.join("");
+const sectionStyle =
+  layer.id === "cad001"
+    ? "margin-top:8px;"
+    : "margin-top:10px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.12);";
+
     sections.push(`
-      <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.12);">
+      <div style="${sectionStyle}">
         <div style="font-weight:950; font-size:13px; color:#111;">
-          ${escapeHtml(layer.name)}
+          ${layer.id === "cad001" ? "CADASTRE" : escapeHtml(layer.name)}
         </div>
         ${
-          rows.length
-            ? rows.join("")
+          visibleRows
+            ? visibleRows
             : `<div style="margin-top:5px; color:#666; font-weight:800;">No selected attributes found.</div>`
         }
       </div>
@@ -2615,7 +2794,9 @@ function openMapInfoPopupAtLatLng(latLng) {
   const map = mapRef.current;
   if (!map || !latLng) return;
 
-  const html = buildMapInfoPopupHtml(latLng);
+  const cadastreOn = (layersRef.current || []).some((l) => l.id === "cad001" && l.visible);
+  const emptyAddressInfo = { address: "", lotNumber: "" };
+  const html = buildMapInfoPopupHtml(latLng, cadastreOn ? emptyAddressInfo : null);
 
   infoWindowRef.current?.setContent(html);
   infoWindowRef.current?.setPosition(latLng);
@@ -2623,6 +2804,36 @@ function openMapInfoPopupAtLatLng(latLng) {
 
   window.google.maps.event.addListenerOnce(infoWindowRef.current, "domready", () => {
     setTimeout(makeLatestInfoWindowDraggable, 0);
+  });
+
+  if (!cadastreOn || !html.includes("CADASTRE")) return;
+
+  const lat = typeof latLng.lat === "function" ? latLng.lat() : latLng.lat;
+  const lng = typeof latLng.lng === "function" ? latLng.lng() : latLng.lng;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+  const cacheKey = `${lat.toFixed(7)},${lng.toFixed(7)}`;
+  const cached = lgate002AddressCacheRef.current.get(cacheKey);
+  const applyAddressInfo = (info) => {
+    if (!infoWindowRef.current?.getMap?.()) return;
+    infoWindowRef.current.setContent(buildMapInfoPopupHtml(latLng, info || emptyAddressInfo));
+    window.google?.maps?.event?.addListenerOnce?.(infoWindowRef.current, "domready", () => {
+      setTimeout(makeLatestInfoWindowDraggable, 0);
+    });
+  };
+
+  if (cached) {
+    if (cached.status === "ready") applyAddressInfo(cached.value);
+    if (cached.status === "pending") cached.promise.then(applyAddressInfo);
+    return;
+  }
+
+  const promise = fetchLgate002AddressAtLatLng(latLng);
+  lgate002AddressCacheRef.current.set(cacheKey, { status: "pending", promise });
+  promise.then((info) => {
+    const value = info || emptyAddressInfo;
+    lgate002AddressCacheRef.current.set(cacheKey, { status: "ready", value });
+    applyAddressInfo(value);
   });
 }
 
@@ -5677,9 +5888,7 @@ if (!hasSewerConnection)
 exportFormats: ["dxf"],
 dxfLabelFields: [],
 outputLayerName: "Cadastre",
-infoFields: [
-  { key: "objectid", label: "OBJECTID" },
-],
+infoFields: [],
           },
         });
       if (!hasLGA)

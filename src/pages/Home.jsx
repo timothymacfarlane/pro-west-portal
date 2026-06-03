@@ -15,7 +15,9 @@ function Home() {
           To access Pro West Portal: <strong>https://pro-west-portal.netlify.app/</strong>
         </p>
         <ul style={{ fontSize: "0.85rem", marginTop: "0.3rem", paddingLeft: "1.1rem" }}>
-          <strong>Current Version - v1.1.4</strong>
+          <strong>Current Version - v1.1.5</strong>
+          <br />
+          v1.1.5 - 03/06/2026 - Maps Cadastre layer additional data.
           <br />
           v1.1.4 - Equipment Register amendments.
           <br />
