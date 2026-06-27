@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { cleanDisplayAddress } from "../lib/displayFormatters.js";
+import { getJobAddressWarning } from "../lib/jobAddress.js";
 
 // ---------- Date helpers ----------
 function getMonday(date) {
@@ -191,6 +192,14 @@ const getColourHex = (colour) => {
   return COLOUR_HEX[colour] || "#333";
 };
 
+const makePlanningJobDomKey = (bucketKey, item, index) =>
+  `${bucketKey}::${item?.id ?? item?.client_key ?? item?.job_number ?? index}`;
+
+const planningJobNumberCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
+
 const NOTES_JOB_OPTION = {
   job_number: "Notes",
   full_address: "",
@@ -233,6 +242,7 @@ const [editItems, setEditItems] = useState([]);
 const [unscheduledItems, setUnscheduledItems] = useState([]);
 const [jobMetaByNumber, setJobMetaByNumber] = useState({});
 const [highlightedJobKey, setHighlightedJobKey] = useState(null);
+const [highlightedPlanningJobKey, setHighlightedPlanningJobKey] = useState(null);
 const [draggedJobKey, setDraggedJobKey] = useState(null);
 const [dragOverJobKey, setDragOverJobKey] = useState(null);
 const [moveDatePickerKey, setMoveDatePickerKey] = useState(null);
@@ -246,6 +256,13 @@ const editorLoadedRef = useRef(false);
 const autosaveTimerRef = useRef(null);
 const dragAutoScrollFrameRef = useRef(null);
 const dragAutoScrollDirectionRef = useRef({ x: 0, y: 0 });
+const planningSearchHighlightTimerRef = useRef(null);
+const planningSearchRef = useRef(null);
+const planningJobCardRefs = useRef(new Map());
+
+const [planningJobSearch, setPlanningJobSearch] = useState("");
+const [planningJobSearchOpen, setPlanningJobSearchOpen] = useState(false);
+const [planningJobSearchActiveIdx, setPlanningJobSearchActiveIdx] = useState(-1);
 
 const [jobQuery, setJobQuery] = useState("");
 const [jobSuggestions, setJobSuggestions] = useState([]);
@@ -271,6 +288,175 @@ const calendarDays = useMemo(() => buildCalendarDays(currentMonth), [currentMont
 
   const monthValue = formatMonthInput(currentMonth);
   const todayISO = formatISO(new Date());
+  const visiblePlanningDateKeys = useMemo(
+    () => new Set(calendarDays.map((date) => formatISO(date))),
+    [calendarDays]
+  );
+
+  const planningJobSearchOptions = useMemo(() => {
+    const seen = new Set();
+    const options = [];
+
+    const addOption = (item, bucketKey, index) => {
+      const jobNumber = String(item?.job_number || "").trim();
+      if (!jobNumber || jobNumber.toLowerCase() === "notes") return;
+
+      const meta = jobMetaByNumber[jobNumber] || {};
+      const renderKey = makePlanningJobDomKey(bucketKey, item, index);
+
+      if (seen.has(renderKey)) return;
+      seen.add(renderKey);
+
+      const row = {
+        ...meta,
+        ...item,
+        id: meta.id || item?.id,
+        planning_item_id: item?.id ?? null,
+        job_number: jobNumber,
+        address: addressSummaryFromRow({ ...item, ...meta }),
+        bucketKey,
+        renderKey,
+        locationLabel:
+          bucketKey === UNSCHEDULED_KEY ? "Unscheduled" : longDateLabel(bucketKey),
+        locationSortKey: bucketKey === UNSCHEDULED_KEY ? "9999-99-99" : bucketKey,
+        isUnscheduledOccurrence: bucketKey === UNSCHEDULED_KEY,
+      };
+
+      options.push(row);
+    };
+
+    Object.entries(plansByDate || {}).forEach(([dateISO, items]) => {
+      if (!visiblePlanningDateKeys.has(dateISO)) return;
+      (items || []).forEach((item, index) => addOption(item, dateISO, index));
+    });
+
+    (unscheduledItems || []).forEach((item, index) =>
+      addOption(item, UNSCHEDULED_KEY, index)
+    );
+
+    return options;
+  }, [UNSCHEDULED_KEY, jobMetaByNumber, plansByDate, unscheduledItems, visiblePlanningDateKeys]);
+
+  const planningJobSearchResults = useMemo(() => {
+    const q = String(planningJobSearch || "").trim().toLowerCase();
+    if (!q) return [];
+
+    return planningJobSearchOptions
+      .filter((job) => String(job.job_number || "").trim().toLowerCase().includes(q))
+      .sort((a, b) => {
+        const aJob = String(a.job_number || "").trim().toLowerCase();
+        const bJob = String(b.job_number || "").trim().toLowerCase();
+
+        const aExact = aJob === q ? 1 : 0;
+        const bExact = bJob === q ? 1 : 0;
+        if (aExact !== bExact) return bExact - aExact;
+
+        const aStarts = aJob.startsWith(q) ? 1 : 0;
+        const bStarts = bJob.startsWith(q) ? 1 : 0;
+        if (aStarts !== bStarts) return bStarts - aStarts;
+
+        const aUnscheduled = a.isUnscheduledOccurrence ? 1 : 0;
+        const bUnscheduled = b.isUnscheduledOccurrence ? 1 : 0;
+        if (aUnscheduled !== bUnscheduled) return aUnscheduled - bUnscheduled;
+
+        const dateCompare = String(a.locationSortKey || "").localeCompare(
+          String(b.locationSortKey || "")
+        );
+        if (dateCompare !== 0) return dateCompare;
+
+        const jobCompare = planningJobNumberCollator.compare(aJob, bJob);
+        if (jobCompare !== 0) return jobCompare;
+
+        return String(a.renderKey || "").localeCompare(String(b.renderKey || ""));
+      })
+      .slice(0, 20);
+  }, [planningJobSearch, planningJobSearchOptions]);
+
+  const clearPlanningSearchHighlight = () => {
+    if (planningSearchHighlightTimerRef.current) {
+      window.clearTimeout(planningSearchHighlightTimerRef.current);
+      planningSearchHighlightTimerRef.current = null;
+    }
+
+    setHighlightedPlanningJobKey(null);
+  };
+
+  const handlePlanningSearchSelect = (job) => {
+    if (!job) return;
+
+    setPlanningJobSearch(String(job.job_number || ""));
+    setPlanningJobSearchOpen(false);
+    setPlanningJobSearchActiveIdx(-1);
+    setHighlightedPlanningJobKey(job.renderKey);
+
+    if (planningSearchHighlightTimerRef.current) {
+      window.clearTimeout(planningSearchHighlightTimerRef.current);
+    }
+
+    window.requestAnimationFrame(() => {
+      const el = planningJobCardRefs.current.get(job.renderKey);
+
+      if (el) {
+        el.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+          inline: "center",
+        });
+      }
+    });
+
+    planningSearchHighlightTimerRef.current = window.setTimeout(() => {
+      setHighlightedPlanningJobKey(null);
+      planningSearchHighlightTimerRef.current = null;
+    }, 3000);
+  };
+
+  const handlePlanningSearchKeyDown = (e) => {
+    const hasList = planningJobSearchResults.length > 0;
+
+    if (e.key === "ArrowDown") {
+      if (!hasList) return;
+      e.preventDefault();
+      setPlanningJobSearchOpen(true);
+      setPlanningJobSearchActiveIdx((i) =>
+        i < planningJobSearchResults.length - 1 ? i + 1 : 0
+      );
+      return;
+    }
+
+    if (e.key === "ArrowUp") {
+      if (!hasList) return;
+      e.preventDefault();
+      setPlanningJobSearchOpen(true);
+      setPlanningJobSearchActiveIdx((i) =>
+        i > 0 ? i - 1 : planningJobSearchResults.length - 1
+      );
+      return;
+    }
+
+    if (e.key === "Enter") {
+      if (!hasList) return;
+      e.preventDefault();
+      const picked =
+        planningJobSearchActiveIdx >= 0
+          ? planningJobSearchResults[planningJobSearchActiveIdx]
+          : planningJobSearchResults[0];
+      handlePlanningSearchSelect(picked);
+      return;
+    }
+
+  if (e.key === "Escape") {
+      setPlanningJobSearchOpen(false);
+      setPlanningJobSearchActiveIdx(-1);
+    }
+  };
+
+  const resetPlanningJobSearch = () => {
+    setPlanningJobSearch("");
+    setPlanningJobSearchOpen(false);
+    setPlanningJobSearchActiveIdx(-1);
+    clearPlanningSearchHighlight();
+  };
 
  
 
@@ -337,12 +523,14 @@ const visibleJobNumbers = [
        const { data: jobsMeta, error: jobsMetaError } = await supabase
   .from("jobs")
   .select(`
+    id,
     job_number,
     job_category,
     full_address,
     street_number,
     street_name,
     suburb,
+    place_id,
     client_company,
     client_first_name,
     client_surname,
@@ -358,11 +546,13 @@ const visibleJobNumbers = [
   (jobsMeta || []).map((row) => [
     String(row.job_number).trim(),
     {
+      id: row.id,
       job_category: row.job_category || "",
       full_address: row.full_address || "",
       street_number: row.street_number || "",
       street_name: row.street_name || "",
       suburb: row.suburb || "",
+      place_id: row.place_id || "",
       client_company: row.client_company || "",
       client_first_name: row.client_first_name || "",
       client_surname: row.client_surname || "",
@@ -573,9 +763,35 @@ useEffect(() => {
       clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
     }
+    if (planningSearchHighlightTimerRef.current) {
+      clearTimeout(planningSearchHighlightTimerRef.current);
+      planningSearchHighlightTimerRef.current = null;
+    }
     stopDragAutoScroll();
   };
 }, []);
+
+useEffect(() => {
+  const handlePointerDown = (event) => {
+    const wrap = planningSearchRef.current;
+    if (!wrap || wrap.contains(event.target)) return;
+
+    setPlanningJobSearchOpen(false);
+    setPlanningJobSearchActiveIdx(-1);
+  };
+
+  document.addEventListener("pointerdown", handlePointerDown);
+
+  return () => {
+    document.removeEventListener("pointerdown", handlePointerDown);
+  };
+}, []);
+
+useEffect(() => {
+  setPlanningJobSearchActiveIdx((i) =>
+    Math.min(i, planningJobSearchResults.length - 1)
+  );
+}, [planningJobSearchResults.length]);
 
 useEffect(() => {
   const modalOpen = editorModalOpen || !!modalTarget;
@@ -595,16 +811,19 @@ useEffect(() => {
 }, [editorModalOpen, modalTarget]);
   // ---------- Month nav ----------
   const handlePrevMonth = () => {
+    resetPlanningJobSearch();
     setCurrentMonth((prev) => addMonths(prev, -1));
     setSelectedDate(null);
   };
 
   const handleNextMonth = () => {
+    resetPlanningJobSearch();
     setCurrentMonth((prev) => addMonths(prev, 1));
     setSelectedDate(null);
   };
 
   const handleThisMonth = () => {
+    resetPlanningJobSearch();
     setCurrentMonth(getMonthStart(new Date()));
     setSelectedDate(null);
   };
@@ -616,6 +835,7 @@ useEffect(() => {
     const d = new Date(`${v}-01T00:00:00`);
     if (Number.isNaN(d.getTime())) return;
 
+    resetPlanningJobSearch();
     setCurrentMonth(getMonthStart(d));
     setSelectedDate(null);
   };
@@ -2280,6 +2500,7 @@ const confirmCalendarMove = ({ item, fromKey, toKey }) => {
     >
       <div className="card schedule-card">
         <div className="schedule-header">
+          <div className="job-planning-header-top">
          <div className="schedule-week-label">
   Month of&nbsp;<strong>{monthLabel}</strong>
   {loading && <span style={{ marginLeft: "0.5rem", fontSize: "0.75rem" }}>Loading…</span>}
@@ -2290,6 +2511,115 @@ const confirmCalendarMove = ({ item, fromKey, toKey }) => {
     <span style={{ marginLeft: "0.5rem", fontSize: "0.7rem" }}>(weather unavailable)</span>
   )}
 </div>
+
+        <div
+          className="job-planning-search-control"
+          ref={planningSearchRef}
+          onDragStart={(e) => e.stopPropagation()}
+        >
+          <div className="job-planning-search-wrap">
+            <input
+              id="job-planning-job-search"
+              className="maps-search-input"
+              type="search"
+              inputMode="numeric"
+              role="combobox"
+              aria-label="Search job number"
+              aria-autocomplete="list"
+              aria-expanded={planningJobSearchOpen}
+              aria-controls="job-planning-search-results"
+              aria-activedescendant={
+                planningJobSearchOpen && planningJobSearchActiveIdx >= 0
+                  ? `job-planning-search-result-${planningJobSearchActiveIdx}`
+                  : undefined
+              }
+              value={planningJobSearch}
+              placeholder="Search job number"
+              onChange={(e) => {
+                const nextValue = e.target.value;
+                setPlanningJobSearch(nextValue);
+                setPlanningJobSearchActiveIdx(-1);
+                setPlanningJobSearchOpen(!!nextValue.trim());
+
+                if (!nextValue.trim()) {
+                  clearPlanningSearchHighlight();
+                }
+              }}
+              onFocus={() => {
+                if (planningJobSearch.trim()) setPlanningJobSearchOpen(true);
+              }}
+              onKeyDown={handlePlanningSearchKeyDown}
+            />
+
+            {planningJobSearch.trim() && planningJobSearchOpen && (
+              <div
+                id="job-planning-search-results"
+                className="contacts-suggestions job-planning-search-results"
+                role="listbox"
+              >
+                {planningJobSearchResults.length === 0 ? (
+                  <div className="job-planning-search-empty">
+                    No matching job in the current view
+                  </div>
+                ) : (
+                  planningJobSearchResults.map((job, idx) => {
+                    const addressState = getJobAddressWarning(job);
+
+                    return (
+                      <button
+                        id={`job-planning-search-result-${idx}`}
+                        key={`${job.id ?? job.job_number}-${job.renderKey}`}
+                        type="button"
+                        role="option"
+                        aria-selected={idx === planningJobSearchActiveIdx}
+                        className={`contacts-suggestion ${
+                          idx === planningJobSearchActiveIdx ? "is-active" : ""
+                        }`}
+                        onMouseEnter={() => setPlanningJobSearchActiveIdx(idx)}
+                        onClick={() => handlePlanningSearchSelect(job)}
+                      >
+                        <div className="contacts-suggestion-header">
+                          <div className="contacts-avatar">
+                            {getJobBadge(job.job_number)}
+                          </div>
+
+                          <div>
+                            <div className="contacts-suggestion-name">
+                              {`Job #${job.job_number}`}
+                              {job.job_type_legacy ? ` · ${job.job_type_legacy}` : ""}
+                            </div>
+
+                            <div className="contacts-suggestion-role job-planning-search-location">
+                              {job.locationLabel}
+                            </div>
+
+                            <div className="contacts-suggestion-role">
+                              {`${safeText(addressState.displayAddress)}${
+                                jobLotPlanText(job) ? ` ${jobLotPlanText(job)}` : ""
+                              }`}
+                              {addressState.label && (
+                                <span className="manual-address-badge">
+                                  {addressState.label}
+                                </span>
+                              )}
+                            </div>
+
+                            {jobClientText(job) && (
+                              <div className="contacts-suggestion-role job-planning-search-client">
+                                {jobClientText(job)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+          </div>
 
           <div className="schedule-week-buttons">
             <button type="button" className="btn-pill job-planning-month-btn" onClick={handlePrevMonth}>
@@ -2468,12 +2798,21 @@ void moveCalendarItemToUnscheduled(sourceBucketKey, draggedItem);
         {unscheduledItems.length === 0 ? (
           <div className="job-planning-empty-note">No unscheduled jobs</div>
         ) : (
-          unscheduledItems.map((item, index) => (
+          unscheduledItems.map((item, index) => {
+            const planningJobKey = makePlanningJobDomKey(UNSCHEDULED_KEY, item, index);
+
+            return (
 <div
   key={item.id || `unscheduled-${item.job_number}-${index}`}
+  data-planning-job-key={planningJobKey}
+  ref={(node) => {
+    if (node) planningJobCardRefs.current.set(planningJobKey, node);
+    else planningJobCardRefs.current.delete(planningJobKey);
+  }}
   className={
     "job-planning-day-job" +
-    (item.colour ? ` job-planning-day-job--${item.colour}` : "")
+    (item.colour ? ` job-planning-day-job--${item.colour}` : "") +
+    (highlightedPlanningJobKey === planningJobKey ? " job-planning-search-highlight" : "")
   }
   onClick={(e) => {
   e.stopPropagation();
@@ -2532,7 +2871,8 @@ onDragOver={(e) => {
   <div className="job-planning-day-job-notes">{item.notes}</div>
 )}
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
@@ -2700,12 +3040,21 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
                         {items.length === 0 ? (
                           <div className="job-planning-empty-note">No jobs planned</div>
                         ) : (
-                          items.map((item, index) => (
+                          items.map((item, index) => {
+                            const planningJobKey = makePlanningJobDomKey(iso, item, index);
+
+                            return (
                          <div
   key={item.id || `${iso}-${item.job_number}-${index}`}
+  data-planning-job-key={planningJobKey}
+  ref={(node) => {
+    if (node) planningJobCardRefs.current.set(planningJobKey, node);
+    else planningJobCardRefs.current.delete(planningJobKey);
+  }}
   className={
     "job-planning-day-job" +
-    (item.colour ? ` job-planning-day-job--${item.colour}` : "")
+    (item.colour ? ` job-planning-day-job--${item.colour}` : "") +
+    (highlightedPlanningJobKey === planningJobKey ? " job-planning-search-highlight" : "")
   }
   onClick={(e) => {
   e.stopPropagation();
@@ -2769,7 +3118,8 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
   <div className="job-planning-day-job-notes">{item.notes}</div>
 )}
                             </div>
-                          ))
+                            );
+                          })
                         )}
                       </div>
                     </div>

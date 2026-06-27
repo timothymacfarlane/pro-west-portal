@@ -1326,19 +1326,32 @@
 
 .schedule-header {
   display: flex;
+  flex-direction: column;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 0.5rem;
 }
 
 .schedule-week-label {
   font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.job-planning-header-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
 }
 
 .schedule-week-buttons {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.4rem;
 }
 
@@ -3210,6 +3223,96 @@ body,
   box-shadow: inset 0 0 0 3px rgba(30, 136, 229, 0.9);
   background: rgba(30, 136, 229, 0.08);
   transition: box-shadow 0.12s ease, background 0.12s ease;
+}
+
+.job-planning-search-control {
+  position: relative;
+  flex: 0 1 380px;
+  width: 380px;
+  max-width: min(440px, 100%);
+  margin: 0;
+  z-index: 30;
+}
+
+.job-planning-search-wrap {
+  position: relative;
+}
+
+.job-planning-search-wrap .maps-search-input {
+  width: 100%;
+}
+
+.job-planning-search-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 80;
+  margin-top: 4px;
+  max-height: min(320px, 55vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.35rem;
+  border: 1px solid var(--pw-border-soft);
+  border-radius: 8px;
+  background: var(--pw-card);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
+}
+
+.job-planning-search-results .contacts-suggestion.is-active {
+  border-color: var(--pw-primary);
+  background: rgba(211, 47, 47, 0.08);
+}
+
+.job-planning-search-empty {
+  padding: 0.55rem 0.6rem;
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.job-planning-search-client {
+  font-size: 0.72rem;
+  opacity: 0.8;
+}
+
+.job-planning-search-location {
+  color: var(--pw-primary-dark);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.job-planning-search-highlight {
+  outline: 3px solid var(--pw-primary);
+  outline-offset: -3px;
+  box-shadow:
+    0 0 0 4px rgba(211, 47, 47, 0.18),
+    0 8px 20px rgba(0, 0, 0, 0.18);
+  transition: outline-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+@media (max-width: 768px) {
+  .job-planning-header-top {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .schedule-week-label {
+    white-space: normal;
+  }
+
+  .job-planning-search-control {
+    flex: 1 1 100%;
+    max-width: none;
+    width: 100%;
+  }
+
+  .job-planning-search-results {
+    max-height: min(260px, 50vh);
+  }
 }
 
 .job-planning-day-cell.job-planning-drop-target {

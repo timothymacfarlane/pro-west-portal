@@ -31,6 +31,21 @@ function formatTimeAgo(dateString) {
   return past.toLocaleDateString();
 }
 
+const nameCollator = new Intl.Collator(undefined, { sensitivity: "base" });
+
+function sortProfilesByDisplayName(profiles) {
+  return [...profiles].sort((a, b) => {
+    const aName = String(a.display_name || "").trim();
+    const bName = String(b.display_name || "").trim();
+
+    if (!aName && !bName) return 0;
+    if (!aName) return 1;
+    if (!bName) return -1;
+
+    return nameCollator.compare(aName, bName);
+  });
+}
+
 function Admin() {
   const { isAdmin, user } = useAuth();
 
@@ -59,7 +74,9 @@ function Admin() {
         setProfiles([]);
       } else {
         setProfiles(
-          (data || []).map((p) => ({ ...p, role: normalizeRole(p.role) }))
+          sortProfilesByDisplayName(
+            (data || []).map((p) => ({ ...p, role: normalizeRole(p.role) }))
+          )
         );
       }
 
