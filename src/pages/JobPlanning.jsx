@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
@@ -200,6 +201,21 @@ const planningJobNumberCollator = new Intl.Collator(undefined, {
   sensitivity: "base",
 });
 
+function buildJobPlanningMapsHref(source) {
+  if (!source?.job_number && !source?.place_id && !source?.full_address) return "";
+
+  const params = new URLSearchParams();
+
+  if (source.job_number != null) params.set("job", String(source.job_number));
+  if (source.place_id) params.set("place_id", String(source.place_id));
+  if (source.full_address) params.set("address", String(source.full_address));
+  if (source.mga_zone != null) params.set("zone", String(source.mga_zone));
+  if (source.mga_easting != null) params.set("e", String(source.mga_easting));
+  if (source.mga_northing != null) params.set("n", String(source.mga_northing));
+
+  return `/maps?${params.toString()}`;
+}
+
 const NOTES_JOB_OPTION = {
   job_number: "Notes",
   full_address: "",
@@ -208,6 +224,7 @@ const NOTES_JOB_OPTION = {
 };
 
 function JobPlanning() {
+  const navigate = useNavigate();
   const { user, isAdmin } = useAuth();
   const isAppVisible = useAppVisibilityContext();
 
@@ -536,7 +553,10 @@ const visibleJobNumbers = [
     client_surname,
     lot_number,
     plan_number,
-    job_type_legacy
+    job_type_legacy,
+    mga_zone,
+    mga_easting,
+    mga_northing
   `)
   .in("job_number", numericJobNumbers);
 
@@ -559,6 +579,9 @@ const visibleJobNumbers = [
       lot_number: row.lot_number || "",
       plan_number: row.plan_number || "",
       job_type_legacy: row.job_type_legacy || "",
+      mga_zone: row.mga_zone,
+      mga_easting: row.mga_easting,
+      mga_northing: row.mga_northing,
     },
   ])
 );
@@ -3155,12 +3178,27 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
       className="job-planning-modal-card job-planning-editor-modal-card"
       onClick={(e) => e.stopPropagation()}
     >
-         <h3 className="card-title">
-  {selectedDate === UNSCHEDULED_KEY ? "Edit unscheduled jobs" : "Edit day plan"}
-</h3>
-<p className="card-subtitle">
-  {selectedDate === UNSCHEDULED_KEY ? "Jobs waiting to be scheduled" : longDateLabel(selectedDate)}
-</p>
+      <div className="job-planning-editor-modal-header">
+        <div className="job-planning-editor-modal-title">
+          <h3 className="card-title">
+            {selectedDate === UNSCHEDULED_KEY ? "Edit unscheduled jobs" : "Edit day plan"}
+          </h3>
+          <p className="card-subtitle">
+            {selectedDate === UNSCHEDULED_KEY ? "Jobs waiting to be scheduled" : longDateLabel(selectedDate)}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className="btn-pill"
+          aria-label="Close"
+          title="Close"
+          onClick={closeEditorModal}
+          disabled={saving}
+        >
+          Close
+        </button>
+      </div>
 
 
           <div className="job-planning-editor-summary">
@@ -3178,9 +3216,10 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
               <p style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "#777" }}>
   Drag jobs up or down to set the order for this day.
 </p>
-              {editItems.map((item) => {
+{editItems.map((item) => {
   const jobMeta = jobMetaByNumber[String(item.job_number || "").trim()] || null;
   const isNotesOnly = String(item.job_number || "").toLowerCase() === "notes";
+  const mapsHref = !isNotesOnly && jobMeta ? buildJobPlanningMapsHref(jobMeta) : "";
 
   return (
     <div
@@ -3258,6 +3297,26 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
       </option>
     ))}
   </select>
+
+  {mapsHref && (
+    <button
+      type="button"
+      className="btn-pill"
+      draggable={false}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onDragStart={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        navigate(mapsHref);
+      }}
+    >
+      View in Maps
+    </button>
+  )}
 
   {selectedDate !== UNSCHEDULED_KEY && (
     <button

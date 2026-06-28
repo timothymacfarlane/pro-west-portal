@@ -15,7 +15,9 @@ function Home() {
           To access Pro West Portal: <strong>https://pro-west-portal.netlify.app/</strong>
         </p>
         <ul style={{ fontSize: "0.85rem", marginTop: "0.3rem", paddingLeft: "1.1rem" }}>
-          <strong>Current Version - v1.1.6</strong>
+          <strong>Current Version - v1.1.7</strong>
+          <br />
+          v1.1.7 - 28/06/2026 - View in Maps added to Job Planning Page - Admin only.
           <br />
           v1.1.6 - 27/06/2026 - Job Number search box added to Job Planning Page - Admin only.
           <br />
