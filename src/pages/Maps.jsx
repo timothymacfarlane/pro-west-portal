@@ -190,9 +190,133 @@ const WP_035_QUERY =
 const WP_032_QUERY =
   "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/11/query"; // Transmission Overhead Powerlines (WP-032)
 const WP_030_QUERY =
-  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/1/query"; // Transmission Pole (WP-030)
+  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/1/query"; // Transmission Pole(WP-030)
 const WP_051_QUERY =
   "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/NCMT_Public_Secure_Services/MapServer/2/query"; // NCMT High Voltage Overhead Transmission Lines (WP-051)
+const DPIRD_CONTOURS_MAPSERVER =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Terrain/MapServer";
+const DPIRD_CONTOUR_IDENTIFY_TOLERANCE_PX = 6;
+const DPIRD_10M_CONTOUR_DRAWING_INFO = {
+  renderer: {
+    type: "simple",
+    symbol: {
+      type: "esriSLS",
+      style: "esriSLSSolid",
+      color: [210, 105, 30, 255],
+      width: 1.5,
+    },
+  },
+  scaleSymbols: false,
+  transparency: 0,
+  labelingInfo: [
+    {
+      labelExpression: "[ELEVATION]",
+      labelPlacement: "esriServerLinePlacementCenterAlong",
+      textLayout: "straight",
+      deconflictionStrategy: "dynamic",
+      allowOverrun: false,
+      repeatLabel: false,
+      removeDuplicates: "all",
+      lineConnection: "minimizeLabels",
+      stackLabel: false,
+      useCodedValues: true,
+      maxScale: 1000,
+      minScale: 50000,
+      name: "Default",
+      priority: 2,
+      symbol: {
+        type: "esriTS",
+        color: [0, 0, 0, 255],
+        haloColor: [255, 255, 255, 255],
+        haloSize: 2,
+        verticalAlignment: "bottom",
+        horizontalAlignment: "center",
+        rightToLeft: false,
+        angle: 0,
+        xoffset: 0,
+        yoffset: 0,
+        font: {
+          family: "Arial",
+          size: 10,
+          style: "normal",
+          weight: "normal",
+          decoration: "none",
+        },
+      },
+    },
+  ],
+};
+const DPIRD_CONTOUR_LAYER_CONFIGS = [
+  {
+    key: "contoursDpird072",
+    name: "2 Metre Contours (DPIRD-072)",
+    layerId: 0,
+    interval: 2,
+    elevationField: "elevation_m",
+    opacity: 0.8,
+    priority: 2,
+  },
+  {
+    key: "contoursDpird073",
+    name: "10 Metre Contours (DPIRD-073)",
+    layerId: 1,
+    interval: 10,
+    elevationField: "elevation",
+    opacity: 0.8,
+    priority: 1,
+    drawingInfo: DPIRD_10M_CONTOUR_DRAWING_INFO,
+  },
+];
+const LGATE_214_PROJECT_GRID_MAPSERVER =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Imagery_and_Maps/MapServer";
+const LGATE_214_PROJECT_GRID_KEY = "projectGrid214";
+const LGATE_214_PROJECT_GRID_LAYER_ID = 29;
+const LGATE_214_PROJECT_GRID_NAME = "Landgate Project Grids (LGATE-214)";
+const LGATE_214_PROJECT_GRID_IDENTIFY_TOLERANCE_PX = 1;
+const MRWA_PROJECT_ZONES_QUERY =
+  "https://services2.arcgis.com/cHGEnmsJ165IBJRM/arcgis/rest/services/Project_Zone_View/FeatureServer/0/query";
+const MRWA_PROJECT_ZONES_KEY = "mrwaProjectZones";
+const MRWA_PROJECT_ZONES_NAME = "MRWA Project Zones";
+const MRWA_PROJECT_ZONES_GDA94_SPHEROID = "gda94";
+// The portal's MRWA Project Zones layer intentionally shows GDA94 zones only;
+// GDA2020 source records are excluded from rendering and identification.
+const MRWA_PROJECT_ZONES_WHERE = "Spheroid = 'GDA94'";
+
+// Info popup sections intentionally follow the Layers panel order.
+// Add new information-enabled layers here when they are added to the panel.
+const INFO_LAYER_ORDER_IDS = [
+  "cad001",
+  "ssm076",
+  "bm076",
+  "rm199",
+  "projectGrid214",
+  "mrwaProjectZones",
+  "power034",
+  "power031",
+  "power029",
+  "power035",
+  "power032",
+  "power030",
+  "power051",
+  "sewer026",
+  "sewer068",
+  "sewer083",
+  "sewer084",
+  "water002",
+  "water006",
+  "contoursDpird072",
+  "contoursDpird073",
+  "lga233",
+  "localities234",
+  "bushfire001",
+  "zoning070",
+];
+const INFO_LAYER_ORDER = new Map(
+  INFO_LAYER_ORDER_IDS.map((layerId, index) => [layerId, index])
+);
+function getInfoLayerOrder(layerId) {
+  return INFO_LAYER_ORDER.has(layerId) ? INFO_LAYER_ORDER.get(layerId) : Number.MAX_SAFE_INTEGER;
+}
 
 
   // ---- Speed knobs ----
@@ -239,7 +363,7 @@ const rmCrossSymbol = {
 };
 
 // ---- helpers ----
-async function fetchArcgisGeojsonInView(url, bounds, where = "1=1") {
+async function fetchArcgisGeojsonInView(url, bounds, where = "1=1", options = {}) {
   if (!bounds) return { type: "FeatureCollection", features: [] };
 
   const sw = bounds.getSouthWest();
@@ -248,7 +372,9 @@ async function fetchArcgisGeojsonInView(url, bounds, where = "1=1") {
 
   const params = new URLSearchParams({
     where,
-    outFields: "*",
+    outFields: Array.isArray(options.outFields)
+      ? options.outFields.join(",")
+      : options.outFields || "*",
     f: "geojson",
     outSR: "4326",
     geometry,
@@ -259,6 +385,13 @@ async function fetchArcgisGeojsonInView(url, bounds, where = "1=1") {
     t: Date.now().toString(),
   });
 
+  if (options.geometryPrecision != null) {
+    params.set("geometryPrecision", String(options.geometryPrecision));
+  }
+  if (options.maxAllowableOffset != null) {
+    params.set("maxAllowableOffset", String(options.maxAllowableOffset));
+  }
+
   const requestUrl = `${url}?${params.toString()}`;
   const res = await fetch(requestUrl);
   const json = await res.json();
@@ -266,6 +399,207 @@ async function fetchArcgisGeojsonInView(url, bounds, where = "1=1") {
   if (json?.error) throw new Error(json.error.message || "ArcGIS query error");
 
   return { type: "FeatureCollection", features: json?.features || [], requestUrl };
+}
+
+function getMapImageSize(mapDiv) {
+  const width = Math.max(1, Math.round(mapDiv?.clientWidth || mapDiv?.offsetWidth || 1));
+  const height = Math.max(1, Math.round(mapDiv?.clientHeight || mapDiv?.offsetHeight || 1));
+  return { width, height };
+}
+
+function buildArcgisMapServerExportUrl({ serviceUrl, bounds, width, height, layerId, drawingInfo }) {
+  if (!serviceUrl || !bounds || !width || !height) return "";
+
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+  const bbox = `${sw.lng()},${sw.lat()},${ne.lng()},${ne.lat()}`;
+  const params = new URLSearchParams({
+    f: "image",
+    format: "png32",
+    transparent: "true",
+    layers: `show:${layerId}`,
+    bbox,
+    bboxSR: "4326",
+    imageSR: "4326",
+    size: `${width},${height}`,
+    dpi: "96",
+  });
+
+  if (drawingInfo) {
+    params.set(
+      "dynamicLayers",
+      JSON.stringify([
+        {
+          id: layerId,
+          source: { type: "mapLayer", mapLayerId: layerId },
+          drawingInfo,
+        },
+      ])
+    );
+  }
+
+  return `${serviceUrl}/export?${params.toString()}`;
+}
+
+function formatContourElevation(value) {
+  const text = cleanInfoPart(value);
+  if (!text) return "";
+  const number = Number(text);
+  if (!Number.isFinite(number)) return text;
+  return number.toFixed(3).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+}
+
+function getContourElevationFromAttributes(attrs = {}, field) {
+  const wanted = String(field || "").toLowerCase();
+  const fieldName = Object.keys(attrs).find((key) => key.toLowerCase() === wanted);
+  if (!fieldName) return { fieldName: "", value: "" };
+  return { fieldName, value: attrs[fieldName] };
+}
+
+function getContourConfigForIdentifyResult(result, contourConfigs) {
+  const attrs = result?.attributes || {};
+  const resultLayerId = Number(result?.layerId);
+
+  return contourConfigs.find((config) => {
+    if (Number.isFinite(resultLayerId) && resultLayerId === config.layerId) return true;
+    const layerName = String(result?.layerName || "").toLowerCase();
+    if (layerName && layerName.includes(String(config.interval))) return true;
+    return !!getContourElevationFromAttributes(attrs, config.elevationField).fieldName;
+  });
+}
+
+async function identifyDpirdContours({ serviceUrl, latLng, map, mapDiv, tolerance, contourConfigs }) {
+  if (!serviceUrl || !latLng || !map || !mapDiv || !contourConfigs?.length) return [];
+
+  const bounds = map.getBounds();
+  if (!bounds) return [];
+
+  const { width, height } = getMapImageSize(mapDiv);
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+  const lng = typeof latLng.lng === "function" ? latLng.lng() : latLng.lng;
+  const lat = typeof latLng.lat === "function" ? latLng.lat() : latLng.lat;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+
+  const orderedConfigs = [...contourConfigs].sort(
+    (a, b) => getInfoLayerOrder(a.key) - getInfoLayerOrder(b.key)
+  );
+  const spatialReference = { wkid: 4326 };
+  const params = new URLSearchParams({
+    f: "json",
+    geometry: JSON.stringify({ x: lng, y: lat, spatialReference }),
+    geometryType: "esriGeometryPoint",
+    sr: "4326",
+    mapExtent: JSON.stringify({
+      xmin: sw.lng(),
+      ymin: sw.lat(),
+      xmax: ne.lng(),
+      ymax: ne.lat(),
+      spatialReference,
+    }),
+    imageDisplay: `${width},${height},96`,
+    tolerance: String(tolerance),
+    layers: `visible:${orderedConfigs.map((config) => config.layerId).join(",")}`,
+    returnGeometry: "false",
+  });
+
+  const res = await fetch(`${serviceUrl}/identify?${params.toString()}`);
+  const json = await res.json();
+  if (json?.error) throw new Error(json.error.message || "ArcGIS identify error");
+
+  const contours = [];
+  for (const config of orderedConfigs) {
+    const result = (json?.results || []).find((item) => {
+      const matchedConfig = getContourConfigForIdentifyResult(item, [config]);
+      if (!matchedConfig) return false;
+      return !!getContourElevationFromAttributes(item?.attributes || {}, config.elevationField).fieldName;
+    });
+    if (!result) continue;
+
+    const elevation = getContourElevationFromAttributes(result.attributes || {}, config.elevationField);
+    const formattedElevation = formatContourElevation(elevation.value);
+    if (!formattedElevation) continue;
+
+    contours.push({
+      elevation: formattedElevation,
+      elevationField: elevation.fieldName,
+      interval: config.interval,
+      layerId: config.layerId,
+      layerKey: config.key,
+    });
+  }
+
+  return contours;
+}
+
+function getCaseInsensitiveAttribute(attrs = {}, field) {
+  const wanted = String(field || "").toLowerCase();
+  const key = Object.keys(attrs).find((name) => name.toLowerCase() === wanted);
+  return key ? cleanInfoPart(attrs[key]) : "";
+}
+
+function isMrwaGda94ProjectZone(attributes = {}) {
+  return (
+    getCaseInsensitiveAttribute(attributes, "Spheroid").toLowerCase() ===
+    MRWA_PROJECT_ZONES_GDA94_SPHEROID
+  );
+}
+
+function isRenderableMrwaProjectZoneFeature(feature) {
+  return isMrwaGda94ProjectZone(feature?.properties || {});
+}
+
+async function identifyProjectGrid214({ serviceUrl, latLng, map, mapDiv, tolerance }) {
+  if (!serviceUrl || !latLng || !map || !mapDiv) return [];
+
+  const bounds = map.getBounds();
+  if (!bounds) return [];
+
+  const { width, height } = getMapImageSize(mapDiv);
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+  const lng = typeof latLng.lng === "function" ? latLng.lng() : latLng.lng;
+  const lat = typeof latLng.lat === "function" ? latLng.lat() : latLng.lat;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+
+  const spatialReference = { wkid: 4326 };
+  const params = new URLSearchParams({
+    f: "json",
+    geometry: JSON.stringify({ x: lng, y: lat, spatialReference }),
+    geometryType: "esriGeometryPoint",
+    sr: "4326",
+    mapExtent: JSON.stringify({
+      xmin: sw.lng(),
+      ymin: sw.lat(),
+      xmax: ne.lng(),
+      ymax: ne.lat(),
+      spatialReference,
+    }),
+    imageDisplay: `${width},${height},96`,
+    tolerance: String(tolerance),
+    layers: `visible:${LGATE_214_PROJECT_GRID_LAYER_ID}`,
+    returnGeometry: "false",
+  });
+
+  const res = await fetch(`${serviceUrl}/identify?${params.toString()}`);
+  const json = await res.json();
+  if (json?.error) throw new Error(json.error.message || "ArcGIS identify error");
+
+  const seen = new Set();
+  const grids = [];
+  (json?.results || []).forEach((result) => {
+    const attrs = result?.attributes || {};
+    const projection = getCaseInsensitiveAttribute(attrs, "projection");
+    const projId = getCaseInsensitiveAttribute(attrs, "proj_id");
+    if (!projection && !projId) return;
+
+    const key = `${projection.toLowerCase()}::${projId.toLowerCase()}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    grids.push({ projection, projId });
+  });
+
+  return grids;
 }
 
 function cleanInfoPart(value) {
@@ -1095,6 +1429,9 @@ const pointLayersRef = useRef(new Map());
 
 // Line layers (future road centreline / contours / etc.)
 const lineLayersRef = useRef(new Map());
+const contourOverlaysRef = useRef(new Map());
+const projectGridOverlayRef = useRef(null);
+const contourIdentifySeqRef = useRef(0);
 
   // Portal jobs markers/cluster
   const portalClustererRef = useRef(null);
@@ -2664,7 +3001,7 @@ if (!isWA) {
   });
 };
 
-function buildMapInfoPopupHtml(latLng, lgate002Info = null) {
+function buildMapInfoPopupHtml(latLng, lgate002Info = null, contourInfos = [], projectGridInfo = []) {
   const googleMaps = window.google?.maps;
   if (!googleMaps) return "";
 
@@ -2681,14 +3018,90 @@ function buildMapInfoPopupHtml(latLng, lgate002Info = null) {
     `;
   }
 
-const visiblePolygonLayers = (layersRef.current || []).filter(
-  (l) => l.type === "polygon" && l.visible
-);
+  const visiblePolygonLayers = (layersRef.current || []).filter(
+    (l) => l.type === "polygon" && l.visible
+  );
   const sections = [];
+  const addSection = (layerId, html) => {
+    if (!html) return;
+    sections.push({ layerId, order: getInfoLayerOrder(layerId), html });
+  };
+
+  const contourList = Array.isArray(contourInfos)
+    ? contourInfos
+    : contourInfos
+    ? [contourInfos]
+    : [];
+
+  contourList.forEach((contourInfo) => {
+    if (!contourInfo?.elevation) return;
+    addSection(
+      contourInfo.layerKey,
+      `
+        <div style="margin-top:8px;">
+          <div style="font-weight:950; font-size:13px; color:#111;">
+            CONTOUR
+          </div>
+          ${contourInfo.interval === 10 ? `
+            <div style="margin-top:5px; color:#111; word-break:break-word;">
+              <span style="font-weight:900; color:#333;">Interval:</span> 10 m
+            </div>
+          ` : ""}
+          <div style="margin-top:5px; color:#111; word-break:break-word;">
+            <span style="font-weight:900; color:#333;">Elevation:</span> ${escapeHtml(contourInfo.elevation)} m
+          </div>
+        </div>
+      `
+    );
+  });
 
   visiblePolygonLayers.forEach((layer) => {
     const store = polygonLayersRef.current.get(layer.id);
     if (!store?.polygons) return;
+
+    if (layer.id === MRWA_PROJECT_ZONES_KEY) {
+      const seenZones = new Set();
+      const matchedZones = [];
+
+      store.polygons.forEach((feature) => {
+        if (!dataPolygonFeatureContainsLatLng(feature, latLng, googleMaps)) return;
+
+        const props = {};
+        feature.forEachProperty((value, key) => {
+          props[key] = value;
+        });
+
+        const objectId = getCaseInsensitiveAttribute(props, "OBJECTID");
+        const name = getCaseInsensitiveAttribute(props, "Name");
+        if (!name || !isMrwaGda94ProjectZone(props)) return;
+
+        const dedupeKey = objectId || name.toLowerCase();
+        if (seenZones.has(dedupeKey)) return;
+        seenZones.add(dedupeKey);
+        matchedZones.push({ name });
+      });
+
+      if (!matchedZones.length) return;
+
+      addSection(
+        layer.id,
+        `
+          <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.12);">
+            <div style="font-weight:950; font-size:13px; color:#111;">
+              ${matchedZones.length === 1 ? "MRWA PROJECT ZONE" : "MRWA PROJECT ZONES"}
+            </div>
+            ${matchedZones
+              .map((zone, index) => `
+                <div style="${index ? "margin-top:8px;" : "margin-top:5px;"} color:#111; word-break:break-word;">
+                  <div><span style="font-weight:900; color:#333;">Project Zone:</span> ${escapeHtml(zone.name)}</div>
+                </div>
+              `)
+              .join("")}
+          </div>
+        `
+      );
+      return;
+    }
 
     let matchedFeature = null;
 
@@ -2702,79 +3115,107 @@ const visiblePolygonLayers = (layersRef.current || []).filter(
 
     if (!matchedFeature) return;
 
-  const infoFields = layer.data?.infoFields || [];
+    const infoFields = layer.data?.infoFields || [];
 
-const props = {};
-matchedFeature.forEachProperty((value, key) => {
-  props[key] = value;
-});
+    const props = {};
+    matchedFeature.forEachProperty((value, key) => {
+      props[key] = value;
+    });
 
-const rows = infoFields
-  .map(({ key, label }) => {
-    const value = props[key];
+    const rows = infoFields
+      .map(({ key, label }) => {
+        const value = props[key];
 
-    if (value === null || value === undefined || String(value).trim() === "") {
-      return "";
-    }
-
-    return `
-      <div style="margin-top:5px;">
-        <div style="font-weight:900; color:#333;">${escapeHtml(label || key)}</div>
-        <div style="color:#111; word-break:break-word;">${escapeHtml(value)}</div>
-      </div>
-    `;
-  })
-  .filter(Boolean);
-
-const lgate002LotRow =
-  layer.id === "cad001" && cleanInfoPart(lgate002Info?.lotNumber)
-    ? `
-      <div style="margin-top:5px; color:#111; word-break:break-word;">
-        <span style="font-weight:900; color:#333;">Lot:</span> ${escapeHtml(cleanInfoPart(lgate002Info.lotNumber))}
-      </div>
-    `
-    : "";
-const cadastreRows =
-  layer.id === "cad001" && !lgate002LotRow ? buildCadastreLotPlanRowsFromProps(props, rows) : [];
-const addressRow =
-  layer.id === "cad001" && lgate002Info
-    ? `
-      <div style="margin-top:5px; color:#111; white-space:pre-line; word-break:break-word;">
-        <span style="font-weight:900; color:#333;">Address:</span> ${escapeHtml(lgate002Info.address || "No registered address")}
-      </div>
-    `
-    : "";
-const visibleRows = layer.id === "cad001" ? `${lgate002LotRow}${cadastreRows.join("")}${addressRow}` : rows.join("");
-const sectionStyle =
-  layer.id === "cad001"
-    ? "margin-top:8px;"
-    : "margin-top:10px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.12);";
-
-    sections.push(`
-      <div style="${sectionStyle}">
-        <div style="font-weight:950; font-size:13px; color:#111;">
-          ${layer.id === "cad001" ? "CADASTRE" : escapeHtml(layer.name)}
-        </div>
-        ${
-          visibleRows
-            ? visibleRows
-            : `<div style="margin-top:5px; color:#666; font-weight:800;">No selected attributes found.</div>`
+        if (value === null || value === undefined || String(value).trim() === "") {
+          return "";
         }
-      </div>
-    `);
+
+        return `
+          <div style="margin-top:5px;">
+            <div style="font-weight:900; color:#333;">${escapeHtml(label || key)}</div>
+            <div style="color:#111; word-break:break-word;">${escapeHtml(value)}</div>
+          </div>
+        `;
+      })
+      .filter(Boolean);
+
+    const lgate002LotRow =
+      layer.id === "cad001" && cleanInfoPart(lgate002Info?.lotNumber)
+        ? `
+          <div style="margin-top:5px; color:#111; word-break:break-word;">
+            <span style="font-weight:900; color:#333;">Lot:</span> ${escapeHtml(cleanInfoPart(lgate002Info.lotNumber))}
+          </div>
+        `
+        : "";
+    const cadastreRows =
+      layer.id === "cad001" && !lgate002LotRow ? buildCadastreLotPlanRowsFromProps(props, rows) : [];
+    const addressRow =
+      layer.id === "cad001" && lgate002Info
+        ? `
+          <div style="margin-top:5px; color:#111; white-space:pre-line; word-break:break-word;">
+            <span style="font-weight:900; color:#333;">Address:</span> ${escapeHtml(lgate002Info.address || "No registered address")}
+          </div>
+        `
+        : "";
+    const visibleRows = layer.id === "cad001" ? `${lgate002LotRow}${cadastreRows.join("")}${addressRow}` : rows.join("");
+    const sectionStyle =
+      layer.id === "cad001"
+        ? "margin-top:8px;"
+        : "margin-top:10px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.12);";
+
+    addSection(
+      layer.id,
+      `
+        <div style="${sectionStyle}">
+          <div style="font-weight:950; font-size:13px; color:#111;">
+            ${layer.id === "cad001" ? "CADASTRE" : escapeHtml(layer.name)}
+          </div>
+          ${
+            visibleRows
+              ? visibleRows
+              : `<div style="margin-top:5px; color:#666; font-weight:800;">No selected attributes found.</div>`
+          }
+        </div>
+      `
+    );
   });
 
-  if (!sections.length) {
+  if (projectGridInfo?.length) {
+    addSection(
+      LGATE_214_PROJECT_GRID_KEY,
+      `
+        <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.12);">
+          <div style="font-weight:950; font-size:13px; color:#111;">
+            ${projectGridInfo.length === 1 ? "LANDGATE PROJECT GRID" : "PROJECT GRIDS"}
+          </div>
+          ${projectGridInfo
+            .map((grid, index) => `
+              <div style="${index ? "margin-top:8px;" : "margin-top:5px;"} color:#111; word-break:break-word;">
+                ${grid.projection ? `<div><span style="font-weight:900; color:#333;">Landgate Project Grid:</span> ${escapeHtml(grid.projection)}</div>` : ""}
+                ${grid.projId ? `<div style="margin-top:3px;"><span style="font-weight:900; color:#333;">Grid ID:</span> ${escapeHtml(grid.projId)}</div>` : ""}
+              </div>
+            `)
+            .join("")}
+        </div>
+      `
+    );
+  }
+
+  const orderedSections = sections
+    .filter((section) => section.html)
+    .sort((a, b) => a.order - b.order);
+
+  if (!orderedSections.length) {
     return `
       <div style="font-family:Inter,sans-serif; font-size:12px; max-width:260px;">
         <div data-pw-drag-handle="1" style="font-weight:900; font-size:13px; margin-bottom:6px;">
           Map Information
         </div>
         <div style="color:#666; font-weight:800;">
-          No visible polygon data found at this point.
+          No visible map information found at this point.
         </div>
         <div style="margin-top:6px; color:#666;">
-          Turn on Cadastre, Local Authority, or R-Codes Zoning first.
+          Turn on Cadastre, Local Authority, R-Codes Zoning, Contours, Project Grids, or MRWA Project Zones first.
         </div>
       </div>
     `;
@@ -2785,7 +3226,7 @@ const sectionStyle =
       <div data-pw-drag-handle="1" style="font-weight:950; font-size:14px; margin-bottom:6px;">
         Map Information
       </div>
-      ${sections.join("")}
+      ${orderedSections.map((section) => section.html).join("")}
     </div>
   `;
 }
@@ -2795,18 +3236,90 @@ function openMapInfoPopupAtLatLng(latLng) {
   if (!map || !latLng) return;
 
   const cadastreOn = (layersRef.current || []).some((l) => l.id === "cad001" && l.visible);
+  const activeContourConfigs = DPIRD_CONTOUR_LAYER_CONFIGS.filter((config) =>
+    (layersRef.current || []).some((l) => l.id === config.key && l.visible)
+  );
+  const contourOn = activeContourConfigs.length > 0;
+  const projectGridOn = (layersRef.current || []).some(
+    (l) => l.id === LGATE_214_PROJECT_GRID_KEY && l.visible
+  );
   const emptyAddressInfo = { address: "", lotNumber: "" };
-  const html = buildMapInfoPopupHtml(latLng, cadastreOn ? emptyAddressInfo : null);
+  let latestAddressInfo = cadastreOn ? emptyAddressInfo : null;
+  let latestContourInfo = null;
+  let latestProjectGridInfo = [];
+  const identifySeq = ++contourIdentifySeqRef.current;
 
-  infoWindowRef.current?.setContent(html);
-  infoWindowRef.current?.setPosition(latLng);
-  infoWindowRef.current?.open({ map });
+  const renderInfoPopup = () => {
+    infoWindowRef.current?.setContent(
+      buildMapInfoPopupHtml(latLng, latestAddressInfo, latestContourInfo, latestProjectGridInfo)
+    );
+    infoWindowRef.current?.setPosition(latLng);
+    infoWindowRef.current?.open({ map });
 
-  window.google.maps.event.addListenerOnce(infoWindowRef.current, "domready", () => {
-    setTimeout(makeLatestInfoWindowDraggable, 0);
-  });
+    window.google?.maps?.event?.addListenerOnce?.(infoWindowRef.current, "domready", () => {
+      setTimeout(makeLatestInfoWindowDraggable, 0);
+    });
+  };
 
-  if (!cadastreOn || !html.includes("CADASTRE")) return;
+  renderInfoPopup();
+
+  if (contourOn) {
+    identifyDpirdContours({
+      serviceUrl: DPIRD_CONTOURS_MAPSERVER,
+      latLng,
+      map,
+      mapDiv: mapDivRef.current,
+      tolerance: DPIRD_CONTOUR_IDENTIFY_TOLERANCE_PX,
+      contourConfigs: activeContourConfigs,
+    })
+      .then((contourInfo) => {
+        if (!contourInfo) return;
+        if (contourIdentifySeqRef.current !== identifySeq) return;
+        if (!infoModeRef.current) return;
+        if (
+          !(layersRef.current || []).some(
+            (l) => l.id === contourInfo.layerKey && l.visible
+          )
+        ) {
+          return;
+        }
+        latestContourInfo = contourInfo;
+        renderInfoPopup();
+      })
+      .catch((err) => {
+        if (contourIdentifySeqRef.current !== identifySeq) return;
+        console.warn("DPIRD contour identify failed:", err);
+      });
+  }
+
+  if (projectGridOn) {
+    identifyProjectGrid214({
+      serviceUrl: LGATE_214_PROJECT_GRID_MAPSERVER,
+      latLng,
+      map,
+      mapDiv: mapDivRef.current,
+      tolerance: LGATE_214_PROJECT_GRID_IDENTIFY_TOLERANCE_PX,
+    })
+      .then((projectGridInfo) => {
+        if (!projectGridInfo?.length) return;
+        if (contourIdentifySeqRef.current !== identifySeq) return;
+        if (!infoModeRef.current) return;
+        if (!(layersRef.current || []).some((l) => l.id === LGATE_214_PROJECT_GRID_KEY && l.visible)) {
+          return;
+        }
+        latestProjectGridInfo = projectGridInfo;
+        renderInfoPopup();
+      })
+      .catch((err) => {
+        if (contourIdentifySeqRef.current !== identifySeq) return;
+        console.warn("LGATE-214 project grid identify failed:", err);
+      });
+  }
+
+  if (!cadastreOn) return;
+
+  const html = buildMapInfoPopupHtml(latLng, latestAddressInfo, latestContourInfo, latestProjectGridInfo);
+  if (!html.includes("CADASTRE")) return;
 
   const lat = typeof latLng.lat === "function" ? latLng.lat() : latLng.lat;
   const lng = typeof latLng.lng === "function" ? latLng.lng() : latLng.lng;
@@ -2816,10 +3329,8 @@ function openMapInfoPopupAtLatLng(latLng) {
   const cached = lgate002AddressCacheRef.current.get(cacheKey);
   const applyAddressInfo = (info) => {
     if (!infoWindowRef.current?.getMap?.()) return;
-    infoWindowRef.current.setContent(buildMapInfoPopupHtml(latLng, info || emptyAddressInfo));
-    window.google?.maps?.event?.addListenerOnce?.(infoWindowRef.current, "domready", () => {
-      setTimeout(makeLatestInfoWindowDraggable, 0);
-    });
+    latestAddressInfo = info || emptyAddressInfo;
+    renderInfoPopup();
   };
 
   if (cached) {
@@ -2846,6 +3357,7 @@ function refreshBushfireLayerStyle() {
 }
 
 function stopInfoMode() {
+  contourIdentifySeqRef.current += 1;
   infoModeRef.current = false;
   setInfoMode(false);
 
@@ -2863,6 +3375,7 @@ function toggleInfoMode() {
   setNoteAddMode(false);
 
   const next = !infoModeRef.current;
+  if (!next) contourIdentifySeqRef.current += 1;
   infoModeRef.current = next;
   setInfoMode(next);
 
@@ -5363,6 +5876,9 @@ if (pointSets.length) {
       const hasPowerTransmissionOverhead = prev.some((l) => l.id === "power032");
       const hasPowerTransmissionPoles = prev.some((l) => l.id === "power030");
       const hasPowerNcmt = prev.some((l) => l.id === "power051");
+      const hasProjectGrid = prev.some((l) => l.id === LGATE_214_PROJECT_GRID_KEY);
+      const hasMrwaProjectZones = prev.some((l) => l.id === MRWA_PROJECT_ZONES_KEY);
+      const existingLayerIds = new Set(prev.map((l) => l.id));
       const next = [...prev];
 
     if (!hasSSM)
@@ -6182,6 +6698,78 @@ if (!hasWaterMeters)
     },
   });
 
+if (!hasProjectGrid)
+  next.push({
+    id: LGATE_214_PROJECT_GRID_KEY,
+    name: LGATE_214_PROJECT_GRID_NAME,
+    type: "imageOverlay",
+    visible: false,
+    data: {
+      mapServerUrl: LGATE_214_PROJECT_GRID_MAPSERVER,
+      layerId: LGATE_214_PROJECT_GRID_LAYER_ID,
+      opacity: 0.8,
+      identifyTolerance: LGATE_214_PROJECT_GRID_IDENTIFY_TOLERANCE_PX,
+      infoFields: ["projection", "proj_id"],
+    },
+  });
+
+if (!hasMrwaProjectZones)
+  next.push({
+    id: MRWA_PROJECT_ZONES_KEY,
+    name: MRWA_PROJECT_ZONES_NAME,
+    type: "polygon",
+    visible: false,
+    data: {
+      url: MRWA_PROJECT_ZONES_QUERY,
+      where: MRWA_PROJECT_ZONES_WHERE,
+      outFields: ["OBJECTID", "Name", "Spheroid"],
+      geometryPrecision: 6,
+      maxFeatures: 2000,
+      style: {
+        clickable: false,
+        strokeColor: "#512DA8",
+        strokeOpacity: 0.9,
+        strokeWeight: 2,
+        fillColor: "#7E57C2",
+        fillOpacity: 0.18,
+      },
+      labels: {
+        minZoom: 9,
+        fields: ["Name"],
+        color: "#111111",
+        fontWeight: "800",
+        fontSize: (zoom) => (zoom >= 10 ? "12px" : "10px"),
+        maxLabels: 80,
+        mobileMinZoom: 9,
+        mobileMaxLabels: 35,
+      },
+      filterFn: isRenderableMrwaProjectZoneFeature,
+      infoFields: [
+        { key: "Name", label: "Project Zone" },
+      ],
+    },
+  });
+
+DPIRD_CONTOUR_LAYER_CONFIGS.forEach((config) => {
+  if (existingLayerIds.has(config.key)) return;
+  next.push({
+    id: config.key,
+    name: config.name,
+    type: "imageOverlay",
+    visible: false,
+    data: {
+      mapServerUrl: DPIRD_CONTOURS_MAPSERVER,
+      layerId: config.layerId,
+      opacity: config.opacity,
+      identifyTolerance: DPIRD_CONTOUR_IDENTIFY_TOLERANCE_PX,
+      elevationField: config.elevationField,
+      interval: config.interval,
+      priority: config.priority,
+      drawingInfo: config.drawingInfo,
+    },
+  });
+});
+
       return next;
     });
   }, []);
@@ -6535,7 +7123,12 @@ const staleTimer = setInterval(() => {
           const geojson = await fetchArcgisGeojsonInView(
             layer.data.url,
             bounds,
-            layer.data.where || "1=1"
+            layer.data.where || "1=1",
+            {
+              outFields: layer.data?.outFields,
+              geometryPrecision: layer.data?.geometryPrecision,
+              maxAllowableOffset: layer.data?.maxAllowableOffset,
+            }
           );
           if (cancelled) return;
 
@@ -6547,6 +7140,10 @@ const staleTimer = setInterval(() => {
               firstFeatureAttributes: firstFeature?.properties || null,
               firstFeatureHasGeometry: !!firstFeature?.geometry,
             });
+          }
+
+          if (typeof layer.data?.filterFn === "function") {
+            geojson.features = (geojson.features || []).filter(layer.data.filterFn);
           }
 
           const maxFeatures = layer.data?.maxFeatures ?? MAX_FEATURES_PER_VIEW;
@@ -6798,6 +7395,130 @@ useEffect(() => {
     cancelled = true;
   };
 }, [layers, viewTick, isAppVisible]);
+
+const projectGridLayer = useMemo(
+  () => layers.find((l) => l.id === LGATE_214_PROJECT_GRID_KEY),
+  [layers]
+);
+const mrwaProjectZonesLayer = useMemo(
+  () => layers.find((l) => l.id === MRWA_PROJECT_ZONES_KEY),
+  [layers]
+);
+
+useEffect(() => {
+  const map = mapRef.current;
+  const googleMaps = window.google?.maps;
+  const layer = projectGridLayer;
+
+  const removeOverlay = () => {
+    if (!projectGridOverlayRef.current) return;
+    try {
+      projectGridOverlayRef.current.setMap(null);
+    } catch {
+      // ignore
+    }
+    projectGridOverlayRef.current = null;
+  };
+
+  if (!map || !googleMaps || !isAppVisible || !layer?.visible) {
+    contourIdentifySeqRef.current += 1;
+    removeOverlay();
+    return undefined;
+  }
+
+  const bounds = viewRef.current?.bounds || map.getBounds();
+  const mapDiv = mapDivRef.current;
+  const { width, height } = getMapImageSize(mapDiv);
+  const url = buildArcgisMapServerExportUrl({
+    serviceUrl: layer.data?.mapServerUrl || LGATE_214_PROJECT_GRID_MAPSERVER,
+    bounds,
+    width,
+    height,
+    layerId: layer.data?.layerId,
+  });
+
+  removeOverlay();
+  if (!bounds || !url) return undefined;
+
+  projectGridOverlayRef.current = new googleMaps.GroundOverlay(url, bounds, {
+    clickable: false,
+    opacity: layer.data?.opacity ?? 0.8,
+  });
+  projectGridOverlayRef.current.setMap(map);
+
+  return () => {
+    removeOverlay();
+  };
+}, [projectGridLayer, viewTick, isAppVisible]);
+
+const contourLayers = useMemo(
+  () =>
+    DPIRD_CONTOUR_LAYER_CONFIGS.map((config) => layers.find((l) => l.id === config.key)).filter(Boolean),
+  [layers]
+);
+
+useEffect(() => {
+  const map = mapRef.current;
+  const googleMaps = window.google?.maps;
+  const activeContourLayers = contourLayers.filter((layer) => layer.visible);
+
+  const removeOverlay = (layerId) => {
+    const overlay = contourOverlaysRef.current.get(layerId);
+    if (!overlay) return;
+    try {
+      overlay.setMap(null);
+    } catch {
+      // ignore
+    }
+    contourOverlaysRef.current.delete(layerId);
+  };
+
+  const removeAllOverlays = () => {
+    Array.from(contourOverlaysRef.current.keys()).forEach(removeOverlay);
+  };
+
+  if (!map || !googleMaps || !isAppVisible || !activeContourLayers.length) {
+    contourIdentifySeqRef.current += 1;
+    removeAllOverlays();
+    return undefined;
+  }
+
+  const activeIds = new Set(activeContourLayers.map((layer) => layer.id));
+  Array.from(contourOverlaysRef.current.keys()).forEach((layerId) => {
+    if (!activeIds.has(layerId)) removeOverlay(layerId);
+  });
+
+  const bounds = viewRef.current?.bounds || map.getBounds();
+  const mapDiv = mapDivRef.current;
+  const { width, height } = getMapImageSize(mapDiv);
+
+  activeContourLayers
+    .slice()
+    .sort((a, b) => (a.data?.interval || 0) - (b.data?.interval || 0))
+    .forEach((layer) => {
+      removeOverlay(layer.id);
+      const url = buildArcgisMapServerExportUrl({
+        serviceUrl: layer.data?.mapServerUrl || DPIRD_CONTOURS_MAPSERVER,
+        bounds,
+        width,
+        height,
+        layerId: layer.data?.layerId,
+        drawingInfo: layer.data?.drawingInfo,
+      });
+      if (!bounds || !url) return;
+
+      const overlay = new googleMaps.GroundOverlay(url, bounds, {
+        clickable: false,
+        opacity: layer.data?.opacity ?? 0.8,
+      });
+      contourOverlaysRef.current.set(layer.id, overlay);
+      overlay.setMap(map);
+    });
+
+  return () => {
+    removeAllOverlays();
+  };
+}, [contourLayers, viewTick, isAppVisible]);
 
   const toggleLayer = (id) => {
     setLayers((prev) =>
@@ -7756,7 +8477,7 @@ onBlur={() => {
                   </div>
 
                   <div className="layers-list">
-                    {[ssmLayer, bmLayer, rmLayer]
+                    {[ssmLayer, bmLayer, rmLayer, projectGridLayer, mrwaProjectZonesLayer]
                       .filter(Boolean)
                       .map((l) => (
                         <div key={l.id} className="layer-row layer-row-compact">
@@ -7840,6 +8561,23 @@ onBlur={() => {
   ))}
   </div>
 </div>
+                <div className="maps-layer-section">
+                  <div className="maps-layer-section-title">Contours</div>
+                  <div className="layers-list">
+                    {contourLayers.map((layer) => (
+                      <div key={layer.id} className="layer-row layer-row-compact">
+                        <label className="layer-left">
+                          <input
+                            type="checkbox"
+                            checked={layer.visible}
+                            onChange={() => toggleLayer(layer.id)}
+                          />
+                          <span className="layer-name">{layer.name}</span>
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 <div className="maps-layer-section">
                   <div className="maps-layer-section-title">Local Authority</div>
                   <div className="layers-list">
