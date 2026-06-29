@@ -154,6 +154,8 @@ const LGATE_076_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Property_and_Planning/MapServer/1/query"; // SSM + BM
 const LGATE_199_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Property_and_Planning/MapServer/62/query"; // RM
+const MRWA_RRM_QUERY =
+  "https://services2.arcgis.com/cHGEnmsJ165IBJRM/arcgis/rest/services/Geodetic_Control_View/FeatureServer/0/query";
 const LGATE_001_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Property_and_Planning/MapServer/2/query"; // Cadastre (LGATE-001)
 const LGATE_002_ADDRESS_LARGE_QUERY =
@@ -164,6 +166,8 @@ const LGATE_233_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Boundaries/MapServer/14/query"; // LGA Boundaries (LGATE-233)
 const LGATE_234_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Boundaries/MapServer/16/query"; // Localities (LGATE-234)
+const LGATE_BOUNDARIES_MAPSERVER =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Boundaries/MapServer";
 const OBRM_001_QUERY = "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Bush_Fire_Prone_Areas/MapServer/17/query"; // Bush Fire Prone Areas (OBRM-001)
   const DPLH_070_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Property_and_Planning/MapServer/111/query"; // R-Codes Zoning (DPLH-070)
@@ -273,6 +277,66 @@ const LGATE_214_PROJECT_GRID_KEY = "projectGrid214";
 const LGATE_214_PROJECT_GRID_LAYER_ID = 29;
 const LGATE_214_PROJECT_GRID_NAME = "Landgate Project Grids (LGATE-214)";
 const LGATE_214_PROJECT_GRID_IDENTIFY_TOLERANCE_PX = 1;
+const LGATE_229_DISTRICTS_KEY = "districts229";
+const LGATE_229_DISTRICTS_NAME = "Districts (LGATE-229)";
+const LGATE_229_DISTRICTS_LAYER_ID = 17;
+const LGATE_229_DISTRICTS_NAME_FIELD = "name";
+const LGATE_229_DISTRICTS_IDENTIFY_TOLERANCE_PX = 1;
+const LGATE_229_DISTRICTS_DRAWING_INFO = {
+  renderer: {
+    type: "simple",
+    symbol: {
+      type: "esriSFS",
+      style: "esriSFSSolid",
+      color: [244, 211, 94, 31],
+      outline: {
+        type: "esriSLS",
+        style: "esriSLSSolid",
+        color: [154, 103, 0, 230],
+        width: 2,
+      },
+    },
+    label: "District",
+  },
+  scaleSymbols: true,
+  transparency: 0,
+  labelingInfo: [
+    {
+      labelExpression: "[name]",
+      labelPlacement: "esriServerPolygonPlacementAlwaysHorizontal",
+      removeDuplicates: "none",
+      multiPart: "labelPerPart",
+      deconflictionStrategy: "dynamic",
+      repeatLabel: false,
+      allowOverrun: false,
+      stackLabel: false,
+      useCodedValues: true,
+      maxScale: 0,
+      minScale: 1500000,
+      name: "Default",
+      priority: 28,
+      symbol: {
+        type: "esriTS",
+        color: [45, 32, 0, 255],
+        haloColor: [255, 255, 255, 255],
+        haloSize: 1,
+        verticalAlignment: "bottom",
+        horizontalAlignment: "center",
+        rightToLeft: false,
+        angle: 0,
+        xoffset: 0,
+        yoffset: 0,
+        font: {
+          family: "Arial",
+          size: 9,
+          style: "normal",
+          weight: "bold",
+          decoration: "none",
+        },
+      },
+    },
+  ],
+};
 const MRWA_PROJECT_ZONES_QUERY =
   "https://services2.arcgis.com/cHGEnmsJ165IBJRM/arcgis/rest/services/Project_Zone_View/FeatureServer/0/query";
 const MRWA_PROJECT_ZONES_KEY = "mrwaProjectZones";
@@ -281,6 +345,113 @@ const MRWA_PROJECT_ZONES_GDA94_SPHEROID = "gda94";
 // The portal's MRWA Project Zones layer intentionally shows GDA94 zones only;
 // GDA2020 source records are excluded from rendering and identification.
 const MRWA_PROJECT_ZONES_WHERE = "Spheroid = 'GDA94'";
+const MRWA_ROADS_NETWORK_MAPSERVER =
+  "https://gisservices.mainroads.wa.gov.au/arcgis/rest/services/OpenData/RoadAssets_DataPortal/MapServer";
+const MRWA_ROADS_NETWORK_KEY = "mrwaRoadsNetwork";
+const MRWA_ROADS_NETWORK_LAYER_ID = 17;
+const MRWA_ROADS_NETWORK_NAME = "Roads Network";
+const MRWA_ROADS_NETWORK_ROAD_NAME_FIELD = "ROAD_NAME";
+const MRWA_ROADS_NETWORK_IDENTIFY_TOLERANCE_PX = 6;
+const MRWA_RRM_KEY = "mrwaRrms";
+const MRWA_RRM_NAME = "MRWA RRMs";
+const MRWA_RRM_WHERE = "ControlType = 'RRM'";
+const MRWA_RRM_OUT_FIELDS = [
+  "OBJECTID",
+  "MarkName",
+  "ControlType",
+  "MarkType",
+  "ElevationDatum",
+  "Elevation",
+  "MGAZone",
+  "Easting_MGA94",
+  "Northing_MGA94",
+  "Easting_MGA2020",
+  "Northing_MGA2020",
+  "ProjectZone",
+  "Easting_PrZone94",
+  "Northing_PrZone94",
+  "Easting_PrZone2020",
+  "Northing_PrZone2020",
+  "Comments",
+];
+const MRWA_RRM_EXPORT_FIELDS = ["OBJECTID", "MarkName", "ControlType"];
+const MRWA_RRM_POPUP_ROWS = [
+  ["Mark Name", "MarkName"],
+  ["Control Type", "ControlType"],
+  ["Mark Type", "MarkType"],
+  ["Elevation Datum", "ElevationDatum"],
+  ["Elevation", "Elevation"],
+  ["MGA Zone", "MGAZone"],
+  ["MGA94 Easting", "Easting_MGA94"],
+  ["MGA94 Northing", "Northing_MGA94"],
+  ["MGA2020 Easting", "Easting_MGA2020"],
+  ["MGA2020 Northing", "Northing_MGA2020"],
+  ["Project Zone", "ProjectZone"],
+  ["Project Zone 94 Easting", "Easting_PrZone94"],
+  ["Project Zone 94 Northing", "Northing_PrZone94"],
+  ["Project Zone 2020 Easting", "Easting_PrZone2020"],
+  ["Project Zone 2020 Northing", "Northing_PrZone2020"],
+  ["Comments", "Comments"],
+];
+const MRWA_ROADS_NETWORK_DRAWING_INFO = {
+  renderer: {
+    type: "uniqueValue",
+    field1: "NETWORK_TYPE",
+    uniqueValueInfos: [
+      {
+        value: "State Road",
+        label: "State Road",
+        symbol: {
+          type: "esriSLS",
+          style: "esriSLSSolid",
+          color: [0, 197, 255, 255],
+          width: 2,
+        },
+      },
+      {
+        value: "Local Road",
+        label: "Local Road",
+        symbol: {
+          type: "esriSLS",
+          style: "esriSLSSolid",
+          color: [204, 204, 204, 255],
+          width: 2,
+        },
+      },
+      {
+        value: "Main Roads Controlled Path",
+        label: "Main Roads Controlled Path",
+        symbol: {
+          type: "esriSLS",
+          style: "esriSLSDash",
+          color: [197, 0, 255, 255],
+          width: 2,
+        },
+      },
+      {
+        value: "Miscellaneous Road",
+        label: "Miscellaneous Road",
+        symbol: {
+          type: "esriSLS",
+          style: "esriSLSSolid",
+          color: [255, 170, 0, 255],
+          width: 2,
+        },
+      },
+      {
+        value: "Crossover",
+        label: "Crossover",
+        symbol: {
+          type: "esriSLS",
+          style: "esriSLSSolid",
+          color: [0, 0, 0, 255],
+          width: 2,
+        },
+      },
+    ],
+    fieldDelimiter: ",",
+  },
+};
 
 // Info popup sections intentionally follow the Layers panel order.
 // Add new information-enabled layers here when they are added to the panel.
@@ -289,6 +460,7 @@ const INFO_LAYER_ORDER_IDS = [
   "ssm076",
   "bm076",
   "rm199",
+  "mrwaRrms",
   "projectGrid214",
   "mrwaProjectZones",
   "power034",
@@ -306,10 +478,12 @@ const INFO_LAYER_ORDER_IDS = [
   "water006",
   "contoursDpird072",
   "contoursDpird073",
+  "districts229",
   "lga233",
   "localities234",
   "bushfire001",
   "zoning070",
+  "mrwaRoadsNetwork",
 ];
 const INFO_LAYER_ORDER = new Map(
   INFO_LAYER_ORDER_IDS.map((layerId, index) => [layerId, index])
@@ -341,6 +515,13 @@ const ssmTriangleSymbol = {
   strokeWeight: 1,
   scale: 2.6,
   labelOrigin: new GPoint(0, 5),
+};
+
+const mrwaRrmTriangleSymbol = {
+  ...ssmTriangleSymbol,
+  fillColor: "#66C2FF",
+  strokeColor: "#0B4F8A",
+  strokeWeight: 1.75,
 };
 
 const bmSquareSymbol = {
@@ -417,7 +598,6 @@ function buildArcgisMapServerExportUrl({ serviceUrl, bounds, width, height, laye
     f: "image",
     format: "png32",
     transparent: "true",
-    layers: `show:${layerId}`,
     bbox,
     bboxSR: "4326",
     imageSR: "4326",
@@ -436,6 +616,8 @@ function buildArcgisMapServerExportUrl({ serviceUrl, bounds, width, height, laye
         },
       ])
     );
+  } else {
+    params.set("layers", `show:${layerId}`);
   }
 
   return `${serviceUrl}/export?${params.toString()}`;
@@ -600,6 +782,114 @@ async function identifyProjectGrid214({ serviceUrl, latLng, map, mapDiv, toleran
   });
 
   return grids;
+}
+
+async function identifyMrwaRoadsNetwork({ serviceUrl, latLng, map, mapDiv, tolerance }) {
+  if (!serviceUrl || !latLng || !map || !mapDiv) return [];
+
+  const bounds = map.getBounds();
+  if (!bounds) return [];
+
+  const { width, height } = getMapImageSize(mapDiv);
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+  const lng = typeof latLng.lng === "function" ? latLng.lng() : latLng.lng;
+  const lat = typeof latLng.lat === "function" ? latLng.lat() : latLng.lat;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+
+  const spatialReference = { wkid: 4326 };
+  const params = new URLSearchParams({
+    f: "json",
+    geometry: JSON.stringify({ x: lng, y: lat, spatialReference }),
+    geometryType: "esriGeometryPoint",
+    sr: "4326",
+    mapExtent: JSON.stringify({
+      xmin: sw.lng(),
+      ymin: sw.lat(),
+      xmax: ne.lng(),
+      ymax: ne.lat(),
+      spatialReference,
+    }),
+    imageDisplay: `${width},${height},96`,
+    tolerance: String(tolerance),
+    layers: `visible:${MRWA_ROADS_NETWORK_LAYER_ID}`,
+    returnGeometry: "false",
+  });
+
+  const res = await fetch(`${serviceUrl}/identify?${params.toString()}`);
+  const json = await res.json();
+  if (json?.error) throw new Error(json.error.message || "ArcGIS identify error");
+
+  const seen = new Set();
+  const roadNames = [];
+  (json?.results || []).forEach((result) => {
+    const roadName = getCaseInsensitiveAttribute(
+      result?.attributes || {},
+      MRWA_ROADS_NETWORK_ROAD_NAME_FIELD
+    );
+    if (!roadName) return;
+
+    const key = roadName.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    roadNames.push(roadName);
+  });
+
+  return roadNames;
+}
+
+async function identifyLandgateDistricts({ serviceUrl, latLng, map, mapDiv, tolerance }) {
+  if (!serviceUrl || !latLng || !map || !mapDiv) return [];
+
+  const bounds = map.getBounds();
+  if (!bounds) return [];
+
+  const { width, height } = getMapImageSize(mapDiv);
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+  const lng = typeof latLng.lng === "function" ? latLng.lng() : latLng.lng;
+  const lat = typeof latLng.lat === "function" ? latLng.lat() : latLng.lat;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+
+  const spatialReference = { wkid: 4326 };
+  const params = new URLSearchParams({
+    f: "json",
+    geometry: JSON.stringify({ x: lng, y: lat, spatialReference }),
+    geometryType: "esriGeometryPoint",
+    sr: "4326",
+    mapExtent: JSON.stringify({
+      xmin: sw.lng(),
+      ymin: sw.lat(),
+      xmax: ne.lng(),
+      ymax: ne.lat(),
+      spatialReference,
+    }),
+    imageDisplay: `${width},${height},96`,
+    tolerance: String(tolerance),
+    layers: `visible:${LGATE_229_DISTRICTS_LAYER_ID}`,
+    returnGeometry: "false",
+  });
+
+  const res = await fetch(`${serviceUrl}/identify?${params.toString()}`);
+  const json = await res.json();
+  if (json?.error) throw new Error(json.error.message || "ArcGIS identify error");
+
+  const seen = new Set();
+  const districtNames = [];
+  (json?.results || []).forEach((result) => {
+    const districtName = getCaseInsensitiveAttribute(
+      result?.attributes || {},
+      LGATE_229_DISTRICTS_NAME_FIELD
+    );
+    if (!districtName) return;
+
+    const key = districtName.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    districtNames.push(districtName);
+  });
+
+  return districtNames;
 }
 
 function cleanInfoPart(value) {
@@ -974,6 +1264,38 @@ function buildPopupHtmlExample({ layerTag, name, props, pcg2020 }) {
       </div>`
           : ""
       }
+    </div>
+  `;
+}
+
+function isMrwaRrmFeature(feature) {
+  const controlType = cleanInfoPart(feature?.properties?.ControlType);
+  return controlType.toUpperCase() === "RRM";
+}
+
+function formatPopupValueOrDash(value) {
+  if (typeof value === "number" && !Number.isFinite(value)) return "—";
+  const text = String(value ?? "").trim();
+  if (!text) return "—";
+  if (/^(null|undefined|n\/a|none)$/i.test(text)) return "—";
+  return text;
+}
+
+function buildMrwaRrmPopupHtml({ props = {}, multiple = false }) {
+  return `
+    <div style="font-family: Inter, sans-serif; font-size: 13px; min-width: 250px;">
+      <div data-pw-drag-handle="1" style="font-weight:800; font-size:14px; margin-bottom:8px; color:#111;">
+        ${multiple ? "MRWA RRMs" : "MRWA RRM"}
+      </div>
+
+      ${MRWA_RRM_POPUP_ROWS.map(([label, field]) => {
+        const value = formatPopupValueOrDash(props[field]);
+        return `
+        <div style="padding:2px 0;">
+          <div style="font-weight:700; color:#333;">${escapeHtml(label)}</div>
+          <div style="color:#111; word-break:break-word; overflow-wrap:anywhere;">${escapeHtml(value)}</div>
+        </div>`;
+      }).join("")}
     </div>
   `;
 }
@@ -1406,6 +1728,7 @@ const lastFetchRef = useRef({
   ssm076: 0,
   bm076: 0,
   rm199: 0,
+  mrwaRrms: 0,
   cad001: 0,
   lga233: 0,
   localities234: 0,
@@ -1431,6 +1754,8 @@ const pointLayersRef = useRef(new Map());
 const lineLayersRef = useRef(new Map());
 const contourOverlaysRef = useRef(new Map());
 const projectGridOverlayRef = useRef(null);
+const districtsOverlayRef = useRef(null);
+const roadsNetworkOverlayRef = useRef(null);
 const contourIdentifySeqRef = useRef(0);
 
   // Portal jobs markers/cluster
@@ -2702,6 +3027,7 @@ mapRuntimeListenersRef.current = [
   idleListener,
 ];
 return () => {
+  contourIdentifySeqRef.current += 1;
   mapRuntimeListenersRef.current.forEach((listener) => {
     try {
       window.google?.maps?.event?.removeListener(listener);
@@ -3001,7 +3327,14 @@ if (!isWA) {
   });
 };
 
-function buildMapInfoPopupHtml(latLng, lgate002Info = null, contourInfos = [], projectGridInfo = []) {
+function buildMapInfoPopupHtml(
+  latLng,
+  lgate002Info = null,
+  contourInfos = [],
+  projectGridInfo = [],
+  districtInfo = [],
+  roadsNetworkInfo = []
+) {
   const googleMaps = window.google?.maps;
   if (!googleMaps) return "";
 
@@ -3201,6 +3534,46 @@ function buildMapInfoPopupHtml(latLng, lgate002Info = null, contourInfos = [], p
     );
   }
 
+  if (districtInfo?.length) {
+    addSection(
+      LGATE_229_DISTRICTS_KEY,
+      `
+        <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.12);">
+          <div style="font-weight:950; font-size:13px; color:#111;">
+            ${districtInfo.length === 1 ? "LAND DISTRICT" : "LAND DISTRICTS"}
+          </div>
+          ${districtInfo
+            .map((districtName) => `
+              <div style="margin-top:5px; color:#111; word-break:break-word;">
+                <span style="font-weight:900; color:#333;">District:</span> ${escapeHtml(districtName)}
+              </div>
+            `)
+            .join("")}
+        </div>
+      `
+    );
+  }
+
+  if (roadsNetworkInfo?.length) {
+    addSection(
+      MRWA_ROADS_NETWORK_KEY,
+      `
+        <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.12);">
+          <div style="font-weight:950; font-size:13px; color:#111;">
+            ROAD NETWORK
+          </div>
+          ${roadsNetworkInfo
+            .map((roadName, index) => `
+              <div style="${index ? "margin-top:5px;" : "margin-top:5px;"} color:#111; word-break:break-word;">
+                <span style="font-weight:900; color:#333;">Road Name:</span> ${escapeHtml(roadName)}
+              </div>
+            `)
+            .join("")}
+        </div>
+      `
+    );
+  }
+
   const orderedSections = sections
     .filter((section) => section.html)
     .sort((a, b) => a.order - b.order);
@@ -3215,7 +3588,7 @@ function buildMapInfoPopupHtml(latLng, lgate002Info = null, contourInfos = [], p
           No visible map information found at this point.
         </div>
         <div style="margin-top:6px; color:#666;">
-          Turn on Cadastre, Local Authority, R-Codes Zoning, Contours, Project Grids, or MRWA Project Zones first.
+          Turn on Cadastre, Local Authority, R-Codes Zoning, Contours, Project Grids, MRWA Project Zones, Districts, or Roads Network first.
         </div>
       </div>
     `;
@@ -3243,15 +3616,30 @@ function openMapInfoPopupAtLatLng(latLng) {
   const projectGridOn = (layersRef.current || []).some(
     (l) => l.id === LGATE_214_PROJECT_GRID_KEY && l.visible
   );
+  const districtsOn = (layersRef.current || []).some(
+    (l) => l.id === LGATE_229_DISTRICTS_KEY && l.visible
+  );
+  const roadsNetworkOn = (layersRef.current || []).some(
+    (l) => l.id === MRWA_ROADS_NETWORK_KEY && l.visible
+  );
   const emptyAddressInfo = { address: "", lotNumber: "" };
   let latestAddressInfo = cadastreOn ? emptyAddressInfo : null;
   let latestContourInfo = null;
   let latestProjectGridInfo = [];
+  let latestDistrictInfo = [];
+  let latestRoadsNetworkInfo = [];
   const identifySeq = ++contourIdentifySeqRef.current;
 
   const renderInfoPopup = () => {
     infoWindowRef.current?.setContent(
-      buildMapInfoPopupHtml(latLng, latestAddressInfo, latestContourInfo, latestProjectGridInfo)
+      buildMapInfoPopupHtml(
+        latLng,
+        latestAddressInfo,
+        latestContourInfo,
+        latestProjectGridInfo,
+        latestDistrictInfo,
+        latestRoadsNetworkInfo
+      )
     );
     infoWindowRef.current?.setPosition(latLng);
     infoWindowRef.current?.open({ map });
@@ -3316,9 +3704,66 @@ function openMapInfoPopupAtLatLng(latLng) {
       });
   }
 
+  if (districtsOn) {
+    identifyLandgateDistricts({
+      serviceUrl: LGATE_BOUNDARIES_MAPSERVER,
+      latLng,
+      map,
+      mapDiv: mapDivRef.current,
+      tolerance: LGATE_229_DISTRICTS_IDENTIFY_TOLERANCE_PX,
+    })
+      .then((districtNames) => {
+        if (!districtNames?.length) return;
+        if (contourIdentifySeqRef.current !== identifySeq) return;
+        if (!infoModeRef.current) return;
+        if (!(layersRef.current || []).some((l) => l.id === LGATE_229_DISTRICTS_KEY && l.visible)) {
+          return;
+        }
+        if (!infoWindowRef.current?.getMap?.()) return;
+        latestDistrictInfo = districtNames;
+        renderInfoPopup();
+      })
+      .catch((err) => {
+        if (contourIdentifySeqRef.current !== identifySeq) return;
+        console.warn("LGATE-229 Districts identify failed:", err);
+      });
+  }
+
+  if (roadsNetworkOn) {
+    identifyMrwaRoadsNetwork({
+      serviceUrl: MRWA_ROADS_NETWORK_MAPSERVER,
+      latLng,
+      map,
+      mapDiv: mapDivRef.current,
+      tolerance: MRWA_ROADS_NETWORK_IDENTIFY_TOLERANCE_PX,
+    })
+      .then((roadNames) => {
+        if (!roadNames?.length) return;
+        if (contourIdentifySeqRef.current !== identifySeq) return;
+        if (!infoModeRef.current) return;
+        if (!(layersRef.current || []).some((l) => l.id === MRWA_ROADS_NETWORK_KEY && l.visible)) {
+          return;
+        }
+        if (!infoWindowRef.current?.getMap?.()) return;
+        latestRoadsNetworkInfo = roadNames;
+        renderInfoPopup();
+      })
+      .catch((err) => {
+        if (contourIdentifySeqRef.current !== identifySeq) return;
+        console.warn("MRWA Roads Network identify failed:", err);
+      });
+  }
+
   if (!cadastreOn) return;
 
-  const html = buildMapInfoPopupHtml(latLng, latestAddressInfo, latestContourInfo, latestProjectGridInfo);
+  const html = buildMapInfoPopupHtml(
+    latLng,
+    latestAddressInfo,
+    latestContourInfo,
+    latestProjectGridInfo,
+    latestDistrictInfo,
+    latestRoadsNetworkInfo
+  );
   if (!html.includes("CADASTRE")) return;
 
   const lat = typeof latLng.lat === "function" ? latLng.lat() : latLng.lat;
@@ -4791,7 +5236,13 @@ function sanitizeDxfText(text = "") {
     return Number(json?.count || 0);
   }
 
-  async function fetchArcgisGeojsonByFence(url, fence, where = "1=1", pageSize = EXPORT_PAGE_SIZE) {
+  async function fetchArcgisGeojsonByFence(
+    url,
+    fence,
+    where = "1=1",
+    pageSize = EXPORT_PAGE_SIZE,
+    options = {}
+  ) {
     const allFeatures = [];
     let offset = 0;
     let safety = 0;
@@ -4799,7 +5250,9 @@ function sanitizeDxfText(text = "") {
     while (safety < 50) {
       const params = new URLSearchParams({
         where,
-        outFields: "*",
+        outFields: Array.isArray(options.outFields)
+          ? options.outFields.join(",")
+          : options.outFields || "*",
         f: "geojson",
         outSR: "4326",
         geometry: fence.geometry,
@@ -4847,6 +5300,44 @@ function sanitizeDxfText(text = "") {
         }
       }),
     };
+  }
+
+  function dedupeFeatureCollectionForExport(featureCollection, layer) {
+    const fields = layer?.data?.exportDedupeFields || layer?.data?.idFields || [];
+    if (!fields.length) return featureCollection;
+
+    const seen = new Set();
+    const features = [];
+    (featureCollection?.features || []).forEach((feature, index) => {
+      const props = feature?.properties || {};
+      const key =
+        fields
+          .map((field) => cleanInfoPart(props[field]))
+          .filter(Boolean)
+          .join("::") || `${layer?.id || "feature"}_${index}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      features.push(feature);
+    });
+
+    return { ...featureCollection, features };
+  }
+
+  function prepareLayerExportFeatureCollection(featureCollection, layer) {
+    return dedupeFeatureCollectionForExport(
+      applyLayerExportFilter(featureCollection, layer),
+      layer
+    );
+  }
+
+  function getExportAttributesForCsv(props = {}, layer) {
+    const fields = layer?.data?.exportAttributeFields;
+    if (!Array.isArray(fields) || !fields.length) return props;
+
+    return fields.reduce((acc, field) => {
+      acc[field] = props?.[field];
+      return acc;
+    }, {});
   }
 
   function getLineCoordinateSets(geometry) {
@@ -5403,6 +5894,7 @@ function sanitizeDxfText(text = "") {
 
       (featureCollection?.features || []).forEach((feature, featureIndex) => {
         const props = feature?.properties || {};
+        const csvAttributes = getExportAttributesForCsv(props, layer);
         const baseId = getFeaturePointId(
           props,
           layer,
@@ -5422,7 +5914,7 @@ pointSets.forEach((coord, pointIndex) => {
 	  const attrZ = getFeatureZValue(props, layer);
 	  const zValue = Number.isFinite(geomZ) ? geomZ : attrZ;
 
-          Object.keys(props).forEach((key) => attrKeySet.add(key));
+          Object.keys(csvAttributes).forEach((key) => attrKeySet.add(key));
 
 	          rows.push({
 	            feature_id: pointSets.length > 1 ? `${baseId}_${pointIndex + 1}` : baseId,
@@ -5433,7 +5925,7 @@ pointSets.forEach((coord, pointIndex) => {
                 ? formatExportNumber(zValue, projectionCode, "z")
                 : "",
             layer_name: layer?.name || layer?.id || "Layer",
-            attributes: props,
+            attributes: csvAttributes,
           });
         });
       });
@@ -5772,13 +6264,26 @@ if (pointSets.length) {
             layer.data.url,
             exportGeometryRef.current,
             layer.data?.where || "1=1",
-            Math.min(EXPORT_PAGE_SIZE, layer.data?.maxFeatures || EXPORT_PAGE_SIZE)
+            Math.min(EXPORT_PAGE_SIZE, layer.data?.maxFeatures || EXPORT_PAGE_SIZE),
+            {
+              outFields: layer.data?.exportOutFields || layer.data?.outFields,
+            }
           );
+          const stillVisible = (layersRef.current || []).some(
+            (currentLayer) => currentLayer.id === layer.id && currentLayer.visible
+          );
+          if (!stillVisible) {
+            return {
+              layer,
+              sourceDatumFamily: getLayerExportSourceDatumFamily(layer),
+              featureCollection: { type: "FeatureCollection", features: [] },
+            };
+          }
 
           return {
             layer,
             sourceDatumFamily: getLayerExportSourceDatumFamily(layer),
-            featureCollection: applyLayerExportFilter(raw, layer),
+            featureCollection: prepareLayerExportFeatureCollection(raw, layer),
           };
         })
       );
@@ -5858,6 +6363,7 @@ if (pointSets.length) {
       const hasSSM = prev.some((l) => l.id === "ssm076");
       const hasBM = prev.some((l) => l.id === "bm076");
       const hasRM = prev.some((l) => l.id === "rm199");
+      const hasMrwaRrms = prev.some((l) => l.id === MRWA_RRM_KEY);
       const hasCad = prev.some((l) => l.id === "cad001");
       const hasLGA = prev.some((l) => l.id === "lga233");
       const hasLocalities = prev.some((l) => l.id === "localities234");
@@ -5877,7 +6383,9 @@ if (pointSets.length) {
       const hasPowerTransmissionPoles = prev.some((l) => l.id === "power030");
       const hasPowerNcmt = prev.some((l) => l.id === "power051");
       const hasProjectGrid = prev.some((l) => l.id === LGATE_214_PROJECT_GRID_KEY);
+      const hasDistricts = prev.some((l) => l.id === LGATE_229_DISTRICTS_KEY);
       const hasMrwaProjectZones = prev.some((l) => l.id === MRWA_PROJECT_ZONES_KEY);
+      const hasRoadsNetwork = prev.some((l) => l.id === MRWA_ROADS_NETWORK_KEY);
       const existingLayerIds = new Set(prev.map((l) => l.id));
       const next = [...prev];
 
@@ -6063,6 +6571,44 @@ exportFieldOrder: [
   "mga2020_easting",
   "mga2020_northing",
 ],
+    },
+  });
+
+if (!hasMrwaRrms)
+  next.push({
+    id: MRWA_RRM_KEY,
+    name: MRWA_RRM_NAME,
+    type: "point",
+    visible: false,
+    data: {
+      url: MRWA_RRM_QUERY,
+      where: MRWA_RRM_WHERE,
+      outFields: MRWA_RRM_OUT_FIELDS,
+      minZoom: MIN_GEODETIC_ZOOM,
+      maxFeatures: MAX_FEATURES_PER_VIEW,
+      symbol: mrwaRrmTriangleSymbol,
+      layerTag: "MRWA RRM",
+      idFields: ["OBJECTID"],
+      nameFields: ["MarkName"],
+      label: {
+        minZoom: SHOW_LABELS_ZOOM,
+        color: "#ffffff",
+        fontSize: "10px",
+        fontWeight: "700",
+      },
+      filterFn: isMrwaRrmFeature,
+      popupBuilder: ({ props }) =>
+        buildMrwaRrmPopupHtml({
+          props,
+        }),
+      exportable: true,
+      exportFormats: ["csv", "dxf"],
+      exportSourceDatum: "GDA94",
+      exportOutFields: MRWA_RRM_EXPORT_FIELDS,
+      exportAttributeFields: ["MarkName"],
+      exportDedupeFields: ["OBJECTID"],
+      outputLayerName: "MRWA_RRM",
+      dxfLabelFields: ["MarkName"],
     },
   });
 
@@ -6713,6 +7259,38 @@ if (!hasProjectGrid)
     },
   });
 
+if (!hasDistricts)
+  next.push({
+    id: LGATE_229_DISTRICTS_KEY,
+    name: LGATE_229_DISTRICTS_NAME,
+    type: "imageOverlay",
+    visible: false,
+    data: {
+      mapServerUrl: LGATE_BOUNDARIES_MAPSERVER,
+      layerId: LGATE_229_DISTRICTS_LAYER_ID,
+      opacity: 1,
+      identifyTolerance: LGATE_229_DISTRICTS_IDENTIFY_TOLERANCE_PX,
+      nameField: LGATE_229_DISTRICTS_NAME_FIELD,
+      drawingInfo: LGATE_229_DISTRICTS_DRAWING_INFO,
+    },
+  });
+
+if (!hasRoadsNetwork)
+  next.push({
+    id: MRWA_ROADS_NETWORK_KEY,
+    name: MRWA_ROADS_NETWORK_NAME,
+    type: "imageOverlay",
+    visible: false,
+    data: {
+      mapServerUrl: MRWA_ROADS_NETWORK_MAPSERVER,
+      layerId: MRWA_ROADS_NETWORK_LAYER_ID,
+      opacity: 0.8,
+      identifyTolerance: MRWA_ROADS_NETWORK_IDENTIFY_TOLERANCE_PX,
+      roadNameField: MRWA_ROADS_NETWORK_ROAD_NAME_FIELD,
+      drawingInfo: MRWA_ROADS_NETWORK_DRAWING_INFO,
+    },
+  });
+
 if (!hasMrwaProjectZones)
   next.push({
     id: MRWA_PROJECT_ZONES_KEY,
@@ -6898,7 +7476,12 @@ const syncClusterer = () => {
         const geojson = await fetchArcgisGeojsonInView(
           layer.data.url,
           bounds,
-          layer.data.where || "1=1"
+          layer.data.where || "1=1",
+          {
+            outFields: layer.data?.outFields,
+            geometryPrecision: layer.data?.geometryPrecision,
+            maxAllowableOffset: layer.data?.maxAllowableOffset,
+          }
         );
         if (cancelled) return;
 
@@ -7400,6 +7983,14 @@ const projectGridLayer = useMemo(
   () => layers.find((l) => l.id === LGATE_214_PROJECT_GRID_KEY),
   [layers]
 );
+const districtsLayer = useMemo(
+  () => layers.find((l) => l.id === LGATE_229_DISTRICTS_KEY),
+  [layers]
+);
+const roadsNetworkLayer = useMemo(
+  () => layers.find((l) => l.id === MRWA_ROADS_NETWORK_KEY),
+  [layers]
+);
 const mrwaProjectZonesLayer = useMemo(
   () => layers.find((l) => l.id === MRWA_PROJECT_ZONES_KEY),
   [layers]
@@ -7450,6 +8041,100 @@ useEffect(() => {
     removeOverlay();
   };
 }, [projectGridLayer, viewTick, isAppVisible]);
+
+useEffect(() => {
+  const map = mapRef.current;
+  const googleMaps = window.google?.maps;
+  const layer = districtsLayer;
+
+  const removeOverlay = () => {
+    if (!districtsOverlayRef.current) return;
+    try {
+      districtsOverlayRef.current.setMap(null);
+    } catch {
+      // ignore
+    }
+    districtsOverlayRef.current = null;
+  };
+
+  if (!map || !googleMaps || !isAppVisible || !layer?.visible) {
+    contourIdentifySeqRef.current += 1;
+    removeOverlay();
+    return undefined;
+  }
+
+  const bounds = viewRef.current?.bounds || map.getBounds();
+  const mapDiv = mapDivRef.current;
+  const { width, height } = getMapImageSize(mapDiv);
+  const url = buildArcgisMapServerExportUrl({
+    serviceUrl: layer.data?.mapServerUrl || LGATE_BOUNDARIES_MAPSERVER,
+    bounds,
+    width,
+    height,
+    layerId: layer.data?.layerId,
+    drawingInfo: layer.data?.drawingInfo,
+  });
+
+  removeOverlay();
+  if (!bounds || !url) return undefined;
+
+  districtsOverlayRef.current = new googleMaps.GroundOverlay(url, bounds, {
+    clickable: false,
+    opacity: layer.data?.opacity ?? 1,
+  });
+  districtsOverlayRef.current.setMap(map);
+
+  return () => {
+    removeOverlay();
+  };
+}, [districtsLayer, viewTick, isAppVisible]);
+
+useEffect(() => {
+  const map = mapRef.current;
+  const googleMaps = window.google?.maps;
+  const layer = roadsNetworkLayer;
+
+  const removeOverlay = () => {
+    if (!roadsNetworkOverlayRef.current) return;
+    try {
+      roadsNetworkOverlayRef.current.setMap(null);
+    } catch {
+      // ignore
+    }
+    roadsNetworkOverlayRef.current = null;
+  };
+
+  if (!map || !googleMaps || !isAppVisible || !layer?.visible) {
+    contourIdentifySeqRef.current += 1;
+    removeOverlay();
+    return undefined;
+  }
+
+  const bounds = viewRef.current?.bounds || map.getBounds();
+  const mapDiv = mapDivRef.current;
+  const { width, height } = getMapImageSize(mapDiv);
+  const url = buildArcgisMapServerExportUrl({
+    serviceUrl: layer.data?.mapServerUrl || MRWA_ROADS_NETWORK_MAPSERVER,
+    bounds,
+    width,
+    height,
+    layerId: layer.data?.layerId,
+    drawingInfo: layer.data?.drawingInfo,
+  });
+
+  removeOverlay();
+  if (!bounds || !url) return undefined;
+
+  roadsNetworkOverlayRef.current = new googleMaps.GroundOverlay(url, bounds, {
+    clickable: false,
+    opacity: layer.data?.opacity ?? 0.8,
+  });
+  roadsNetworkOverlayRef.current.setMap(map);
+
+  return () => {
+    removeOverlay();
+  };
+}, [roadsNetworkLayer, viewTick, isAppVisible]);
 
 const contourLayers = useMemo(
   () =>
@@ -7530,14 +8215,22 @@ useEffect(() => {
   const ssmLayer = useMemo(() => layers.find((l) => l.id === "ssm076"), [layers]);
   const bmLayer = useMemo(() => layers.find((l) => l.id === "bm076"), [layers]);
   const rmLayer = useMemo(() => layers.find((l) => l.id === "rm199"), [layers]);
+  const mrwaRrmLayer = useMemo(() => layers.find((l) => l.id === MRWA_RRM_KEY), [layers]);
 
-  const geodeticAnyOn = !!(ssmLayer?.visible || bmLayer?.visible || rmLayer?.visible);
+  const geodeticAnyOn = !!(
+    ssmLayer?.visible ||
+    bmLayer?.visible ||
+    rmLayer?.visible ||
+    mrwaRrmLayer?.visible
+  );
 
   const toggleGeodeticAll = () => {
     const next = !geodeticAnyOn;
     setLayers((prev) =>
       prev.map((l) =>
-        ["ssm076", "bm076", "rm199"].includes(l.id) ? { ...l, visible: next } : l
+        ["ssm076", "bm076", "rm199", MRWA_RRM_KEY].includes(l.id)
+          ? { ...l, visible: next }
+          : l
       )
     );
   };
@@ -7622,6 +8315,8 @@ useEffect(() => {
       const map = mapRef.current;
       if (!map || !window.google?.maps) return;
       window.google.maps.event.trigger(map, "resize");
+      viewRef.current = { bounds: map.getBounds(), zoom: map.getZoom() };
+      setViewTick((t) => t + 1);
     });
   };
 
@@ -8477,7 +9172,7 @@ onBlur={() => {
                   </div>
 
                   <div className="layers-list">
-                    {[ssmLayer, bmLayer, rmLayer, projectGridLayer, mrwaProjectZonesLayer]
+                    {[ssmLayer, bmLayer, rmLayer, mrwaRrmLayer, projectGridLayer, mrwaProjectZonesLayer]
                       .filter(Boolean)
                       .map((l) => (
                         <div key={l.id} className="layer-row layer-row-compact">
@@ -8581,8 +9276,13 @@ onBlur={() => {
                 <div className="maps-layer-section">
                   <div className="maps-layer-section-title">Local Authority</div>
                   <div className="layers-list">
-                    {layers
-  .filter((l) => ["lga233", "localities234"].includes(l.id))
+                    {[
+                      LGATE_229_DISTRICTS_KEY,
+                      "lga233",
+                      "localities234",
+                    ]
+                      .map((id) => layers.find((l) => l.id === id))
+                      .filter(Boolean)
                       .map((l) => (
                         <div key={l.id} className="layer-row layer-row-compact">
                           <label className="layer-left">
@@ -8597,7 +9297,7 @@ onBlur={() => {
                       ))}
                   </div>
                 </div>
-                <div className="maps-layer-section">
+<div className="maps-layer-section">
   <div className="maps-layer-section-title">Planning</div>
   <div className="layers-list">
     {layers
@@ -8616,6 +9316,25 @@ onBlur={() => {
       ))}
   </div>
 </div>
+                <div className="maps-layer-section">
+                  <div className="maps-layer-section-title">Roads</div>
+                  <div className="layers-list">
+                    {[roadsNetworkLayer]
+                      .filter(Boolean)
+                      .map((l) => (
+                        <div key={l.id} className="layer-row layer-row-compact">
+                          <label className="layer-left">
+                            <input
+                              type="checkbox"
+                              checked={l.visible}
+                              onChange={() => toggleLayer(l.id)}
+                            />
+                            <span className="layer-name">{l.name}</span>
+                          </label>
+                        </div>
+                      ))}
+                  </div>
+                </div>
               </div>
             )}
 
