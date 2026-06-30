@@ -18,7 +18,7 @@ const EQUIPMENT_TYPES = [
 ];
 
 const SET_NUMBER_TYPES = new Set(["Controller", "Prism", "Radio Handle", "Total Station"]);
-const SET_NUMBERS = ["-", "5", "6", "7", "8"];
+const SET_NUMBERS = ["-", "5", "6", "7", "8", "9"];
 const MAX_ATTACHMENT_SIZE_BYTES = 15 * 1024 * 1024;
 const ALLOWED_ATTACHMENT_EXTENSIONS = new Set([
   "csv",
@@ -907,6 +907,21 @@ function EquipmentRegister() {
               </button>
             </div>
             <form onSubmit={saveEquipment} className="equipment-modal-body">
+              {error && (
+                <div
+                  className="equipment-modal-full"
+                  style={{
+                    color: "#b71c1c",
+                    fontWeight: 800,
+                    padding: "10px 12px",
+                    border: "1px solid rgba(183, 28, 28, 0.25)",
+                    borderRadius: 8,
+                    background: "rgba(183, 28, 28, 0.08)",
+                  }}
+                >
+                  {error}
+                </div>
+              )}
               <label>
                 <span>Equipment type</span>
                 <select className="maps-search-input" value={equipmentForm.equipment_type} onChange={(e) => setType(e.target.value)}>

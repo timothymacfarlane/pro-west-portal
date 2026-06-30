@@ -183,6 +183,20 @@ const WCORP_002_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer/20/query"; // Water Pipes (WCORP-002)
 const WCORP_006_QUERY =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer/0/query"; // Water Meters (WCORP-006)  
+const DRAINAGE_PITS_QUERY =
+  "https://services2.arcgis.com/cHGEnmsJ165IBJRM/arcgis/rest/services/Drainage_Pits_View/FeatureServer/0/query";
+const DRAINAGE_PITS_KEY = "drainagePits";
+const DRAINAGE_PITS_NAME = "Drainage Pits";
+const DRAINAGE_PITS_OUT_FIELDS = ["OBJECTID", "Pit_Type"];
+const DRAINAGE_PITS_QUERY_PAGE_SIZE = 2000;
+const DRAINAGE_PITS_MAX_FEATURES_PER_VIEW = 6000;
+const DRAINAGE_PIPES_QUERY =
+  "https://services2.arcgis.com/cHGEnmsJ165IBJRM/arcgis/rest/services/Drainage_P_View/FeatureServer/3/query";
+const DRAINAGE_PIPES_KEY = "drainagePipes";
+const DRAINAGE_PIPES_NAME = "Drainage Pipes";
+const DRAINAGE_PIPES_OUT_FIELDS = ["OBJECTID"];
+const DRAINAGE_PIPES_QUERY_PAGE_SIZE = 2000;
+const DRAINAGE_PIPES_MAX_FEATURES_PER_VIEW = 6000;
 const WP_034_QUERY =
   "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/8/query"; // Distribution Underground Cables (WP-034)
 const WP_031_QUERY =
@@ -463,6 +477,7 @@ const INFO_LAYER_ORDER_IDS = [
   "mrwaRrms",
   "projectGrid214",
   "mrwaProjectZones",
+  "drainagePits",
   "power034",
   "power031",
   "power029",
@@ -573,13 +588,40 @@ async function fetchArcgisGeojsonInView(url, bounds, where = "1=1", options = {}
     params.set("maxAllowableOffset", String(options.maxAllowableOffset));
   }
 
-  const requestUrl = `${url}?${params.toString()}`;
-  const res = await fetch(requestUrl);
-  const json = await res.json();
+  if (!options.paginate) {
+    const requestUrl = `${url}?${params.toString()}`;
+    const res = await fetch(requestUrl);
+    const json = await res.json();
 
-  if (json?.error) throw new Error(json.error.message || "ArcGIS query error");
+    if (json?.error) throw new Error(json.error.message || "ArcGIS query error");
 
-  return { type: "FeatureCollection", features: json?.features || [], requestUrl };
+    return { type: "FeatureCollection", features: json?.features || [], requestUrl };
+  }
+
+  const pageSize = Math.max(1, Number(options.pageSize) || 2000);
+  const features = [];
+  let requestUrl = "";
+
+  for (let offset = 0; offset < pageSize * 50; offset += pageSize) {
+    params.set("resultOffset", String(offset));
+    params.set("resultRecordCount", String(pageSize));
+    params.set("orderByFields", options.orderByFields || "OBJECTID");
+    requestUrl = `${url}?${params.toString()}`;
+
+    const res = await fetch(requestUrl);
+    const json = await res.json();
+
+    if (json?.error) throw new Error(json.error.message || "ArcGIS query error");
+
+    const pageFeatures = json?.features || [];
+    features.push(...pageFeatures);
+
+    const exceededTransferLimit =
+      !!json?.properties?.exceededTransferLimit || !!json?.exceededTransferLimit;
+    if (!exceededTransferLimit && pageFeatures.length < pageSize) break;
+  }
+
+  return { type: "FeatureCollection", features, requestUrl };
 }
 
 function getMapImageSize(mapDiv) {
@@ -1281,6 +1323,39 @@ function formatPopupValueOrDash(value) {
   return text;
 }
 
+function buildDrainagePitPopupHtml({ features = null, props = null } = {}) {
+  const items = Array.isArray(features) && features.length ? features : [props || {}];
+  const deduped = [];
+  const seen = new Set();
+
+  items.forEach((item, index) => {
+    const source = item?.properties || item || {};
+    const key = cleanInfoPart(source.OBJECTID) || cleanInfoPart(source.objectid) || String(index);
+    if (seen.has(key)) return;
+    seen.add(key);
+    deduped.push(source);
+  });
+
+  const rows = deduped.length ? deduped : [{}];
+
+  return `
+    <div style="font-family: Inter, sans-serif; font-size: 13px; min-width: 220px;">
+      <div data-pw-drag-handle="1" style="font-weight:800; font-size:14px; margin-bottom:8px; color:#111;">
+        ${rows.length === 1 ? "DRAINAGE PIT" : "DRAINAGE PITS"}
+      </div>
+
+      ${rows
+        .map((row, index) => `
+        <div style="${index ? "margin-top:8px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.12);" : ""}">
+          <div style="padding:2px 0;">
+            <span style="font-weight:700; color:#333;">Pit Type:</span>
+            <span style="color:#111; word-break:break-word; overflow-wrap:anywhere;">${escapeHtml(formatPopupValueOrDash(row.Pit_Type))}</span>
+          </div>
+        </div>`)
+        .join("")}
+    </div>
+  `;
+}
 function buildMrwaRrmPopupHtml({ props = {}, multiple = false }) {
   return `
     <div style="font-family: Inter, sans-serif; font-size: 13px; min-width: 250px;">
@@ -1735,6 +1810,8 @@ const lastFetchRef = useRef({
   zoning070: 0,
   sewer068: 0,
   sewer026: 0,
+  drainagePits: 0,
+  drainagePipes: 0,
   sewer084: 0,
   sewer083: 0,
   water002: 0,
@@ -5274,7 +5351,8 @@ function sanitizeDxfText(text = "") {
       const features = json?.features || [];
       allFeatures.push(...features);
 
-      const exceeded = !!json?.exceededTransferLimit;
+      const exceeded =
+        !!json?.exceededTransferLimit || !!json?.properties?.exceededTransferLimit;
       if (!features.length || (!exceeded && features.length < pageSize)) {
         break;
       }
@@ -5332,7 +5410,7 @@ function sanitizeDxfText(text = "") {
 
   function getExportAttributesForCsv(props = {}, layer) {
     const fields = layer?.data?.exportAttributeFields;
-    if (!Array.isArray(fields) || !fields.length) return props;
+    if (!Array.isArray(fields)) return props;
 
     return fields.reduce((acc, field) => {
       acc[field] = props?.[field];
@@ -5924,8 +6002,31 @@ pointSets.forEach((coord, pointIndex) => {
               zValue !== "" && zValue !== null && zValue !== undefined
                 ? formatExportNumber(zValue, projectionCode, "z")
                 : "",
-            layer_name: layer?.name || layer?.id || "Layer",
+            layer_name: layer?.data?.csvLayerName || layer?.name || layer?.id || "Layer",
             attributes: csvAttributes,
+          });
+        });
+
+        const lineSets = layer?.data?.csvGeometry === "line"
+          ? getLineCoordinateSets(feature?.geometry)
+          : [];
+        lineSets.forEach((coords, lineIndex) => {
+          coords.forEach((coord, vertexIndex) => {
+            const preferredXY = getPreferredPointXY(coord, projectionCode, sourceDatumFamily, transformContext);
+            if (!preferredXY) return;
+
+            Object.keys(csvAttributes).forEach((key) => attrKeySet.add(key));
+
+            rows.push({
+              feature_id: `${baseId}_${lineIndex + 1}_${vertexIndex + 1}`,
+              x: formatExportNumber(preferredXY.x, projectionCode, "xy"),
+              y: formatExportNumber(preferredXY.y, projectionCode, "xy"),
+              z: Number.isFinite(Number(coord?.[2]))
+                ? formatExportNumber(Number(coord[2]), projectionCode, "z")
+                : "",
+              layer_name: layer?.data?.csvLayerName || layer?.name || layer?.id || "Layer",
+              attributes: csvAttributes,
+            });
           });
         });
       });
@@ -5945,7 +6046,7 @@ pointSets.forEach((coord, pointIndex) => {
     const { rows, orderedAttrKeys } = collectCsvRowsFromCollections(collections, projectionCode, transformContext);
 
     if (!rows.length) {
-      throw new Error("No point features found inside the fence for CSV export.");
+      throw new Error("No CSV-supported features found inside the fence.");
     }
 
     const header = ["feature_id", "x", "y", "z", "layer_name", ...orderedAttrKeys];
@@ -6198,7 +6299,7 @@ if (pointSets.length) {
       exportFormat === "csv"
         ? visibleExportableLayers.filter(
             (layer) =>
-              layer.type === "point" &&
+              (layer.type === "point" || layer.data?.csvGeometry === "line") &&
               (layer.data?.exportFormats || []).includes("csv")
           )
         : visibleExportableLayers.filter((layer) =>
@@ -6208,7 +6309,7 @@ if (pointSets.length) {
     if (!selectedLayers.length) {
       setExportWarning(
         exportFormat === "csv"
-          ? "CSV export currently only supports visible point layers."
+          ? "Turn on at least one visible CSV-supported layer first."
           : "Turn on at least one visible exportable layer first."
       );
       return;
@@ -6375,6 +6476,8 @@ if (pointSets.length) {
       const hasSewerPressure = prev.some((l) => l.id === "sewer083");
       const hasWaterPipes = prev.some((l) => l.id === "water002");
       const hasWaterMeters = prev.some((l) => l.id === "water006");
+      const hasDrainagePits = prev.some((l) => l.id === DRAINAGE_PITS_KEY);
+      const hasDrainagePipes = prev.some((l) => l.id === DRAINAGE_PIPES_KEY);
       const hasPowerDistUnderground = prev.some((l) => l.id === "power034");
       const hasPowerDistOverhead = prev.some((l) => l.id === "power031");
       const hasPowerDistPoles = prev.some((l) => l.id === "power029");
@@ -6612,6 +6715,81 @@ if (!hasMrwaRrms)
     },
   });
 
+if (!hasDrainagePits)
+  next.push({
+    id: DRAINAGE_PITS_KEY,
+    name: DRAINAGE_PITS_NAME,
+    type: "point",
+    visible: false,
+    data: {
+      url: DRAINAGE_PITS_QUERY,
+      where: "1=1",
+      outFields: DRAINAGE_PITS_OUT_FIELDS,
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: DRAINAGE_PITS_MAX_FEATURES_PER_VIEW,
+      paginate: true,
+      pageSize: DRAINAGE_PITS_QUERY_PAGE_SIZE,
+      symbol: {
+        path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
+        fillColor: "#2E7D32",
+        fillOpacity: 1,
+        strokeColor: "#0B3D16",
+        strokeWeight: 1.5,
+        scale: 4.5,
+      },
+      layerTag: "DRAINAGE PIT",
+      exportable: true,
+      exportFormats: ["csv", "dxf"],
+      exportOutFields: DRAINAGE_PITS_OUT_FIELDS,
+      exportAttributeFields: ["Pit_Type"],
+      exportDedupeFields: ["OBJECTID"],
+      csvLayerName: "Drainage Pit",
+      outputLayerName: "DRAINAGE_PITS",
+      dxfLabelFields: ["Pit_Type"],
+      exportFieldOrder: ["Pit_Type", "OBJECTID"],
+      idFields: ["OBJECTID"],
+      nameFields: ["Pit_Type"],
+      label: null,
+      filterFn: () => true,
+      popupBuilder: ({ props }) => buildDrainagePitPopupHtml({ props }),
+      cluster: false,
+    },
+  });
+if (!hasDrainagePipes)
+  next.push({
+    id: DRAINAGE_PIPES_KEY,
+    name: DRAINAGE_PIPES_NAME,
+    type: "line",
+    visible: false,
+    data: {
+      url: DRAINAGE_PIPES_QUERY,
+      where: "1=1",
+      outFields: DRAINAGE_PIPES_OUT_FIELDS,
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: DRAINAGE_PIPES_MAX_FEATURES_PER_VIEW,
+      paginate: true,
+      pageSize: DRAINAGE_PIPES_QUERY_PAGE_SIZE,
+      orderByFields: "OBJECTID",
+      exportable: true,
+      exportFormats: ["csv", "dxf"],
+      exportSourceDatum: "GDA94",
+      exportOutFields: DRAINAGE_PIPES_OUT_FIELDS,
+      exportAttributeFields: [],
+      exportDedupeFields: ["OBJECTID"],
+      csvGeometry: "line",
+      csvLayerName: "Drainage Pipe",
+      outputLayerName: "DRAINAGE_PIPES",
+      dxfLabelFields: [],
+      exportFieldOrder: [],
+      idFields: ["OBJECTID"],
+      style: {
+        clickable: false,
+        strokeColor: "#2E7D32",
+        strokeWeight: 3,
+        strokeOpacity: 0.6,
+      },
+    },
+  });
 if (!hasPowerDistUnderground)
   next.push({
     id: "power034",
@@ -7481,6 +7659,9 @@ const syncClusterer = () => {
             outFields: layer.data?.outFields,
             geometryPrecision: layer.data?.geometryPrecision,
             maxAllowableOffset: layer.data?.maxAllowableOffset,
+            paginate: layer.data?.paginate,
+            pageSize: layer.data?.pageSize,
+            orderByFields: layer.data?.orderByFields,
           }
         );
         if (cancelled) return;
@@ -7951,12 +8132,21 @@ useEffect(() => {
         const geojson = await fetchArcgisGeojsonInView(
           layer.data.url,
           bounds,
-          layer.data.where || "1=1"
+          layer.data.where || "1=1",
+          {
+            outFields: layer.data?.outFields,
+            geometryPrecision: layer.data?.geometryPrecision,
+            maxAllowableOffset: layer.data?.maxAllowableOffset,
+            paginate: layer.data?.paginate,
+            pageSize: layer.data?.pageSize,
+            orderByFields: layer.data?.orderByFields,
+          }
         );
         if (cancelled) return;
 
+        const preparedGeojson = dedupeFeatureCollectionForExport(geojson, layer);
         const maxFeatures = layer.data?.maxFeatures ?? MAX_FEATURES_PER_VIEW;
-        if ((geojson.features?.length || 0) > maxFeatures) {
+        if ((preparedGeojson.features?.length || 0) > maxFeatures) {
           console.warn(`${layer.name}: too many features in view, zoom in further.`);
           clearLayer(store);
           continue;
@@ -7964,7 +8154,7 @@ useEffect(() => {
 
         clearLayer(store);
         if (cancelled) return;
-        store.lines.addGeoJson(geojson);
+        store.lines.addGeoJson(preparedGeojson);
       } catch (err) {
         if (cancelled) return;
         console.warn(`${layer.name} fetch failed:`, err);
@@ -8777,7 +8967,7 @@ return (
                     fontWeight: 800,
                   }}
                 >
-                  CSV will only include visible point layers inside the fence.
+                  CSV will include visible point layers and supported line layers inside the fence.
                 </div>
               )}
 
@@ -9191,8 +9381,26 @@ onBlur={() => {
 <div className="maps-layer-section">
   <div className="maps-layer-section-title">Services</div>
   <div className="layers-list">
+{/* Drainage */}
+<div className="layer-subheading">Drainage</div>
+{[DRAINAGE_PITS_KEY, DRAINAGE_PIPES_KEY]
+  .map((id) => layers.find((l) => l.id === id))
+  .filter(Boolean)
+  .map((l) => (
+    <div key={l.id} className="layer-row layer-row-compact">
+      <label className="layer-left">
+        <input
+          type="checkbox"
+          checked={l.visible}
+          onChange={() => toggleLayer(l.id)}
+        />
+        <span className="layer-name">{l.name}</span>
+      </label>
+    </div>
+  ))}
+
 {/* Power */}
-<div className="layer-subheading">Power</div>
+<div className="layer-subheading" style={{ marginTop: 8 }}>Power</div>
 {[
   "power034",
   "power031",
