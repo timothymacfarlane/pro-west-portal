@@ -31,3 +31,7 @@ supabase/.temp/
 # env files
 .env
 .env.*
+!/.env.example
+
+# Local Netlify folder
+.netlify

@@ -197,20 +197,24 @@ const DRAINAGE_PIPES_NAME = "Drainage Pipes";
 const DRAINAGE_PIPES_OUT_FIELDS = ["OBJECTID"];
 const DRAINAGE_PIPES_QUERY_PAGE_SIZE = 2000;
 const DRAINAGE_PIPES_MAX_FEATURES_PER_VIEW = 6000;
-const WP_034_QUERY =
-  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/8/query"; // Distribution Underground Cables (WP-034)
-const WP_031_QUERY =
-  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/10/query"; // Distribution Overhead Powerlines (WP-031)
-const WP_029_QUERY =
-  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/2/query"; // Distribution Poles (WP-029)
-const WP_035_QUERY =
-  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/9/query"; // Transmission Underground Cable (WP-035)
-const WP_032_QUERY =
-  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/11/query"; // Transmission Overhead Powerlines (WP-032)
-const WP_030_QUERY =
-  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/WP_Public_Secure_Services/MapServer/1/query"; // Transmission Pole(WP-030)
-const WP_051_QUERY =
-  "https://services.slip.wa.gov.au/arcgis/rest/services/WP_Public_Secure_Services/NCMT_Public_Secure_Services/MapServer/2/query"; // NCMT High Voltage Overhead Transmission Lines (WP-051)
+const POWER_LAYER_IDS = new Set([
+  "power034",
+  "power031",
+  "power029",
+  "power035",
+  "power032",
+  "power030",
+  "power051",
+]);
+const POWER_LAYER_CONFIG = {
+  power034: { layerId: 8 },
+  power031: { layerId: 10 },
+  power029: { layerId: 2 },
+  power035: { layerId: 9 },
+  power032: { layerId: 11 },
+  power030: { layerId: 1 },
+  power051: { layerId: 2 },
+};
 const DPIRD_CONTOURS_MAPSERVER =
   "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Terrain/MapServer";
 const DPIRD_CONTOUR_IDENTIFY_TOLERANCE_PX = 6;
@@ -559,6 +563,39 @@ const rmCrossSymbol = {
 };
 
 // ---- helpers ----
+function buildUrlWithParams(url, params) {
+  const qs = params.toString();
+  if (!qs) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}${qs}`;
+}
+
+function buildPowerProxyUrl(serviceId, layerId, operation = "query") {
+  const params = new URLSearchParams({
+    service: serviceId,
+    layer: String(layerId),
+    operation,
+  });
+  return `/.netlify/functions/power-arcgis?${params.toString()}`;
+}
+
+async function readArcgisJsonResponse(res) {
+  const text = await res.text();
+
+  if (!res.ok) {
+    const authMessage =
+      res.status === 401
+        ? "ArcGIS request failed (401 Unauthorized; source service requires authentication)"
+        : `ArcGIS request failed (${res.status} ${res.statusText || "HTTP error"})`;
+    throw new Error(authMessage);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("ArcGIS request did not return JSON.");
+  }
+}
+
 async function fetchArcgisGeojsonInView(url, bounds, where = "1=1", options = {}) {
   if (!bounds) return { type: "FeatureCollection", features: [] };
 
@@ -589,9 +626,9 @@ async function fetchArcgisGeojsonInView(url, bounds, where = "1=1", options = {}
   }
 
   if (!options.paginate) {
-    const requestUrl = `${url}?${params.toString()}`;
+    const requestUrl = buildUrlWithParams(url, params);
     const res = await fetch(requestUrl);
-    const json = await res.json();
+    const json = await readArcgisJsonResponse(res);
 
     if (json?.error) throw new Error(json.error.message || "ArcGIS query error");
 
@@ -606,10 +643,10 @@ async function fetchArcgisGeojsonInView(url, bounds, where = "1=1", options = {}
     params.set("resultOffset", String(offset));
     params.set("resultRecordCount", String(pageSize));
     params.set("orderByFields", options.orderByFields || "OBJECTID");
-    requestUrl = `${url}?${params.toString()}`;
+    requestUrl = buildUrlWithParams(url, params);
 
     const res = await fetch(requestUrl);
-    const json = await res.json();
+    const json = await readArcgisJsonResponse(res);
 
     if (json?.error) throw new Error(json.error.message || "ArcGIS query error");
 
@@ -1755,6 +1792,7 @@ function Maps() {
   const [layers, setLayers] = useState([]);
   const layersRef = useRef([]);
   const [geodeticNotice, setGeodeticNotice] = useState("");
+  const [layerLoadNotice, setLayerLoadNotice] = useState("");
   const [viewTick, setViewTick] = useState(0);
   const [googleMapsReady, setGoogleMapsReady] = useState(
     () => typeof window !== "undefined" && !!window.google?.maps
@@ -5306,7 +5344,7 @@ function sanitizeDxfText(text = "") {
       t: Date.now().toString(),
     });
 
-    const res = await fetch(`${url}?${params.toString()}`);
+    const res = await fetch(buildUrlWithParams(url, params));
     const json = await res.json();
 
     if (json?.error) throw new Error(json.error.message || "ArcGIS count error");
@@ -5343,7 +5381,7 @@ function sanitizeDxfText(text = "") {
         t: Date.now().toString(),
       });
 
-      const res = await fetch(`${url}?${params.toString()}`);
+      const res = await fetch(buildUrlWithParams(url, params));
       const json = await res.json();
 
       if (json?.error) throw new Error(json.error.message || "ArcGIS query error");
@@ -6797,7 +6835,7 @@ if (!hasPowerDistUnderground)
     type: "line",
     visible: false,
     data: {
-      url: WP_034_QUERY,
+      url: buildPowerProxyUrl("power034", POWER_LAYER_CONFIG.power034.layerId, "query"),
       where: "1=1",
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: MAX_FEATURES_PER_VIEW,
@@ -6833,7 +6871,7 @@ if (!hasPowerDistOverhead)
     type: "line",
     visible: false,
     data: {
-      url: WP_031_QUERY,
+      url: buildPowerProxyUrl("power031", POWER_LAYER_CONFIG.power031.layerId, "query"),
       where: "1=1",
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: MAX_FEATURES_PER_VIEW,
@@ -6857,7 +6895,7 @@ if (!hasPowerDistPoles)
     type: "point",
     visible: false,
     data: {
-      url: WP_029_QUERY,
+      url: buildPowerProxyUrl("power029", POWER_LAYER_CONFIG.power029.layerId, "query"),
       where: "1=1",
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: MAX_FEATURES_PER_VIEW,
@@ -6906,7 +6944,7 @@ if (!hasPowerTransmissionUnderground)
     type: "line",
     visible: false,
     data: {
-      url: WP_035_QUERY,
+      url: buildPowerProxyUrl("power035", POWER_LAYER_CONFIG.power035.layerId, "query"),
       where: "1=1",
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: MAX_FEATURES_PER_VIEW,
@@ -6942,7 +6980,7 @@ if (!hasPowerTransmissionOverhead)
     type: "line",
     visible: false,
     data: {
-      url: WP_032_QUERY,
+      url: buildPowerProxyUrl("power032", POWER_LAYER_CONFIG.power032.layerId, "query"),
       where: "1=1",
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: MAX_FEATURES_PER_VIEW,
@@ -6966,7 +7004,7 @@ if (!hasPowerTransmissionPoles)
     type: "point",
     visible: false,
     data: {
-      url: WP_030_QUERY,
+      url: buildPowerProxyUrl("power030", POWER_LAYER_CONFIG.power030.layerId, "query"),
       where: "1=1",
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: MAX_FEATURES_PER_VIEW,
@@ -7015,7 +7053,7 @@ if (!hasPowerNcmt)
     type: "line",
     visible: false,
     data: {
-      url: WP_051_QUERY,
+      url: buildPowerProxyUrl("power051", POWER_LAYER_CONFIG.power051.layerId, "query"),
       where: "1=1",
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: MAX_FEATURES_PER_VIEW,
@@ -7667,6 +7705,9 @@ const syncClusterer = () => {
         if (cancelled) return;
 
         let features = geojson.features || [];
+        if (POWER_LAYER_IDS.has(layer.id)) {
+          setLayerLoadNotice("");
+        }
 
         if (typeof layer.data?.filterFn === "function") {
           features = features.filter(layer.data.filterFn);
@@ -7768,6 +7809,11 @@ if (layer.data?.clickable !== false) {
       } catch (err) {
         if (cancelled) return;
         console.warn(`${layer.name} fetch failed:`, err);
+        if (POWER_LAYER_IDS.has(layer.id)) {
+          setLayerLoadNotice(
+            "Power layer could not be loaded. Access to the source service may need to be checked."
+          );
+        }
         clearLayer(store);
       }
     }
@@ -8155,9 +8201,17 @@ useEffect(() => {
         clearLayer(store);
         if (cancelled) return;
         store.lines.addGeoJson(preparedGeojson);
+        if (POWER_LAYER_IDS.has(layer.id)) {
+          setLayerLoadNotice("");
+        }
       } catch (err) {
         if (cancelled) return;
         console.warn(`${layer.name} fetch failed:`, err);
+        if (POWER_LAYER_IDS.has(layer.id)) {
+          setLayerLoadNotice(
+            "Power layer could not be loaded. Access to the source service may need to be checked."
+          );
+        }
         clearLayer(store);
       }
     }
@@ -8424,6 +8478,285 @@ useEffect(() => {
       )
     );
   };
+
+  const LegendPolygon = ({ stroke, fill = "transparent", strokeWidth = 2 }) => (
+    <span
+      className="maps-legend-swatch"
+      style={{
+        background: fill,
+        border: `${strokeWidth}px solid ${stroke}`,
+      }}
+    />
+  );
+
+  const LegendLine = ({ color, width = 3, dashed = false }) => (
+    <span
+      className="maps-legend-line"
+      style={{
+        background: "transparent",
+        border: 0,
+        borderTop: `${width}px ${dashed ? "dashed" : "solid"} ${color}`,
+        borderRadius: 0,
+        height: 0,
+      }}
+    />
+  );
+
+  const LegendPoint = ({ fill, stroke = "#ffffff", size = 10 }) => (
+    <span
+      className="maps-legend-swatch"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: fill,
+        border: `1.5px solid ${stroke}`,
+      }}
+    />
+  );
+
+  const LegendTriangle = ({ fill, stroke = "#ffffff" }) => (
+    <span className="maps-legend-swatch maps-legend-svg-swatch">
+      <svg viewBox="-8 -8 16 16" width="18" height="18" aria-hidden="true">
+        <polygon points="0,-6 6,6 -6,6" fill={fill} stroke={stroke} strokeWidth="1.8" />
+      </svg>
+    </span>
+  );
+
+  const LegendSquare = ({ fill, stroke = "#ffffff" }) => (
+    <span className="maps-legend-swatch maps-legend-svg-swatch">
+      <svg viewBox="-8 -8 16 16" width="18" height="18" aria-hidden="true">
+        <rect x="-5.5" y="-5.5" width="11" height="11" fill={fill} stroke={stroke} strokeWidth="1.7" />
+      </svg>
+    </span>
+  );
+
+  const LegendCross = () => <span className="maps-legend-swatch swatch-rm" />;
+
+  const LegendRow = ({ symbol, title, sub, children }) => (
+    <div className="maps-legend-row">
+      {symbol}
+      <div>
+        <div className="maps-legend-title">{title}</div>
+        {sub ? <div className="maps-legend-sub">{sub}</div> : null}
+        {children}
+      </div>
+    </div>
+  );
+
+  const LegendSection = ({ title, children }) => (
+    <div className="maps-legend-section">
+      <div className="maps-legend-section-title">{title}</div>
+      {children}
+    </div>
+  );
+
+  const LegendSubheading = ({ children }) => (
+    <div className="maps-legend-subheading">{children}</div>
+  );
+
+  const roadsNetworkLegendRows =
+    MRWA_ROADS_NETWORK_DRAWING_INFO.renderer.uniqueValueInfos.map((info) => {
+      const [r, g, b] = info.symbol.color;
+      return {
+        label: info.label,
+        color: `rgb(${r}, ${g}, ${b})`,
+        dashed: info.symbol.style === "esriSLSDash",
+      };
+    });
+
+  // Legend entries must follow the Layers tab order. New visible map layers
+  // added to the Layers tab should also receive a legend definition here.
+  const renderLegendContent = () => (
+    <div className="maps-legend">
+      <LegendSection title="Cadastre">
+        <LegendRow
+          symbol={<LegendPolygon stroke="#ffffff" fill="rgba(255,255,255,0.05)" strokeWidth={2} />}
+          title="Cadastre (LGATE-001)"
+          sub="Thin white boundary"
+        />
+      </LegendSection>
+
+      <LegendSection title="Geodetic Survey Marks">
+        <LegendRow
+          symbol={<LegendTriangle fill="#A6B96A" />}
+          title="SSMs (LGATE-076)"
+          sub="Triangle"
+        />
+        <LegendRow
+          symbol={<LegendSquare fill="#1976d2" />}
+          title="BMs (LGATE-076)"
+          sub="Square"
+        />
+        <LegendRow
+          symbol={<LegendCross />}
+          title="RMs (LGATE-199)"
+          sub="Cross"
+        />
+        <LegendRow
+          symbol={<LegendTriangle fill="#66C2FF" stroke="#0B4F8A" />}
+          title={MRWA_RRM_NAME}
+          sub="Light-blue triangle"
+        />
+        <LegendRow
+          symbol={<LegendPolygon stroke="#1B5E20" fill="rgba(165,214,167,0.25)" strokeWidth={2} />}
+          title={LGATE_214_PROJECT_GRID_NAME}
+          sub="Pale-green project grid polygon"
+        />
+        <LegendRow
+          symbol={<LegendPolygon stroke="#512DA8" fill="rgba(126,87,194,0.18)" strokeWidth={2} />}
+          title={MRWA_PROJECT_ZONES_NAME}
+          sub="GDA94 project zone polygon"
+        />
+      </LegendSection>
+
+      <LegendSection title="Services">
+        <LegendSubheading>Drainage</LegendSubheading>
+        <LegendRow
+          symbol={<LegendPoint fill="#2E7D32" stroke="#0B3D16" />}
+          title={DRAINAGE_PITS_NAME}
+          sub="Dark-green point"
+        />
+        <LegendRow
+          symbol={<LegendLine color="#2E7D32" width={3} />}
+          title={DRAINAGE_PIPES_NAME}
+          sub="Dark-green line"
+        />
+
+        <LegendSubheading>Power</LegendSubheading>
+        <LegendRow
+          symbol={<LegendLine color="#d32f2f" width={3} dashed />}
+          title="Distribution Underground Cables (WP-034)"
+          sub="Red dashed line"
+        />
+        <LegendRow
+          symbol={<LegendLine color="#d32f2f" width={3} />}
+          title="Distribution Overhead Powerlines (WP-031)"
+          sub="Red line"
+        />
+        <LegendRow
+          symbol={<LegendPoint fill="#d32f2f" />}
+          title="Distribution Poles (WP-029)"
+          sub="Red point"
+        />
+        <LegendRow
+          symbol={<LegendLine color="#f57c00" width={3} dashed />}
+          title="Transmission Underground Cable (WP-035)"
+          sub="Orange dashed line"
+        />
+        <LegendRow
+          symbol={<LegendLine color="#f57c00" width={3} />}
+          title="Transmission Overhead Powerlines (WP-032)"
+          sub="Orange line"
+        />
+        <LegendRow
+          symbol={<LegendPoint fill="#f57c00" />}
+          title="Transmission Pole (WP-030)"
+          sub="Orange point"
+        />
+        <LegendRow
+          symbol={<LegendLine color="#795548" width={3} />}
+          title="NCMT High Voltage Overhead Transmission Lines (WP-051)"
+          sub="Brown line"
+        />
+
+        <LegendSubheading>Sewer</LegendSubheading>
+        <LegendRow
+          symbol={<LegendPoint fill="#ff4da6" />}
+          title="Sewer Manholes (WCORP-026)"
+          sub="Pink point"
+        />
+        <LegendRow
+          symbol={<LegendLine color="#ff4da6" width={3} />}
+          title="Sewer Gravity Pipes (WCORP-068)"
+          sub="Pink utility line"
+        />
+        <LegendRow
+          symbol={<LegendLine color="#ff4da6" width={3} dashed />}
+          title="Sewer Pressure Main (WCORP-083)"
+          sub="Pink dashed line"
+        />
+        <LegendRow
+          symbol={<LegendLine color="#ff4da6" width={3} />}
+          title="Sewer Connections (WCORP-084)"
+          sub="Pink sewer connection line"
+        />
+
+        <LegendSubheading>Water</LegendSubheading>
+        <LegendRow
+          symbol={<LegendLine color="#4fc3f7" width={3} />}
+          title="Water Pipes (WCORP-002)"
+          sub="Light-blue line"
+        />
+        <LegendRow
+          symbol={<LegendPoint fill="#4fc3f7" size={8} />}
+          title="Water Meters (WCORP-006)"
+          sub="Small light-blue point"
+        />
+      </LegendSection>
+
+      <LegendSection title="Contours">
+        <LegendRow
+          symbol={<LegendLine color="#c49a6c" width={2} />}
+          title="2 Metre Contours (DPIRD-072)"
+          sub="Tan contour line"
+        />
+        <LegendRow
+          symbol={<LegendLine color="rgb(210, 105, 30)" width={4} />}
+          title="10 Metre Contours (DPIRD-073)"
+          sub="Burnt-orange contour line"
+        />
+      </LegendSection>
+
+      <LegendSection title="Local Authority">
+        <LegendRow
+          symbol={<LegendPolygon stroke="rgba(154,103,0,0.9)" fill="rgba(244,211,94,0.35)" strokeWidth={2} />}
+          title={LGATE_229_DISTRICTS_NAME}
+          sub="Pale-gold district polygon"
+        />
+        <LegendRow
+          symbol={<LegendPolygon stroke="#2e7d32" fill="rgba(165,214,167,0.25)" strokeWidth={2} />}
+          title="LGA Boundaries (LGATE-233)"
+          sub="Green boundary with light-green fill"
+        />
+        <LegendRow
+          symbol={<LegendPolygon stroke="#1976d2" fill="rgba(144,202,249,0.18)" strokeWidth={2} />}
+          title="Localities (LGATE-234)"
+          sub="Blue boundary with light-blue fill"
+        />
+      </LegendSection>
+
+      <LegendSection title="Planning">
+        <LegendRow
+          symbol={<LegendPolygon stroke="#ef6c00" fill="rgba(255,152,0,0.16)" strokeWidth={2} />}
+          title="Bush Fire Prone Areas (OBRM-001)"
+          sub="Orange boundary with transparent fill"
+        />
+        <LegendRow
+          symbol={<LegendPolygon stroke="#c62828" fill="rgba(239,154,154,0.22)" strokeWidth={2} />}
+          title="R-Codes Zoning (DPLH-070)"
+          sub="Red boundary with light-red fill"
+        />
+      </LegendSection>
+
+      <LegendSection title="Roads">
+        <LegendRow
+          symbol={<LegendLine color={roadsNetworkLegendRows[0]?.color || "#00c5ff"} width={3} />}
+          title={MRWA_ROADS_NETWORK_NAME}
+          sub="Road network categories"
+        >
+          <div className="maps-legend-road-categories">
+            {roadsNetworkLegendRows.map((row) => (
+              <div key={row.label} className="maps-legend-road-row">
+                <LegendLine color={row.color} width={2} dashed={row.dashed} />
+                <span>{row.label}</span>
+              </div>
+            ))}
+          </div>
+        </LegendRow>
+      </LegendSection>
+    </div>
+  );
 
   const renderTabButton = (key, label) => (
     <button
@@ -9328,6 +9661,7 @@ onBlur={() => {
                 <div className="panel-card-title">Layers</div>
 
                 {geodeticNotice && <div className="maps-notice">{geodeticNotice}</div>}
+                {layerLoadNotice && <div className="maps-notice">{layerLoadNotice}</div>}
 
                 <div className="maps-layer-section">
                   <div className="maps-layer-section-title">Cadastre</div>
@@ -9800,290 +10134,7 @@ title={
             {activeTab === "legend" && (
               <div className="panel-card">
                 <div className="panel-card-title">Legend</div>
- <div className="maps-legend-row">
-                    <span className="maps-legend-line" />
-                    <div>
-                      <div className="maps-legend-title">Cadastre</div>
-                      <div className="maps-legend-sub">LGATE-001 (thin white boundary)</div>
-                    </div>
-                  </div>
-                <div className="maps-legend">
-                  <div className="maps-legend-row">
-                    <span className="maps-legend-swatch swatch-ssm" />
-                    <div>
-                      <div className="maps-legend-title">SSM</div>
-                      <div className="maps-legend-sub">LGATE-076 (triangle)</div>
-                    </div>
-                  </div>
-
-                  <div className="maps-legend-row">
-                    <span className="maps-legend-swatch swatch-bm" />
-                    <div>
-                      <div className="maps-legend-title">BM</div>
-                      <div className="maps-legend-sub">LGATE-076 (square)</div>
-                    </div>
-                  </div>
-
-                  <div className="maps-legend-row">
-                    <span className="maps-legend-swatch swatch-rm" />
-                    <div>
-                      <div className="maps-legend-title">RM</div>
-                      <div className="maps-legend-sub">LGATE-199 (cross)</div>
-                    </div>
-                  </div>
-
-<div className="maps-legend-row">
-  <span
-    className="maps-legend-line"
-    style={{ background: "transparent", borderTop: "3px dashed #d32f2f", height: 0 }}
-  />
-  <div>
-    <div className="maps-legend-title">Distribution Underground Cables</div>
-    <div className="maps-legend-sub">WP-034 (red dashed line)</div>
-  </div>
-</div>
-
-<div className="maps-legend-row">
-  <span
-    className="maps-legend-line"
-    style={{ background: "#d32f2f", height: 3 }}
-  />
-  <div>
-    <div className="maps-legend-title">Distribution Overhead Powerlines</div>
-    <div className="maps-legend-sub">WP-031 (red line)</div>
-  </div>
-</div>
-
-<div className="maps-legend-row">
-  <span
-    className="maps-legend-swatch"
-    style={{
-      display: "inline-block",
-      width: 10,
-      height: 10,
-      borderRadius: "50%",
-      background: "#d32f2f",
-      border: "1.5px solid #ffffff",
-    }}
-  />
-  <div>
-    <div className="maps-legend-title">Distribution Poles</div>
-    <div className="maps-legend-sub">WP-029 (red point)</div>
-  </div>
-</div>
-
-<div className="maps-legend-row">
-  <span
-    className="maps-legend-line"
-    style={{ background: "transparent", borderTop: "3px dashed #f57c00", height: 0 }}
-  />
-  <div>
-    <div className="maps-legend-title">Transmission Underground Cable</div>
-    <div className="maps-legend-sub">WP-035 (orange dashed line)</div>
-  </div>
-</div>
-
-<div className="maps-legend-row">
-  <span
-    className="maps-legend-line"
-    style={{ background: "#f57c00", height: 3 }}
-  />
-  <div>
-    <div className="maps-legend-title">Transmission Overhead Powerlines</div>
-    <div className="maps-legend-sub">WP-032 (orange line)</div>
-  </div>
-</div>
-
-<div className="maps-legend-row">
-  <span
-    className="maps-legend-swatch"
-    style={{
-      display: "inline-block",
-      width: 10,
-      height: 10,
-      borderRadius: "50%",
-      background: "#f57c00",
-      border: "1.5px solid #ffffff",
-    }}
-  />
-  <div>
-    <div className="maps-legend-title">Transmission Pole</div>
-    <div className="maps-legend-sub">WP-030 (orange point)</div>
-  </div>
-</div>
-
-<div className="maps-legend-row">
-  <span
-    className="maps-legend-line"
-    style={{ background: "#795548", height: 3 }}
-  />
-  <div>
-    <div className="maps-legend-title">NCMT High Voltage Overhead Transmission Lines</div>
-    <div className="maps-legend-sub">WP-051 (brown line)</div>
-  </div>
-</div>
-
-                  <div className="maps-legend-row">
-  <span
-    className="maps-legend-line"
-       style={{ background: "#ff4da6", height: 3 }}
-  />
-  <div>
-    <div className="maps-legend-title">Sewer Gravity Pipes</div>
-    <div className="maps-legend-sub">WCORP-068 (pink utility line)</div>
-  </div>
-</div>
-<div className="maps-legend-row">
-  <span
-    className="maps-legend-swatch"
-    style={{
-      display: "inline-block",
-      width: 10,
-      height: 10,
-      borderRadius: "50%",
-      background: "#ff4da6",
-      border: "1.5px solid #ffffff",
-    }}
-  />
-  <div>
-    <div className="maps-legend-title">Sewer Manholes</div>
-    <div className="maps-legend-sub">WCORP-026 (pink point)</div>
-  </div>
-</div>
-
-<div className="maps-legend-row">
-  <span
-    className="maps-legend-line"
-    style={{ background: "#ff4da6", height: 3 }}
-  />
-  <div>
-    <div className="maps-legend-title">Sewer Connections</div>
-    <div className="maps-legend-sub">WCORP-084 (pink sewer connection line)</div>
-  </div>
-</div>
-
-<div className="maps-legend-row">
-  <span
-    className="maps-legend-line"
-    style={{ background: "#ff4da6", height: 3 }}
-  />
-  <div>
-    <div className="maps-legend-title">Sewer Pressure Main</div>
-    <div className="maps-legend-sub">WCORP-083 (pink dashed line)</div>
-  </div>
-</div>
-
-<div className="maps-legend-row">
-  <span
-    className="maps-legend-line"
-    style={{ background: "#4fc3f7", height: 3 }}
-  />
-  <div>
-    <div className="maps-legend-title">Water Pipes</div>
-    <div className="maps-legend-sub">WCORP-002 (light blue line)</div>
-  </div>
-</div>
-
-<div className="maps-legend-row">
-  <span
-    className="maps-legend-swatch"
-    style={{
-      background: "#4fc3f7",
-      width: 8,
-      height: 8,
-      borderRadius: "50%",
-      border: "1px solid #ffffff",
-    }}
-  />
-  <div>
-    <div className="maps-legend-title">Water Meters</div>
-    <div className="maps-legend-sub">WCORP-006 (small light blue point)</div>
-  </div>
-</div>
-
-                  <div className="maps-legend-row">
-                    <span
-                      className="maps-legend-line"
-                      style={{ background: "#0b5d1e", height: 2 }}
-                    />
-                    <div>
-                      <div className="maps-legend-title">Local Authority</div>
-                     <div className="maps-legend-sub">LGATE-233 (green boundary, light green fill + label)</div>
-                    </div>
-                  </div>
-                  <div className="maps-legend-row">
-  <span
-    className="maps-legend-line"
-    style={{ background: "#1976d2", height: 2 }}
-  />
-  <div>
-    <div className="maps-legend-title">Localities</div>
-    <div className="maps-legend-sub">LGATE-234 (blue boundary, light blue fill + label)</div>
-  </div>
-</div>
-                  <div className="maps-legend-row">
-                    <span
-                      className="maps-legend-line"
-                      style={{ background: "#ef6c00", height: 2 }}
-                    />
-                    <div>
-                      <div className="maps-legend-title">Bush Fire Prone Areas</div>
-                      <div className="maps-legend-sub">OBRM-001 (orange boundary, light orange transparent fill)</div>
-                    </div>
-                  </div>
-
-                  <div className="maps-legend-row">
-                    <span
-                      className="maps-legend-line"
-                      style={{ background: "#c62828", height: 2 }}
-                    />
-                    <div>
-                      <div className="maps-legend-title">R-Codes Zoning</div>
-                      <div className="maps-legend-sub">DPLH-070 (red boundary, light red fill + zoning labels)</div>
-                    </div>
-                  </div>
-
-                  <div className="maps-legend-row">
-                    <span
-                      className="maps-legend-swatch"
-                      style={{
-                        display: "grid",
-                        placeItems: "center",
-                        borderRadius: "50%",
-                        width: 16,
-                        height: 16,
-                        background: "#FFD54F",
-                        border: "2px solid #111",
-                        fontWeight: 900,
-                        fontSize: 11,
-                        color: "#111",
-                      }}
-                    >
-                      N
-                    </span>
-                    <div>
-                      <div className="maps-legend-title">Notes</div>
-                      <div className="maps-legend-sub">Pinned note (yellow “N”)</div>
-                    </div>
-                  </div>
-
-                  <div className="maps-legend-divider" />
-
-                  <div className="maps-legend-sub" style={{ fontWeight: 800 }}>
-                    Tools
-                  </div>
-                  <div className="maps-legend-tools">
-                    <div>📏 Distance</div>
-                    <div>📐 Area</div>
-                    <div>📍 My location</div>
-                    <div>🕘 Historical (Earth)</div>
-                    <div>👤 Street View</div>
-<div>ℹ Map information</div>
-<div>⬇ Export visible layers</div>
-  <div>✔ Finish measurement</div>
-  <div>✖ Clear measurement</div>
-                  </div>
-                </div>
+                {renderLegendContent()}
               </div>
             )}
           </div>
