@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -18,6 +18,7 @@ function YesNoToggle({
   onChange,
   colorMode = "traffic",
   options = yesNoOptions,
+  disabled = false,
 }) {
   return (
     <div style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden" }}>
@@ -59,14 +60,18 @@ function YesNoToggle({
           <button
             key={opt}
             type="button"
-            onClick={() => onChange(opt)}
+            onClick={() => {
+              if (!disabled) onChange(opt);
+            }}
+            disabled={disabled}
             style={{
               border: `1px solid ${selected ? selectedBorder : "#ccc"}`,
               padding: "0.35rem 0.85rem",
               fontSize: "0.85rem",
-              cursor: "pointer",
+              cursor: disabled ? "not-allowed" : "pointer",
               background: selected ? selectedBg : "#fff",
               color: selected ? "#fff" : "#333",
+              opacity: disabled && !selected ? 0.72 : 1,
             }}
           >
             {opt}
@@ -122,7 +127,7 @@ const CHECK_ITEMS = [
     id: "fire_extinguisher",
     group: "Checks",
     label: "Fire extinguisher in vehicle and last inspected within 6 months",
-    allowNa: false,
+    allowNa: true,
   },
   {
     id: "camera_reverse_siren",
@@ -147,19 +152,6 @@ const CHECK_ITEMS = [
     id: "interior_clean",
     group: "Checks",
     label: "Interior of the vehicle is clean, tidy and in good condition",
-    allowNa: true,
-  },
-  {
-    id: "vehicle_strap_constraint",
-    group: "Checks",
-    label: "Vehicle strap constraint in working condition",
-    allowNa: true,
-  },
-  {
-    id: "spray_cans",
-    group: "Checks",
-    label:
-      "Spray can/s stowed in appropriate storage solution (i.e. esky or lined compartment)",
     allowNa: true,
   },
 
@@ -210,6 +202,38 @@ const CHECK_ITEMS = [
 ];
 
 const GROUP_ORDER = ["Checks", "Okay"];
+const REQUIRED_WARNING = "Please complete all required fields and checklist items before submitting.";
+
+function employeeOptionName(profile) {
+  return (profile?.display_name || "").trim() || (profile?.email || "").trim();
+}
+
+function sanitizeWholeNumber(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function parseWholeNumber(value) {
+  const normalized = sanitizeWholeNumber(value);
+  if (!normalized) return null;
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function formatVehiclePart(value) {
+  return value == null || value === "" ? "-" : String(value);
+}
+
+function vehiclePrimaryText(vehicle) {
+  if (!vehicle) return "Select vehicle...";
+  const registration = formatVehiclePart(vehicle.registration);
+  const makeModel = [vehicle.make, vehicle.model].filter(Boolean).join(" ").trim() || "-";
+  return `${registration} — ${makeModel}`;
+}
+
+function vehicleSecondaryText(vehicle) {
+  if (!vehicle) return "Year: - · Assigned to: -";
+  return `Year: ${formatVehiclePart(vehicle.year)} · Assigned to: ${formatVehiclePart(vehicle.assignedName)}`;
+}
 
 /* ---------------- PDF helpers (mirroring Take 5 style) ---------------- */
 
@@ -261,18 +285,32 @@ function drawYesNoPill(doc, label, x, y, mode) {
   doc.text(label || "-", x + 4, y);
 }
 
+function FieldError({ children }) {
+  if (!children) return null;
+  return <div className="vehicle-prestart-field-error">{children}</div>;
+}
+
 /* ---------------- Component ---------------- */
 
 function VehiclePrestart() {
-  const { user } = useAuth();
+  const { user, profile, displayName } = useAuth();
   const derivedDisplayName =
-    user?.user_metadata?.full_name || user?.email || "";
+    profile?.display_name ||
+    displayName ||
+    user?.user_metadata?.full_name ||
+    user?.email ||
+    "";
 
   const [employeeName, setEmployeeName] = useState(derivedDisplayName);
+  const [employeeId, setEmployeeId] = useState("");
+  const [employeeOptions, setEmployeeOptions] = useState([]);
   const [vehicle, setVehicle] = useState("");
+  const [vehicleId, setVehicleId] = useState("");
+  const [vehicleOptions, setVehicleOptions] = useState([]);
   const [odometer, setOdometer] = useState("");
   const [lastService, setLastService] = useState("");
   const [nextService, setNextService] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const [checks, setChecks] = useState(() => {
     const init = {};
@@ -284,22 +322,213 @@ function VehiclePrestart() {
 
   const [comments, setComments] = useState("");
   const [notifyManager, setNotifyManager] = useState(false);
+  const [signatureConfirmed, setSignatureConfirmed] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [submitSuccess, setSubmitSuccess] = useState("");
+  const [submittedAt, setSubmittedAt] = useState("");
+  const [pendingSubmissionId, setPendingSubmissionId] = useState("");
   const [incompleteWarning, setIncompleteWarning] = useState("");
   const [showFailedWarning, setShowFailedWarning] = useState(false);
+  const [vehicleDropdownOpen, setVehicleDropdownOpen] = useState(false);
+  const [highlightedVehicleIndex, setHighlightedVehicleIndex] = useState(-1);
+  const [vehiclesLoading, setVehiclesLoading] = useState(true);
+  const [employeesLoading, setEmployeesLoading] = useState(true);
+  const [vehicleLoadError, setVehicleLoadError] = useState("");
+  const [employeeLoadError, setEmployeeLoadError] = useState("");
 
   const [pdfUrl, setPdfUrl] = useState("");
   const [logoDataUrl, setLogoDataUrl] = useState("");
+  const fieldRefs = useRef({});
+  const vehicleDropdownRef = useRef(null);
+  const defaultVehicleAppliedForRef = useRef("");
 
-  // sync display name like Take5
+  const myProfileId = profile?.id || user?.id || "";
+
+  const employeeMap = useMemo(() => {
+    const map = new Map();
+    employeeOptions.forEach((emp) => map.set(emp.id, emp));
+    return map;
+  }, [employeeOptions]);
+
+  const vehicleSelectDisabled = vehiclesLoading || !!vehicleLoadError || vehicleOptions.length === 0;
+  const isSubmitted = !!submitSuccess;
+  const selectedVehicle = useMemo(
+    () => vehicleOptions.find((item) => item.id === vehicleId) || null,
+    [vehicleId, vehicleOptions]
+  );
+
+  const clearFieldError = (key) => {
+    setFieldErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  // Keep employee default aligned with Take 5, but leave manual selections alone.
   useEffect(() => {
-    if (derivedDisplayName) {
+    if (!employeeOptions.length && derivedDisplayName && !employeeName) {
       setEmployeeName(derivedDisplayName);
     }
-  }, [derivedDisplayName]);
+  }, [derivedDisplayName, employeeName, employeeOptions.length]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadEmployees = async () => {
+      setEmployeesLoading(true);
+      setEmployeeLoadError("");
+
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("id, display_name, email, is_active")
+          .order("display_name", { ascending: true });
+
+        if (error) throw error;
+
+        const options = (data || [])
+          .filter((p) => p.is_active !== false)
+          .map((p) => ({
+            id: p.id,
+            name: employeeOptionName(p),
+            email: p.email,
+          }))
+          .filter((p) => p.name)
+          .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+
+        if (!isMounted) return;
+
+        setEmployeeOptions(options);
+
+        const matchedUser =
+          options.find((emp) => emp.id === myProfileId) ||
+          options.find((emp) => emp.id === user?.id) ||
+          options.find((emp) => emp.email === user?.email);
+        const defaultName = matchedUser?.name || derivedDisplayName || "";
+
+        if (matchedUser?.id) {
+          setEmployeeId((prev) => prev || matchedUser.id);
+        }
+
+        if (defaultName) {
+          setEmployeeName((prev) => {
+            if (!prev || prev === user?.email) return defaultName;
+            return prev;
+          });
+        }
+      } catch (err) {
+        console.error("Failed to load employee profiles", err);
+        if (!isMounted) {
+          return;
+        }
+        setEmployeeOptions([]);
+        setEmployeeLoadError("Employee list could not be loaded. Please refresh and try again.");
+      } finally {
+        if (isMounted) setEmployeesLoading(false);
+      }
+    };
+
+    loadEmployees();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [derivedDisplayName, myProfileId, user?.email, user?.id]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadVehicles = async () => {
+      setVehiclesLoading(true);
+      setVehicleLoadError("");
+
+      try {
+        const { data: profileRows, error: profileError } = await supabase
+          .from("profiles")
+          .select("id, display_name, email");
+
+        if (profileError) throw profileError;
+
+        const profileMap = new Map(
+          (profileRows || []).map((p) => [p.id, employeeOptionName(p) || "-"])
+        );
+
+        const { data, error } = await supabase
+          .from("equipment_register")
+          .select("id, equipment_type, registration_number, make, model, year, assigned_to, vehicle_last_service_odometer")
+          .eq("equipment_type", "Vehicle");
+
+        if (error) throw error;
+
+        const options = (data || [])
+          .map((row) => ({
+            id: row.id,
+            registration: row.registration_number || "",
+            make: row.make || "",
+            model: row.model || "",
+            year: row.year ?? "",
+            assigned_to: row.assigned_to || "",
+            assignedName: profileMap.get(row.assigned_to) || "-",
+            vehicle_last_service_odometer: row.vehicle_last_service_odometer,
+          }))
+          .sort((a, b) =>
+            (a.registration || "").localeCompare(b.registration || "", undefined, { sensitivity: "base" })
+          );
+
+        if (!isMounted) return;
+
+        setVehicleOptions(options);
+
+        if (myProfileId && defaultVehicleAppliedForRef.current !== myProfileId) {
+          defaultVehicleAppliedForRef.current = myProfileId;
+          const assignedVehicle = options.find((item) => item.assigned_to && item.assigned_to === myProfileId);
+
+          if (assignedVehicle) {
+            setVehicleId(assignedVehicle.id);
+            setVehicle(assignedVehicle.registration);
+            setLastService(
+              assignedVehicle.vehicle_last_service_odometer == null
+                ? ""
+                : String(assignedVehicle.vehicle_last_service_odometer)
+            );
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load Equipment Register vehicles", err);
+        if (!isMounted) return;
+        setVehicleOptions([]);
+        setVehicleLoadError("Vehicle list could not be loaded from the Equipment Register. Please refresh and try again.");
+      } finally {
+        if (isMounted) setVehiclesLoading(false);
+      }
+    };
+
+    loadVehicles();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [myProfileId]);
+
+  useEffect(() => {
+    if (!vehicleDropdownOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (!vehicleDropdownRef.current?.contains(event.target)) {
+        setVehicleDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [vehicleDropdownOpen]);
 
   // Load logo for PDF header
   useEffect(() => {
@@ -323,21 +552,122 @@ function VehiclePrestart() {
     [checks]
   );
 
-  const hasUnanswered = useMemo(
-    () => Object.values(checks).some((v) => !v),
-    [checks]
-  );
+  const handleVehicleChange = (id) => {
+    if (isSubmitted) return;
+    const nextVehicle = vehicleOptions.find((item) => item.id === id) || null;
+    setVehicleId(id);
+    setVehicle(nextVehicle?.registration || "");
+    setLastService(
+      nextVehicle?.vehicle_last_service_odometer == null
+        ? ""
+        : String(nextVehicle.vehicle_last_service_odometer)
+    );
+    clearFieldError("vehicle");
+    clearFieldError("lastService");
+    clearFieldError("nextService");
+    setIncompleteWarning("");
+  };
+
+  const selectVehicleOption = (id) => {
+    handleVehicleChange(id);
+    setVehicleDropdownOpen(false);
+    requestAnimationFrame(() => fieldRefs.current.vehicle?.focus?.());
+  };
+
+  const openVehicleDropdown = () => {
+    if (vehicleSelectDisabled || isSubmitted) return;
+    const selectedIndex = vehicleOptions.findIndex((item) => item.id === vehicleId);
+    setHighlightedVehicleIndex(selectedIndex >= 0 ? selectedIndex : 0);
+    setVehicleDropdownOpen(true);
+  };
+
+  const handleVehicleKeyDown = (event) => {
+    if (vehicleSelectDisabled || isSubmitted) return;
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setVehicleDropdownOpen(true);
+      setHighlightedVehicleIndex((prev) => {
+        const current = prev >= 0 ? prev : vehicleOptions.findIndex((item) => item.id === vehicleId);
+        if (event.key === "ArrowDown") return Math.min((current < 0 ? -1 : current) + 1, vehicleOptions.length - 1);
+        return Math.max((current < 0 ? vehicleOptions.length : current) - 1, 0);
+      });
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      setVehicleDropdownOpen(true);
+      setHighlightedVehicleIndex(0);
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      setVehicleDropdownOpen(true);
+      setHighlightedVehicleIndex(vehicleOptions.length - 1);
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (!vehicleDropdownOpen) {
+        openVehicleDropdown();
+        return;
+      }
+      const option = vehicleOptions[highlightedVehicleIndex];
+      if (option) selectVehicleOption(option.id);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      setVehicleDropdownOpen(false);
+    }
+  };
+
+  const handleEmployeeChange = (id) => {
+    if (isSubmitted) return;
+    const selected = employeeMap.get(id);
+    setEmployeeId(id);
+    setEmployeeName(selected?.name || "");
+    setSignatureConfirmed(false);
+    clearFieldError("employee");
+    clearFieldError("signatureConfirmed");
+    setIncompleteWarning("");
+  };
+
+  const handleNumberChange = (setter, key) => (e) => {
+    if (isSubmitted) return;
+    setter(sanitizeWholeNumber(e.target.value));
+    clearFieldError(key);
+    setIncompleteWarning("");
+  };
 
   const handleCheckChange = (id, value) => {
+    if (isSubmitted) return;
     setChecks((prev) => ({ ...prev, [id]: value }));
+    clearFieldError(`check_${id}`);
     setIncompleteWarning("");
   };
 
   const resetForm = () => {
-    setVehicle("");
+    defaultVehicleAppliedForRef.current = "";
+    const assignedVehicle = vehicleOptions.find((item) => item.assigned_to && item.assigned_to === myProfileId);
+    setVehicleId(assignedVehicle?.id || "");
+    setVehicle(assignedVehicle?.registration || "");
     setOdometer("");
-    setLastService("");
+    setLastService(
+      assignedVehicle?.vehicle_last_service_odometer == null
+        ? ""
+        : String(assignedVehicle.vehicle_last_service_odometer)
+    );
     setNextService("");
+    const currentEmployee =
+      employeeOptions.find((emp) => emp.id === myProfileId) ||
+      employeeOptions.find((emp) => emp.id === user?.id) ||
+      employeeOptions.find((emp) => emp.email === user?.email);
+    setEmployeeId(currentEmployee?.id || "");
+    setEmployeeName(currentEmployee?.name || derivedDisplayName || "");
     setChecks(() => {
       const init = {};
       CHECK_ITEMS.forEach((c) => {
@@ -347,53 +677,95 @@ function VehiclePrestart() {
     });
     setComments("");
     setNotifyManager(false);
+    setSignatureConfirmed(false);
     setSubmitError("");
     setSubmitSuccess("");
+    setSubmittedAt("");
+    setPendingSubmissionId("");
     setIncompleteWarning("");
+    setFieldErrors({});
     setShowFailedWarning(false);
     setPdfUrl("");
   };
 
   const basicValidate = () => {
-    if (!vehicle.trim()) {
-      setIncompleteWarning("Please select a vehicle.");
-      return false;
+    const nextErrors = {};
+    const currentOdometer = parseWholeNumber(odometer);
+    const lastServiceOdometer = parseWholeNumber(lastService);
+    const nextServiceOdometer = parseWholeNumber(nextService);
+
+    if (vehicleLoadError) nextErrors.vehicle = "Vehicle list could not be loaded.";
+    else if (!vehicleOptions.length) nextErrors.vehicle = "No Vehicle equipment records are available.";
+    else if (!vehicleId || !vehicle.trim()) nextErrors.vehicle = "Select a vehicle.";
+
+    if (employeeLoadError) nextErrors.employee = "Employee list could not be loaded.";
+    else if (!employeeName.trim()) nextErrors.employee = "Select an employee.";
+
+    if (currentOdometer == null) nextErrors.odometer = "Enter a non-negative whole-number odometer reading.";
+    if (lastServiceOdometer == null) nextErrors.lastService = "Enter the last service odometer reading.";
+    if (nextServiceOdometer == null) nextErrors.nextService = "Enter the next service odometer reading.";
+
+    if (lastServiceOdometer != null && nextServiceOdometer != null && nextServiceOdometer <= lastServiceOdometer) {
+      nextErrors.nextService = "Next service odometer must be greater than the last service odometer.";
     }
-    if (!odometer.trim()) {
-      setIncompleteWarning("Please enter the odometer reading.");
-      return false;
+
+    if (currentOdometer != null && nextServiceOdometer != null && nextServiceOdometer < currentOdometer) {
+      nextErrors.nextService = "Next service odometer cannot be below the current odometer reading.";
     }
-    if (hasUnanswered) {
-      setIncompleteWarning("Please answer all checklist items.");
-      return false;
-    }
+
+    CHECK_ITEMS.forEach((item) => {
+      if (!checks[item.id]) nextErrors[`check_${item.id}`] = "Required.";
+    });
+
     if (hasAnyNo) {
       if (!comments.trim()) {
-        setIncompleteWarning(
-          "Please describe the issue(s) in the comments box when any checks are 'No'."
-        );
-        return false;
+        nextErrors.comments = "Describe the issue(s) when any checks are marked No.";
       }
       if (!notifyManager) {
-        setIncompleteWarning(
-          "Please tick 'Notify Manager of Results' when there are any failed checks."
-        );
-        return false;
+        nextErrors.notifyManager = "Notify Manager of Results is required when any checks are marked No.";
       }
     }
+
+    if (!signatureConfirmed) {
+      nextErrors.signatureConfirmed = "Employee sign-off is required before submitting.";
+    }
+
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length) {
+      setIncompleteWarning(REQUIRED_WARNING);
+      const firstKey = Object.keys(nextErrors)[0];
+      requestAnimationFrame(() => {
+        fieldRefs.current[firstKey]?.focus?.();
+        fieldRefs.current[firstKey]?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      });
+      return false;
+    }
+
+    setIncompleteWarning("");
     return true;
   };
 
-  const buildFormData = () => ({
+  const buildFormData = (submittedIso = new Date().toISOString()) => ({
     vehicle,
-    odometer,
-    lastService,
-    nextService,
+    vehicleEquipmentId: vehicleId || null,
+    odometer: parseWholeNumber(odometer),
+    lastService: parseWholeNumber(lastService),
+    nextService: parseWholeNumber(nextService),
+    lastServiceOdometer: parseWholeNumber(lastService),
+    nextServiceOdometer: parseWholeNumber(nextService),
+    employeeId: employeeId || null,
     employeeName,
     checks,
     comments,
     notifyManager,
-    submittedAt: new Date().toISOString(),
+    signature: {
+      name: employeeName || "-",
+      employeeId: employeeId || null,
+      confirmed: signatureConfirmed,
+      signedAt: signatureConfirmed ? submittedIso : null,
+    },
+    submittedStatus: "submitted",
+    submittedAt: submittedIso,
   });
 
   // PDF generator – styled like Take 5, but simplified for vehicle checklist
@@ -467,19 +839,21 @@ function VehiclePrestart() {
 
     doc.text(`Vehicle: ${data.vehicle || "-"}`, left + 2, y);
     y += lineH;
-    doc.text(`Odometer: ${data.odometer || "-"} km`, left + 2, y);
+    doc.text(`Odometer: ${data.odometer ?? "-"} km`, left + 2, y);
     y += lineH;
     doc.text(`Employee: ${data.employeeName || "-"}`, left + 2, y);
     y += lineH;
-    if (data.lastService) {
-      doc.text(`Last Service: ${data.lastService}`, left + 2, y);
+    if (data.lastService != null) {
+      doc.text(`Last Service Odometer Reading: ${data.lastService} km`, left + 2, y);
       y += lineH;
     }
-    if (data.nextService) {
-      doc.text(`Next Service: ${data.nextService}`, left + 2, y);
+    if (data.nextService != null) {
+      doc.text(`Next Service Odometer Reading: ${data.nextService} km`, left + 2, y);
       y += lineH;
     }
     doc.text(`Submitted: ${submittedDate}`, left + 2, y);
+    y += lineH + 2;
+    doc.text(`Status: ${data.submittedStatus === "submitted" ? "Submitted" : "-"}`, left + 2, y);
     y += lineH + 2;
 
     // Checklist
@@ -529,6 +903,45 @@ function VehiclePrestart() {
     doc.text(data.notifyManager ? "Yes" : "No", left + 65, y);
     y += lineH;
 
+    sectionHeader("Employee Sign-off");
+
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9.2);
+    doc.setTextColor("#333");
+
+    const declarationText = doc.splitTextToSize(
+      "I confirm I have completed or reviewed this Vehicle Pre Start checklist and the entered information is accurate to the best of my knowledge.",
+      right - left - 4
+    );
+
+    doc.text(declarationText, left + 2, y);
+    y += declarationText.length * 4.8 + 2;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.setTextColor("#000");
+    doc.text("Signed by:", left + 2, y);
+    doc.text(data.signature?.name || "-", left + 28, y);
+    y += lineH;
+
+    const signedAt = data.signature?.signedAt
+      ? new Date(data.signature.signedAt).toLocaleString("en-AU", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        })
+      : "-";
+
+    doc.text(
+      `Confirmed: ${data.signature?.confirmed ? "Yes" : "No"}   |   Signed at: ${signedAt}`,
+      left + 2,
+      y
+    );
+    y += lineH;
+
     // Footer
     doc.setFontSize(8);
     doc.setTextColor("#777");
@@ -539,31 +952,60 @@ function VehiclePrestart() {
 
   // Final submit to Supabase (after any warning confirmation)
   const submitToSupabase = async () => {
+    if (isSubmitting || isSubmitted) return;
     if (!basicValidate()) return;
 
     setIsSubmitting(true);
     setSubmitError("");
     setSubmitSuccess("");
     setPdfUrl("");
+    let savedSubmissionId = pendingSubmissionId;
 
     try {
-      const formData = buildFormData();
+      const submittedIso = new Date().toISOString();
+      const formData = buildFormData(submittedIso);
+      const currentOdometer = parseWholeNumber(odometer);
+      const lastServiceOdometer = parseWholeNumber(lastService);
+      const nextServiceOdometer = parseWholeNumber(nextService);
+      const submissionPayload = {
+        vehicle_label: vehicle,
+        vehicle_equipment_id: vehicleId || null,
+        odometer: currentOdometer,
+        last_service_odometer: lastServiceOdometer,
+        next_service_odometer: nextServiceOdometer,
+        employee_profile_id: employeeId || null,
+        employee_name: employeeName,
+        employee_signed_off: signatureConfirmed,
+        employee_signed_off_at: signatureConfirmed ? submittedIso : null,
+        signed_off_employee_profile_id: employeeId || null,
+        signed_off_employee_name: employeeName,
+        submitted_status: "submitted",
+        submitted_at: submittedIso,
+        form_data: formData,
+        notify_manager: notifyManager,
+      };
 
-      const { data: inserted, error: insertError } = await supabase
-        .from("vehicle_prestart_submissions")
-        .insert({
-          vehicle_label: vehicle,
-          odometer,
-          employee_name: employeeName,
-          form_data: formData,
-          notify_manager: notifyManager,
-        })
-        .select()
-        .single();
+      let prestartId = pendingSubmissionId;
 
-      if (insertError) throw insertError;
+      if (prestartId) {
+        const { error: updateSubmissionError } = await supabase
+          .from("vehicle_prestart_submissions")
+          .update(submissionPayload)
+          .eq("id", prestartId);
 
-      const prestartId = inserted.id;
+        if (updateSubmissionError) throw updateSubmissionError;
+      } else {
+        const { data: inserted, error: insertError } = await supabase
+          .from("vehicle_prestart_submissions")
+          .insert(submissionPayload)
+          .select("id")
+          .single();
+
+        if (insertError) throw insertError;
+        prestartId = inserted.id;
+        savedSubmissionId = prestartId;
+        setPendingSubmissionId(prestartId);
+      }
 
       const pdfDoc = await generatePdf(formData);
 
@@ -606,11 +1048,15 @@ function VehiclePrestart() {
       setSubmitSuccess(
         "Vehicle pre-start submitted and PDF saved successfully."
       );
+      setSubmittedAt(submittedIso);
+      setPendingSubmissionId("");
       setIncompleteWarning("");
     } catch (err) {
-      console.error(err);
+      console.error("Vehicle Pre Start submit/PDF workflow failed:", err);
       setSubmitError(
-        "There was a problem submitting the Vehicle Pre Start. Please try again."
+        savedSubmissionId
+          ? "The submission was saved but the PDF could not be attached. Please try submitting again; it will retry the same record."
+          : "There was a problem submitting the Vehicle Pre Start. Please try again."
       );
     } finally {
       setIsSubmitting(false);
@@ -619,6 +1065,7 @@ function VehiclePrestart() {
   };
 
   const handleSubmitClick = () => {
+    if (isSubmitted || isSubmitting) return;
     setIncompleteWarning("");
     setSubmitError("");
     setSubmitSuccess("");
@@ -640,42 +1087,32 @@ function VehiclePrestart() {
 
     return (
       <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.5)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          zIndex: 60,
-        }}
+        className="modal-backdrop"
         onClick={() => setShowFailedWarning(false)}
       >
         <div
-          className="card"
-          style={{ width: "92%", maxWidth: 420, padding: "1rem" }}
+          className="modal-card vehicle-prestart-confirm-card"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="vehicle-prestart-confirm-title"
           onClick={(e) => e.stopPropagation()}
         >
-          <h3 style={{ marginTop: 0 }}>Vehicle Safety Check</h3>
-          <p style={{ fontSize: "0.9rem", color: "#555" }}>
+          <div className="modal-header">
+            <h3 id="vehicle-prestart-confirm-title">Vehicle Safety Check</h3>
+          </div>
+          <p className="vehicle-prestart-confirm-message">
             One or more checklist items have been marked{" "}
             <strong>No</strong>. The vehicle may not be safe to use. Are you
             sure you want to submit this Vehicle Pre Start and notify the
             manager?
           </p>
 
-          <div
-            style={{
-              display: "flex",
-              gap: "0.6rem",
-              justifyContent: "flex-end",
-              marginTop: "1rem",
-            }}
-          >
+          <div className="modal-actions">
             <button
               className="btn-pill"
               type="button"
               onClick={() => setShowFailedWarning(false)}
+              disabled={isSubmitting}
             >
               No
             </button>
@@ -683,8 +1120,9 @@ function VehiclePrestart() {
               className="btn-pill primary"
               type="button"
               onClick={submitToSupabase}
+              disabled={isSubmitting}
             >
-              Yes, submit
+              {isSubmitting ? "Submitting..." : "Yes, submit"}
             </button>
           </div>
         </div>
@@ -708,7 +1146,7 @@ function VehiclePrestart() {
       title="Vehicle Pre Start"
       subtitle="Vehicle Checklist"
       actions={
-        <button className="btn-pill" type="button" onClick={resetForm}>
+        <button className="btn-pill" type="button" onClick={resetForm} disabled={isSubmitting || isSubmitted}>
           Start Over
         </button>
       }
@@ -719,86 +1157,198 @@ function VehiclePrestart() {
       <div className="card">
         <h3 className="card-title">Vehicle Details</h3>
         <p className="card-subtitle">
-          Select the vehicle and complete the checklist before driving.
+          Select the vehicle and complete the checklist on the <strong>first Monday of every month.</strong>
         </p>
 
-        <div
-          style={{
-            marginTop: "0.6rem",
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.5rem",
-          }}
-        >
+        {(vehicleLoadError || employeeLoadError) && (
+          <div className="vehicle-prestart-message error" role="alert">
+            {vehicleLoadError || employeeLoadError}
+          </div>
+        )}
+
+        {!vehiclesLoading && !vehicleLoadError && vehicleOptions.length === 0 && (
+          <div className="vehicle-prestart-message warning" role="alert">
+            No Vehicle equipment records exist in the Equipment Register. Add a Vehicle before submitting a pre-start.
+          </div>
+        )}
+
+        <div className="vehicle-prestart-details-grid">
           <div className="card-row">
-            <span className="card-row-label">Vehicle</span>
-            {/* Change this to a real select fed from Supabase later */}
-            <input
-              type="text"
-              value={vehicle}
-              onChange={(e) => setVehicle(e.target.value)}
-              aria-label="Vehicle registration"
-              placeholder="Registration #"
-              className="maps-search-input"
-              style={{ maxWidth: "260px" }}
-            />
+            <label className="card-row-label" htmlFor="vehicle-prestart-vehicle">Vehicle</label>
+            <div className="vehicle-prestart-control" ref={vehicleDropdownRef}>
+              <input type="hidden" name="vehicle_equipment_id" value={vehicleId} />
+              <button
+                id="vehicle-prestart-vehicle"
+                ref={(node) => {
+                  fieldRefs.current.vehicle = node;
+                }}
+                type="button"
+                role="combobox"
+                className={`maps-search-input vehicle-prestart-vehicle-trigger${fieldErrors.vehicle ? " is-invalid" : ""}`}
+                disabled={vehicleSelectDisabled || isSubmitted}
+                aria-invalid={fieldErrors.vehicle ? "true" : "false"}
+                aria-haspopup="listbox"
+                aria-expanded={vehicleDropdownOpen}
+                aria-controls="vehicle-prestart-vehicle-list"
+                aria-activedescendant={
+                  vehicleDropdownOpen && highlightedVehicleIndex >= 0
+                    ? `vehicle-prestart-vehicle-option-${vehicleOptions[highlightedVehicleIndex]?.id}`
+                    : undefined
+                }
+                onClick={() => {
+                  if (isSubmitted) return;
+                  if (vehicleDropdownOpen) {
+                    setVehicleDropdownOpen(false);
+                  } else {
+                    openVehicleDropdown();
+                  }
+                }}
+                onKeyDown={handleVehicleKeyDown}
+              >
+                <span className="vehicle-prestart-vehicle-text">
+                  <span className="vehicle-prestart-vehicle-primary">
+                    {vehiclesLoading ? "Loading vehicles..." : vehiclePrimaryText(selectedVehicle)}
+                  </span>
+                  <span className="vehicle-prestart-vehicle-secondary">
+                    {selectedVehicle ? vehicleSecondaryText(selectedVehicle) : "Year: - · Assigned to: -"}
+                  </span>
+                </span>
+                <span className="vehicle-prestart-vehicle-arrow" aria-hidden="true">⌄</span>
+              </button>
+              {vehicleDropdownOpen && (
+                <div
+                  id="vehicle-prestart-vehicle-list"
+                  className="vehicle-prestart-vehicle-list"
+                  role="listbox"
+                  aria-labelledby="vehicle-prestart-vehicle"
+                >
+                  {vehicleOptions.map((item, index) => {
+                    const selected = item.id === vehicleId;
+                    const highlighted = index === highlightedVehicleIndex;
+
+                    return (
+                      <button
+                        key={item.id}
+                        id={`vehicle-prestart-vehicle-option-${item.id}`}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        className={`vehicle-prestart-vehicle-option${selected ? " is-selected" : ""}${highlighted ? " is-highlighted" : ""}`}
+                        onMouseEnter={() => setHighlightedVehicleIndex(index)}
+                        onFocus={() => setHighlightedVehicleIndex(index)}
+                        onKeyDown={handleVehicleKeyDown}
+                        onClick={() => selectVehicleOption(item.id)}
+                      >
+                        <span className="vehicle-prestart-vehicle-primary">{vehiclePrimaryText(item)}</span>
+                        <span className="vehicle-prestart-vehicle-secondary">{vehicleSecondaryText(item)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <FieldError>{fieldErrors.vehicle}</FieldError>
+            </div>
           </div>
 
           <div className="card-row">
-            <span className="card-row-label">Odometer</span>
-            <input
-              type="number"
-              value={odometer}
-              onChange={(e) => setOdometer(e.target.value)}
-              aria-label="Odometer reading"
-              inputMode="numeric"
-              placeholder="km"
-              className="maps-search-input"
-              style={{ maxWidth: "160px" }}
-            />
-          </div>
-
-          {/* Optional manual fields for service info – you can wire to a vehicles table later */}
-          <div className="card-row">
-            <span className="card-row-label">Last Service</span>
-            <input
-              type="text"
-              value={lastService}
-              onChange={(e) => setLastService(e.target.value)}
-              aria-label="Last service date"
-              placeholder="e.g. 10 February 2025"
-              className="maps-search-input"
-              style={{ maxWidth: "220px" }}
-            />
+            <label className="card-row-label" htmlFor="vehicle-prestart-odometer">Current Odometer</label>
+            <div className="vehicle-prestart-control">
+              <input
+                id="vehicle-prestart-odometer"
+                ref={(node) => {
+                  fieldRefs.current.odometer = node;
+                }}
+                type="number"
+                min="0"
+                step="1"
+                value={odometer}
+                onChange={handleNumberChange(setOdometer, "odometer")}
+                readOnly={isSubmitted}
+                aria-label="Current odometer reading"
+                aria-invalid={fieldErrors.odometer ? "true" : "false"}
+                inputMode="numeric"
+                placeholder="km"
+                className={`maps-search-input${fieldErrors.odometer ? " is-invalid" : ""}`}
+                required
+              />
+              <FieldError>{fieldErrors.odometer}</FieldError>
+            </div>
           </div>
 
           <div className="card-row">
-            <span className="card-row-label">Next Service</span>
-            <input
-              type="text"
-              value={nextService}
-              onChange={(e) => setNextService(e.target.value)}
-              aria-label="Next service date"
-              placeholder="e.g. 10 August 2025"
-              className="maps-search-input"
-              style={{ maxWidth: "220px" }}
-            />
+            <label className="card-row-label" htmlFor="vehicle-prestart-last-service">Last Service Odometer Reading</label>
+            <div className="vehicle-prestart-control">
+              <input
+                id="vehicle-prestart-last-service"
+                ref={(node) => {
+                  fieldRefs.current.lastService = node;
+                }}
+                type="number"
+                min="0"
+                step="1"
+                value={lastService}
+                onChange={handleNumberChange(setLastService, "lastService")}
+                readOnly={isSubmitted}
+                aria-label="Last service odometer reading"
+                aria-invalid={fieldErrors.lastService ? "true" : "false"}
+                inputMode="numeric"
+                placeholder="km"
+                className={`maps-search-input${fieldErrors.lastService ? " is-invalid" : ""}`}
+                required
+              />
+              <FieldError>{fieldErrors.lastService}</FieldError>
+            </div>
           </div>
 
           <div className="card-row">
-            <span className="card-row-label">Employee</span>
-            <input
-              type="text"
-              value={employeeName}
-              readOnly
-              className="maps-search-input"
-              style={{ maxWidth: "260px", backgroundColor: "#f5f5f5" }}
-            />
+            <label className="card-row-label" htmlFor="vehicle-prestart-next-service">Next Service Odometer Reading</label>
+            <div className="vehicle-prestart-control">
+              <input
+                id="vehicle-prestart-next-service"
+                ref={(node) => {
+                  fieldRefs.current.nextService = node;
+                }}
+                type="number"
+                min="0"
+                step="1"
+                value={nextService}
+                onChange={handleNumberChange(setNextService, "nextService")}
+                readOnly={isSubmitted}
+                aria-label="Next service odometer reading"
+                aria-invalid={fieldErrors.nextService ? "true" : "false"}
+                inputMode="numeric"
+                placeholder="km"
+                className={`maps-search-input${fieldErrors.nextService ? " is-invalid" : ""}`}
+                required
+              />
+              <FieldError>{fieldErrors.nextService}</FieldError>
+            </div>
           </div>
 
-          <p style={{ margin: 0, fontSize: "0.75rem", color: "#777" }}>
-            Employee name is pulled from your <strong>My Profile</strong> page.
-          </p>
+          <div className="card-row">
+            <label className="card-row-label" htmlFor="vehicle-prestart-employee">Employee</label>
+            <div className="vehicle-prestart-control">
+              <select
+                id="vehicle-prestart-employee"
+                ref={(node) => {
+                  fieldRefs.current.employee = node;
+                }}
+                value={employeeId}
+                onChange={(e) => handleEmployeeChange(e.target.value)}
+                className={`maps-search-input${fieldErrors.employee ? " is-invalid" : ""}`}
+                disabled={employeesLoading || !!employeeLoadError || isSubmitted}
+                aria-invalid={fieldErrors.employee ? "true" : "false"}
+              >
+                <option value="">{employeesLoading ? "Loading employees..." : "Select employee..."}</option>
+                {employeeOptions.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name}
+                  </option>
+                ))}
+              </select>
+              <FieldError>{fieldErrors.employee}</FieldError>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -824,27 +1374,22 @@ function VehiclePrestart() {
             {groupedItems[group].map((item) => (
               <div
                 key={item.id}
-                style={{
-                  display: "flex",
-                  gap: "0.7rem",
-                  alignItems: "center",
-                  marginBottom: "0.45rem",
+                className={`vehicle-prestart-check-row${fieldErrors[`check_${item.id}`] ? " is-invalid" : ""}`}
+                ref={(node) => {
+                  fieldRefs.current[`check_${item.id}`] = node;
                 }}
+                tabIndex={fieldErrors[`check_${item.id}`] ? -1 : undefined}
               >
                 <YesNoToggle
                   value={checks[item.id]}
                   options={item.allowNa ? yesNaNoOptions : yesNoOptions}
                   onChange={(v) => handleCheckChange(item.id, v)}
                   colorMode="traffic"
+                  disabled={isSubmitted}
                 />
-                <div
-                  style={{
-                    fontSize: "0.85rem",
-                    lineHeight: 1.4,
-                    flex: 1,
-                  }}
-                >
-                  {item.label}
+                <div className="vehicle-prestart-check-label">
+                  <span>{item.label}</span>
+                  <FieldError>{fieldErrors[`check_${item.id}`]}</FieldError>
                 </div>
               </div>
             ))}
@@ -861,16 +1406,31 @@ function VehiclePrestart() {
         </p>
 
         <textarea
+          ref={(node) => {
+            fieldRefs.current.comments = node;
+          }}
           value={comments}
-          onChange={(e) => setComments(e.target.value)}
+          onChange={(e) => {
+            if (isSubmitted) return;
+            setComments(e.target.value);
+            clearFieldError("comments");
+            setIncompleteWarning("");
+          }}
           rows={4}
-          className="maps-search-input"
+          className={`maps-search-input${fieldErrors.comments ? " is-invalid" : ""}`}
           style={{ width: "100%", marginTop: "0.4rem", resize: "vertical" }}
           aria-label="Vehicle damage or comments"
+          aria-invalid={fieldErrors.comments ? "true" : "false"}
           placeholder="Describe any issues found during the pre-start…"
+          readOnly={isSubmitted}
         />
+        <FieldError>{fieldErrors.comments}</FieldError>
 
         <label
+          ref={(node) => {
+            fieldRefs.current.notifyManager = node;
+          }}
+          className={fieldErrors.notifyManager ? "vehicle-prestart-checkbox is-invalid" : "vehicle-prestart-checkbox"}
           style={{
             display: "flex",
             alignItems: "center",
@@ -882,52 +1442,98 @@ function VehiclePrestart() {
           <input
             type="checkbox"
             checked={notifyManager}
-            onChange={(e) => setNotifyManager(e.target.checked)}
+            disabled={isSubmitted}
+            onChange={(e) => {
+              if (isSubmitted) return;
+              setNotifyManager(e.target.checked);
+              clearFieldError("notifyManager");
+              setIncompleteWarning("");
+            }}
           />
           <span>
             Notify Manager of Results{" "}
             <span style={{ color: "#777" }}></span>
           </span>
         </label>
+        <FieldError>{fieldErrors.notifyManager}</FieldError>
+      </div>
+
+      <div className="card">
+        <h3 className="card-title">Employee Sign-off</h3>
+        <p className="card-subtitle">
+          Confirm the selected employee has completed or reviewed this checklist and the information is accurate.
+        </p>
+
+        <div className="card-row" style={{ marginTop: "0.6rem" }}>
+          <span className="card-row-label">Signature name</span>
+          <input
+            type="text"
+            value={employeeName || ""}
+            readOnly
+            className="maps-search-input"
+            style={{ maxWidth: "260px", backgroundColor: "#f5f5f5" }}
+          />
+        </div>
+
+        <label
+          ref={(node) => {
+            fieldRefs.current.signatureConfirmed = node;
+          }}
+          className={fieldErrors.signatureConfirmed ? "vehicle-prestart-checkbox is-invalid" : "vehicle-prestart-checkbox"}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.4rem",
+            marginTop: "0.8rem",
+            fontSize: "0.85rem",
+            color: "#555",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={signatureConfirmed}
+            disabled={isSubmitted}
+            onChange={(e) => {
+              if (isSubmitted) return;
+              setSignatureConfirmed(e.target.checked);
+              clearFieldError("signatureConfirmed");
+              setIncompleteWarning("");
+            }}
+          />
+          I confirm I have completed this Vehicle Pre Start honestly and to the best of my knowledge.
+        </label>
+        <FieldError>{fieldErrors.signatureConfirmed}</FieldError>
+
+        {isSubmitted && (
+          <div className="vehicle-prestart-message success" role="status">
+            This Vehicle Pre Start has been submitted and is now locked.
+            {submittedAt ? ` Submitted ${new Date(submittedAt).toLocaleString("en-AU", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            })}.` : ""}
+          </div>
+        )}
       </div>
 
       {/* Warnings & submit row */}
       {incompleteWarning && (
-        <div
-          style={{
-            marginTop: "0.7rem",
-            padding: "0.6rem 0.8rem",
-            borderRadius: 8,
-            background: "#fff3e0",
-            border: "1px solid #ffcc80",
-            color: "#8a4b00",
-            fontSize: "0.85rem",
-          }}
-        >
-          ⚠️ {incompleteWarning}
+        <div className="vehicle-prestart-message warning" role="alert">
+          {incompleteWarning}
         </div>
       )}
 
       {submitError && (
-        <div
-          style={{
-            marginTop: "0.6rem",
-            fontSize: "0.85rem",
-            color: "#b71c1c",
-          }}
-        >
+        <div className="vehicle-prestart-message error" role="alert">
           {submitError}
         </div>
       )}
 
       {submitSuccess && (
-        <div
-          style={{
-            marginTop: "0.6rem",
-            fontSize: "0.85rem",
-            color: "#2e7d32",
-          }}
-        >
+        <div className="vehicle-prestart-message success" role="status">
           {submitSuccess}
         </div>
       )}
@@ -957,12 +1563,14 @@ function VehiclePrestart() {
           type="button"
           className="btn-pill primary"
           onClick={handleSubmitClick}
-          disabled={isSubmitting}
+          disabled={isSubmitting || isSubmitted}
+          aria-busy={isSubmitting ? "true" : "false"}
           style={{
-            opacity: isSubmitting ? 0.7 : 1,
+            opacity: isSubmitting || isSubmitted ? 0.7 : 1,
+            cursor: isSubmitting || isSubmitted ? "not-allowed" : "pointer",
           }}
         >
-          {isSubmitting ? "Submitting…" : "Submit Vehicle Pre Start"}
+          {isSubmitting ? "Submitting..." : isSubmitted ? "Submitted" : "Submit Vehicle Pre Start"}
         </button>
       </div>
     </PageLayout>

@@ -59,6 +59,7 @@ const EMPTY_EQUIPMENT = {
   make: "",
   model: "",
   year: "",
+  vehicle_last_service_odometer: "",
   serial_number: "",
   registration_number: "",
   assigned_to: "",
@@ -78,6 +79,10 @@ function hasRegistration(type) {
   return type === "Vehicle";
 }
 
+function hasVehicleLastServiceOdometer(type) {
+  return type === "Vehicle";
+}
+
 function hasSetNumber(type) {
   return SET_NUMBER_TYPES.has(type);
 }
@@ -90,6 +95,16 @@ function setNumberPayloadValue(type, value) {
   if (!hasSetNumber(type)) return null;
   const normalized = setNumberFormValue(value);
   return normalized ? Number(normalized) : null;
+}
+
+function vehicleLastServiceOdometerFormValue(value) {
+  return value == null ? "" : String(value);
+}
+
+function vehicleLastServiceOdometerPayloadValue(type, value) {
+  if (!hasVehicleLastServiceOdometer(type)) return null;
+  const normalized = String(value || "").trim();
+  return normalized ? Number.parseInt(normalized, 10) : null;
 }
 
 function safeFileName(name = "attachment") {
@@ -348,6 +363,7 @@ function EquipmentRegister() {
       make: item.make || "",
       model: item.model || "",
       year: item.year || "",
+      vehicle_last_service_odometer: vehicleLastServiceOdometerFormValue(item.vehicle_last_service_odometer),
       serial_number: item.serial_number || "",
       registration_number: item.registration_number || "",
       assigned_to: item.assigned_to || "",
@@ -392,6 +408,10 @@ function EquipmentRegister() {
         make: equipmentForm.make.trim(),
         model: equipmentForm.model.trim(),
         year: hasYear(type) ? Number(equipmentForm.year) : null,
+        vehicle_last_service_odometer: vehicleLastServiceOdometerPayloadValue(
+          type,
+          equipmentForm.vehicle_last_service_odometer
+        ),
         serial_number: hasSerial(type) ? equipmentForm.serial_number.trim() : null,
         registration_number: hasRegistration(type) ? equipmentForm.registration_number.trim() : null,
         assigned_to: equipmentForm.assigned_to || null,
@@ -627,6 +647,9 @@ function EquipmentRegister() {
       ...prev,
       equipment_type: type,
       year: hasYear(type) ? prev.year : "",
+      vehicle_last_service_odometer: hasVehicleLastServiceOdometer(type)
+        ? vehicleLastServiceOdometerFormValue(prev.vehicle_last_service_odometer)
+        : "",
       serial_number: hasSerial(type) ? prev.serial_number : "",
       registration_number: hasRegistration(type) ? prev.registration_number : "",
       set_number: hasSetNumber(type) ? setNumberFormValue(prev.set_number) : "",
@@ -956,6 +979,24 @@ function EquipmentRegister() {
                 <label>
                   <span>Year</span>
                   <input className="maps-search-input" type="number" min="1900" max="2100" value={equipmentForm.year} onChange={(e) => setEquipmentForm((f) => ({ ...f, year: e.target.value }))} required />
+                </label>
+              )}
+              {hasVehicleLastServiceOdometer(equipmentForm.equipment_type) && (
+                <label>
+                  <span>Last Service Odometer</span>
+                  <input
+                    className="maps-search-input"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={equipmentForm.vehicle_last_service_odometer}
+                    onChange={(e) =>
+                      setEquipmentForm((f) => ({
+                        ...f,
+                        vehicle_last_service_odometer: e.target.value.replace(/\D/g, ""),
+                      }))
+                    }
+                  />
                 </label>
               )}
               {hasSetNumber(equipmentForm.equipment_type) && (

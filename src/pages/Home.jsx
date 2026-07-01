@@ -15,7 +15,9 @@ function Home() {
           To access Pro West Portal: <strong>https://pro-west-portal.netlify.app/</strong>
         </p>
         <ul style={{ fontSize: "0.85rem", marginTop: "0.3rem", paddingLeft: "1.1rem" }}>
-          <strong>Current Version - v1.1.11</strong>
+          <strong>Current Version - v1.2.0</strong>
+          <br />
+          v1.2.0 - 01/07/2026 - Vehicle Prestart and Vehicle Prestart Register amendments.
           <br />
           v1.1.11 - 30/06/2026 - Power layers now operational in Maps page.
           <br />
@@ -24,9 +26,9 @@ function Home() {
           v1.1.9 - 29/06/2026 - Additional layers added to Maps page.
           <br />
           v1.1.8 - 28/06/2026 - Additional layers added to Maps page.
+           {/*
           <br />
           v1.1.7 - 28/06/2026 - View in Maps added to Job Planning Page - Admin only.
-           {/*
           <br />
           v1.1.6 - 27/06/2026 - Job Number search box added to Job Planning Page - Admin only.
           <br />

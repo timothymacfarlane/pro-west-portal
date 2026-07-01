@@ -4385,6 +4385,211 @@ body,
   height: auto;
 }
 
+.vehicle-prestart-details-grid {
+  margin-top: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.vehicle-prestart-control {
+  position: relative;
+  width: min(100%, 420px);
+}
+
+.vehicle-prestart-control .maps-search-input {
+  width: 100%;
+}
+
+.vehicle-prestart-vehicle-trigger {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 58px;
+  padding: 0.45rem 2.2rem 0.45rem 0.65rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vehicle-prestart-vehicle-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+[data-vehicle-prestart] .maps-search-input:disabled,
+[data-vehicle-prestart] .maps-search-input[readonly] {
+  background: #f8f8f8;
+  color: #333;
+  cursor: not-allowed;
+}
+
+.vehicle-prestart-vehicle-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  width: 100%;
+  line-height: 1.25;
+}
+
+.vehicle-prestart-vehicle-primary,
+.vehicle-prestart-vehicle-secondary {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vehicle-prestart-vehicle-primary {
+  color: #222;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.vehicle-prestart-vehicle-secondary {
+  margin-top: 0.16rem;
+  color: #666;
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.vehicle-prestart-vehicle-arrow {
+  position: absolute;
+  top: 50%;
+  right: 0.72rem;
+  transform: translateY(-50%);
+  color: #666;
+  font-size: 1.05rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.vehicle-prestart-vehicle-list {
+  position: absolute;
+  z-index: 120;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: min(320px, 60vh);
+  overflow-y: auto;
+  border: 1px solid var(--pw-border-soft);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
+  padding: 0.25rem;
+}
+
+.vehicle-prestart-vehicle-option {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  padding: 0.5rem 0.55rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vehicle-prestart-vehicle-option:hover,
+.vehicle-prestart-vehicle-option.is-highlighted,
+.vehicle-prestart-vehicle-option:focus {
+  outline: none;
+  background: #fff5f5;
+}
+
+.vehicle-prestart-vehicle-option.is-selected {
+  background: #ffebee;
+}
+
+.vehicle-prestart-field-error {
+  margin-top: 0.22rem;
+  color: #b71c1c;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.maps-search-input.is-invalid,
+.vehicle-prestart-checkbox.is-invalid {
+  border-color: #c62828 !important;
+  box-shadow: 0 0 0 2px rgba(198, 40, 40, 0.12);
+}
+
+.vehicle-prestart-message {
+  margin-top: 0.7rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.vehicle-prestart-message.warning {
+  background: #fff3e0;
+  border: 1px solid #ffcc80;
+  color: #8a4b00;
+}
+
+.vehicle-prestart-message.error {
+  background: #ffebee;
+  border: 1px solid #ffcdd2;
+  color: #b71c1c;
+}
+
+.vehicle-prestart-message.success {
+  background: #e8f5e9;
+  border: 1px solid #b7dfba;
+  color: #1b5e20;
+}
+
+.vehicle-prestart-check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 0.45rem;
+  padding: 0.2rem 0;
+  border-radius: 8px;
+}
+
+.vehicle-prestart-check-row.is-invalid {
+  background: #fff5f5;
+  outline: 1px solid #ffcdd2;
+  outline-offset: 2px;
+}
+
+.vehicle-prestart-check-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.vehicle-prestart-confirm-card {
+  max-width: 440px;
+}
+
+.vehicle-prestart-confirm-message {
+  margin: 0 0 1rem;
+  color: #555;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 768px) {
+  .vehicle-prestart-control {
+    width: 100%;
+  }
+
+  .vehicle-prestart-check-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  [data-vehicle-prestart] .maps-search-input {
+    font-size: 16px;
+  }
+}
+
 .page-loading {
   padding: 24px;
   font-size: 0.95rem;
