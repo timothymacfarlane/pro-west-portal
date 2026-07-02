@@ -203,6 +203,7 @@ const CHECK_ITEMS = [
 
 const GROUP_ORDER = ["Checks", "Okay"];
 const REQUIRED_WARNING = "Please complete all required fields and checklist items before submitting.";
+const PDF_BUCKET = "vehicle-prestart-pdfs";
 
 function employeeOptionName(profile) {
   return (profile?.display_name || "").trim() || (profile?.email || "").trim();
@@ -329,6 +330,7 @@ function VehiclePrestart() {
   const [submitSuccess, setSubmitSuccess] = useState("");
   const [submittedAt, setSubmittedAt] = useState("");
   const [pendingSubmissionId, setPendingSubmissionId] = useState("");
+  const [pendingPdfPath, setPendingPdfPath] = useState("");
   const [incompleteWarning, setIncompleteWarning] = useState("");
   const [showFailedWarning, setShowFailedWarning] = useState(false);
   const [vehicleDropdownOpen, setVehicleDropdownOpen] = useState(false);
@@ -682,6 +684,7 @@ function VehiclePrestart() {
     setSubmitSuccess("");
     setSubmittedAt("");
     setPendingSubmissionId("");
+    setPendingPdfPath("");
     setIncompleteWarning("");
     setFieldErrors({});
     setShowFailedWarning(false);
@@ -979,7 +982,7 @@ function VehiclePrestart() {
         employee_signed_off_at: signatureConfirmed ? submittedIso : null,
         signed_off_employee_profile_id: employeeId || null,
         signed_off_employee_name: employeeName,
-        submitted_status: "submitted",
+        submitted_status: "pdf_pending",
         submitted_at: submittedIso,
         form_data: formData,
         notify_manager: notifyManager,
@@ -988,6 +991,7 @@ function VehiclePrestart() {
       let prestartId = pendingSubmissionId;
 
       if (prestartId) {
+        console.info("Vehicle Pre Start PDF workflow: retrying saved submission", { submissionId: prestartId });
         const { error: updateSubmissionError } = await supabase
           .from("vehicle_prestart_submissions")
           .update(submissionPayload)
@@ -1005,44 +1009,120 @@ function VehiclePrestart() {
         prestartId = inserted.id;
         savedSubmissionId = prestartId;
         setPendingSubmissionId(prestartId);
+        console.info("Vehicle Pre Start PDF workflow: submission row created", { submissionId: prestartId });
       }
 
-      const pdfDoc = await generatePdf(formData);
+      let path = pendingSubmissionId && pendingPdfPath ? pendingPdfPath : "";
 
-      let pdfBlob;
-      try {
-        pdfBlob = pdfDoc.output("blob");
-      } catch {
-        const ab = pdfDoc.output("arraybuffer");
-        pdfBlob = new Blob([ab], { type: "application/pdf" });
+      if (path) {
+        console.info("Vehicle Pre Start PDF workflow: reusing uploaded PDF for finalization retry", {
+          submissionId: prestartId,
+          pdfPath: path,
+        });
+      } else {
+        const pdfDoc = await generatePdf(formData);
+        console.info("Vehicle Pre Start PDF workflow: PDF generated", { submissionId: prestartId });
+
+        let pdfBlob;
+        try {
+          pdfBlob = pdfDoc.output("blob");
+        } catch {
+          const ab = pdfDoc.output("arraybuffer");
+          pdfBlob = new Blob([ab], { type: "application/pdf" });
+        }
+
+        if (!pdfBlob || pdfBlob.size <= 0) {
+          throw new Error("Generated Vehicle Pre Start PDF was empty.");
+        }
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        path = `vehicle-prestarts/${prestartId}/vehicle-prestart-${timestamp}.pdf`;
+
+        console.info("Vehicle Pre Start PDF workflow: upload started", { submissionId: prestartId, pdfPath: path });
+        const { error: uploadError } = await supabase.storage
+          .from(PDF_BUCKET)
+          .upload(path, pdfBlob, {
+            contentType: "application/pdf",
+            upsert: false,
+          });
+
+        if (uploadError) throw uploadError;
+        setPendingPdfPath(path);
+        console.info("Vehicle Pre Start PDF workflow: PDF uploaded", { submissionId: prestartId, pdfPath: path });
       }
 
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const vehicleSafe = (vehicle || "vehicle").replace(
-        /[^a-zA-Z0-9_-]/g,
-        "_"
-      );
-      const path = `${vehicleSafe}/prestart/${prestartId}_${timestamp}.pdf`;
+      const completedFormData = {
+        ...formData,
+        pdfPath: path,
+        pdf_path: path,
+        submittedStatus: "submitted",
+      };
 
-      const { error: uploadError } = await supabase.storage
-        .from("vehicle-prestart-pdfs")
-        .upload(path, pdfBlob, { contentType: "application/pdf" });
+      const finalUpdatePayload = {
+        pdf_path: path,
+        submitted_status: "submitted",
+        submitted_at: submittedIso,
+        form_data: completedFormData,
+      };
 
-      if (uploadError) throw uploadError;
+      console.info("Vehicle Pre Start PDF workflow: saving PDF path", {
+        submissionId: prestartId,
+        pdfPath: path,
+        updateFields: Object.keys(finalUpdatePayload),
+      });
 
-      const { error: updateError } = await supabase
+      const { data: updatedRows, error: updateError, count: updatedCount, status: updateStatus } = await supabase
         .from("vehicle_prestart_submissions")
-        .update({ pdf_path: path })
-        .eq("id", prestartId);
+        .update(finalUpdatePayload, { count: "exact" })
+        .eq("id", prestartId)
+        .select("id, pdf_path, submitted_status, submitted_at");
 
-      if (updateError) throw updateError;
+      if (updateError) {
+        console.error("Vehicle Pre Start PDF workflow: final update failed", {
+          submissionId: prestartId,
+          pdfPath: path,
+          updateFields: Object.keys(finalUpdatePayload),
+          status: updateStatus,
+          code: updateError.code,
+          message: updateError.message,
+          details: updateError.details,
+          hint: updateError.hint,
+        });
+        throw updateError;
+      }
+
+      if (updatedCount !== 1 || !Array.isArray(updatedRows) || updatedRows.length !== 1) {
+        console.error("Vehicle Pre Start PDF workflow: final update affected unexpected row count", {
+          submissionId: prestartId,
+          pdfPath: path,
+          updateFields: Object.keys(finalUpdatePayload),
+          status: updateStatus,
+          updatedCount,
+          returnedRows: Array.isArray(updatedRows) ? updatedRows.length : null,
+        });
+        throw new Error("Vehicle Pre Start PDF path could not be saved to the submission row.");
+      }
+
+      const [updatedSubmission] = updatedRows;
+      if (updatedSubmission.pdf_path !== path || updatedSubmission.submitted_status !== "submitted") {
+        console.error("Vehicle Pre Start PDF workflow: final update returned unexpected values", {
+          submissionId: prestartId,
+          pdfPath: path,
+          returnedPdfPath: updatedSubmission.pdf_path,
+          returnedStatus: updatedSubmission.submitted_status,
+          status: updateStatus,
+        });
+        throw new Error("Vehicle Pre Start PDF path was not confirmed on the submission row.");
+      }
+      console.info("Vehicle Pre Start PDF workflow: PDF path saved", { submissionId: prestartId, pdfPath: path });
 
       const { data: signed, error: signedErr } = await supabase.storage
-        .from("vehicle-prestart-pdfs")
+        .from(PDF_BUCKET)
         .createSignedUrl(path, 60 * 60);
 
       if (!signedErr && signed?.signedUrl) {
         setPdfUrl(signed.signedUrl);
+        console.info("Vehicle Pre Start PDF workflow: signed URL created", { submissionId: prestartId });
       }
 
       setSubmitSuccess(
@@ -1050,12 +1130,13 @@ function VehiclePrestart() {
       );
       setSubmittedAt(submittedIso);
       setPendingSubmissionId("");
+      setPendingPdfPath("");
       setIncompleteWarning("");
     } catch (err) {
       console.error("Vehicle Pre Start submit/PDF workflow failed:", err);
       setSubmitError(
         savedSubmissionId
-          ? "The submission was saved but the PDF could not be attached. Please try submitting again; it will retry the same record."
+          ? "The checklist was saved, but the PDF could not be attached. Please try submitting again to retry the PDF attachment."
           : "There was a problem submitting the Vehicle Pre Start. Please try again."
       );
     } finally {

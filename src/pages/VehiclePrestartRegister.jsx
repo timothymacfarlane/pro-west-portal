@@ -8,6 +8,7 @@ const MY_SURVEYOR = "__my__";
 const ALL_VEHICLES = "__all__";
 const MY_VEHICLE = "__my__";
 const PDF_BUCKET = "vehicle-prestart-pdfs";
+const PDF_SIGNED_URL_SECONDS = 60 * 60;
 
 function profileName(profile) {
   return (profile?.display_name || "").trim() || (profile?.email || "").trim() || "Unnamed";
@@ -41,12 +42,39 @@ function formatDateTime(value) {
     : "-";
 }
 
-function pdfReference(row) {
-  return row.pdf_path || row.form_data?.pdfPath || row.form_data?.pdf_path || "";
-}
-
 function isUrl(value) {
   return /^https?:\/\//i.test(String(value || ""));
+}
+
+function normalizePdfPath(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (isUrl(raw)) return raw;
+
+  return raw
+    .replace(/^\/+/, "")
+    .replace(new RegExp(`^${PDF_BUCKET}/`), "")
+    .replace(/^storage\/v1\/object\/(?:sign|public)\//, "")
+    .replace(new RegExp(`^${PDF_BUCKET}/`), "");
+}
+
+function pdfReference(row) {
+  const candidates = [
+    row.pdf_path,
+    row.form_data?.pdfPath,
+    row.form_data?.pdf_path,
+    row.form_data?.pdfUrl,
+    row.form_data?.pdf_url,
+    row.form_data?.attachmentUrl,
+    row.form_data?.attachment_url,
+  ];
+
+  for (const candidate of candidates) {
+    const ref = normalizePdfPath(candidate);
+    if (ref) return ref;
+  }
+
+  return "";
 }
 
 function VehiclePrestartRegister() {
@@ -212,6 +240,36 @@ function VehiclePrestartRegister() {
       }
 
       setRows(fetched);
+
+      const map = {};
+      await Promise.all(
+        fetched.map(async (row) => {
+          const ref = pdfReference(row);
+          if (!ref) return;
+
+          if (isUrl(ref)) {
+            map[row.id] = ref;
+            return;
+          }
+
+          try {
+            const { data: signed, error: signedError } = await supabase.storage
+              .from(PDF_BUCKET)
+              .createSignedUrl(ref, PDF_SIGNED_URL_SECONDS);
+
+            if (signedError) throw signedError;
+            if (signed?.signedUrl) map[row.id] = signed.signedUrl;
+          } catch (signedErr) {
+            console.warn("Vehicle Prestart Register signed URL error", {
+              rowId: row.id,
+              pdfPath: ref,
+              error: signedErr,
+            });
+          }
+        })
+      );
+
+      setPdfMap(map);
     } catch (err) {
       console.error("Vehicle Prestart Register load failed:", err);
       setError("Failed to load Vehicle Pre Start submissions.");
@@ -256,12 +314,14 @@ function VehiclePrestartRegister() {
 
   const openPdf = async (row) => {
     const ref = pdfReference(row);
-    if (!ref || openingPdfId) return;
+    if (!ref || openingPdfId === row.id) return;
 
     setOpeningPdfId(row.id);
     setPdfError("");
 
     try {
+      console.info("Vehicle Pre Start PDF open requested", { rowId: row.id, pdfPath: ref });
+
       if (isUrl(ref)) {
         window.open(ref, "_blank", "noopener,noreferrer");
         return;
@@ -275,16 +335,17 @@ function VehiclePrestartRegister() {
 
       const { data, error: signedError } = await supabase.storage
         .from(PDF_BUCKET)
-        .createSignedUrl(ref, 60 * 60);
+        .createSignedUrl(ref, PDF_SIGNED_URL_SECONDS);
 
       if (signedError) throw signedError;
       if (!data?.signedUrl) throw new Error("No signed PDF URL returned.");
 
       setPdfMap((prev) => ({ ...prev, [row.id]: data.signedUrl }));
+      console.info("Vehicle Pre Start signed PDF URL created", { rowId: row.id });
       window.open(data.signedUrl, "_blank", "noopener,noreferrer");
     } catch (err) {
       console.error("Vehicle Prestart PDF open failed:", { rowId: row.id, pdfPath: ref, error: err });
-      setPdfError("Could not open that Vehicle Pre Start PDF. Please try again or check the PDF attachment.");
+      setPdfError("The PDF could not be opened. The attachment may be missing or unavailable.");
     } finally {
       setOpeningPdfId("");
     }
@@ -469,6 +530,7 @@ function VehiclePrestartRegister() {
                   const signoff = getSignoff(row);
                   const status = row.submitted_status || row.form_data?.submittedStatus || "submitted";
                   const ref = pdfReference(row);
+                  const pdfUrl = pdfMap[row.id];
                   const opening = openingPdfId === row.id;
 
                   return (
@@ -487,7 +549,7 @@ function VehiclePrestartRegister() {
                         {row.employee_name || row.form_data?.employeeName || "-"}
                       </td>
                       <td style={{ borderBottom: "1px solid #f8e0e0", padding: "0.35rem" }}>
-                        {status === "submitted" ? "Submitted" : status || "-"}
+                        {status === "submitted" ? "Submitted" : status === "pdf_pending" ? "PDF pending" : status || "-"}
                       </td>
                       <td style={{ borderBottom: "1px solid #f8e0e0", padding: "0.35rem" }}>
                         {formatDateTime(submittedAt)}
@@ -530,9 +592,9 @@ function VehiclePrestartRegister() {
                             className="btn-pill"
                             style={{ fontSize: "0.75rem" }}
                             onClick={() => openPdf(row)}
-                            disabled={!!openingPdfId}
+                            disabled={opening}
                           >
-                            {opening ? "Opening..." : "View PDF"}
+                            {opening ? "Opening..." : pdfUrl || isUrl(ref) ? "View PDF" : "Preparing..."}
                           </button>
                         ) : (
                           <span style={{ color: "#999" }}>No PDF</span>

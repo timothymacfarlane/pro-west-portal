@@ -1,4 +1,4 @@
-const APP_VERSION = "v1.2.0";
+const APP_VERSION = "v1.2.1";
 
 function HeaderActions({ extraActions }) {
   return (
@@ -8,9 +8,9 @@ function HeaderActions({ extraActions }) {
   );
 }
 
-function PageLayout({ icon, title, subtitle, actions, children }) {
+function PageLayout({ icon, title, subtitle, actions, children, className = "", ...pageProps }) {
   return (
-    <div className="page" data-layout="page">
+    <div className={`page${className ? ` ${className}` : ""}`} data-layout="page" {...pageProps}>
       <header className="page-header" role="banner">
         <div className="page-title-group">
           {icon && <span className="page-icon">{icon}</span>}

@@ -4390,15 +4390,24 @@ body,
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .vehicle-prestart-control {
   position: relative;
   width: min(100%, 420px);
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .vehicle-prestart-control .maps-search-input {
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .vehicle-prestart-vehicle-trigger {
@@ -4409,6 +4418,10 @@ body,
   padding: 0.45rem 2.2rem 0.45rem 0.65rem;
   text-align: left;
   cursor: pointer;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .vehicle-prestart-vehicle-trigger:disabled {
@@ -4471,24 +4484,38 @@ body,
   top: calc(100% + 4px);
   left: 0;
   right: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   max-height: min(320px, 60vh);
   overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid var(--pw-border-soft);
   border-radius: 8px;
   background: #fff;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
   padding: 0.25rem;
+  box-sizing: border-box;
 }
 
 .vehicle-prestart-vehicle-option {
   display: block;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   border: 0;
   border-radius: 7px;
   background: transparent;
   padding: 0.5rem 0.55rem;
   text-align: left;
   cursor: pointer;
+  box-sizing: border-box;
+}
+
+.vehicle-prestart-vehicle-option .vehicle-prestart-vehicle-primary,
+.vehicle-prestart-vehicle-option .vehicle-prestart-vehicle-secondary {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .vehicle-prestart-vehicle-option:hover,
@@ -4521,6 +4548,10 @@ body,
   border-radius: 8px;
   font-size: 0.85rem;
   font-weight: 800;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
 }
 
 .vehicle-prestart-message.warning {
@@ -4548,6 +4579,9 @@ body,
   margin-bottom: 0.45rem;
   padding: 0.2rem 0;
   border-radius: 8px;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .vehicle-prestart-check-row.is-invalid {
@@ -4575,8 +4609,42 @@ body,
 }
 
 @media (max-width: 768px) {
+  [data-vehicle-prestart],
+  [data-vehicle-prestart] .page-body,
+  [data-vehicle-prestart] .card {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  [data-vehicle-prestart] .card-row {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.35rem;
+    box-sizing: border-box;
+  }
+
+  [data-vehicle-prestart] .card-row-label {
+    min-width: 0;
+    max-width: 100%;
+  }
+
   .vehicle-prestart-control {
     width: 100%;
+  }
+
+  .vehicle-prestart-vehicle-trigger {
+    min-height: 62px;
+    padding-right: 2rem;
+  }
+
+  .vehicle-prestart-vehicle-secondary {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .vehicle-prestart-check-row {
@@ -4585,8 +4653,41 @@ body,
     gap: 0.45rem;
   }
 
+  .vehicle-prestart-check-row > div:first-child {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .vehicle-prestart-check-row > div:first-child button {
+    min-width: 0;
+  }
+
   [data-vehicle-prestart] .maps-search-input {
     font-size: 16px;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  [data-vehicle-prestart] textarea.maps-search-input {
+    width: 100% !important;
+  }
+
+  [data-vehicle-prestart] .vehicle-prestart-checkbox {
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  [data-vehicle-prestart] .vehicle-prestart-checkbox span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  [data-vehicle-prestart] .btn-pill {
+    max-width: 100%;
+    white-space: normal;
+    text-align: center;
+    justify-content: center;
   }
 }
 
