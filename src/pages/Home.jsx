@@ -15,7 +15,9 @@ function Home() {
           To access Pro West Portal: <strong>https://pro-west-portal.netlify.app/</strong>
         </p>
         <ul style={{ fontSize: "0.85rem", marginTop: "0.3rem", paddingLeft: "1.1rem" }}>
-          <strong>Current Version - v1.2.1</strong>
+          <strong>Current Version - v1.2.2</strong>
+           <br />
+          v1.2.2 - 04/07/2026 - Vehicle Prestart notify manager checkbox now working.
           <br />
           v1.2.1 - 02/07/2026 - Vehicle Prestart Register amendments.
           <br />
@@ -24,9 +26,9 @@ function Home() {
           v1.1.11 - 30/06/2026 - Power layers now operational in Maps page.
           <br />
           v1.1.10 - 30/06/2026 - Additional layers added to Maps page.
+           {/*
           <br />
           v1.1.9 - 29/06/2026 - Additional layers added to Maps page.
-           {/*
           <br />
           v1.1.8 - 28/06/2026 - Additional layers added to Maps page.
           <br />

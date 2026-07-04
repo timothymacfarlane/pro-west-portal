@@ -986,6 +986,8 @@ function VehiclePrestart() {
         submitted_at: submittedIso,
         form_data: formData,
         notify_manager: notifyManager,
+        manager_alert_status: "not_required",
+        submitted_by_user_id: user?.id || null,
       };
 
       let prestartId = pendingSubmissionId;
@@ -1063,6 +1065,9 @@ function VehiclePrestart() {
         submitted_status: "submitted",
         submitted_at: submittedIso,
         form_data: completedFormData,
+        notify_manager: !!notifyManager,
+        manager_alert_status: notifyManager ? "pending" : "not_required",
+        submitted_by_user_id: user?.id || null,
       };
 
       console.info("Vehicle Pre Start PDF workflow: saving PDF path", {

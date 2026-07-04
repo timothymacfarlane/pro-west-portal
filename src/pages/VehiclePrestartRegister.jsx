@@ -46,6 +46,54 @@ function isUrl(value) {
   return /^https?:\/\//i.test(String(value || ""));
 }
 
+function managerAlertInfo(row) {
+  const requested = row.notify_manager === true || row.form_data?.notifyManager === true;
+  const status = row.manager_alert_status || (requested ? "pending" : "not_required");
+
+  if (!requested || status === "not_required") {
+    return { label: "Not requested", detail: "", tone: "neutral" };
+  }
+
+  if (status === "pending") return { label: "Pending", detail: "", tone: "warning" };
+  if (status === "processing") return { label: "Sending", detail: "", tone: "info" };
+  if (status === "sent") {
+    return {
+      label: "Sent",
+      detail: row.manager_alert_sent_at ? formatDateTime(row.manager_alert_sent_at) : "",
+      tone: "success",
+    };
+  }
+  if (status === "failed") {
+    return {
+      label: "Failed",
+      detail: row.manager_alert_error || "Delivery failed",
+      tone: "danger",
+    };
+  }
+
+  return { label: "Not requested", detail: "", tone: "neutral" };
+}
+
+function managerAlertPillStyle(tone) {
+  const colours = {
+    neutral: { backgroundColor: "#eef2f7", color: "#4b5563" },
+    warning: { backgroundColor: "#fff3cd", color: "#7a5b00" },
+    info: { backgroundColor: "#dbeafe", color: "#1d4ed8" },
+    success: { backgroundColor: "#dcfce7", color: "#166534" },
+    danger: { backgroundColor: "#fee2e2", color: "#991b1b" },
+  };
+
+  return {
+    display: "inline-block",
+    padding: "0.1rem 0.5rem",
+    borderRadius: 999,
+    fontSize: "0.75rem",
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+    ...(colours[tone] || colours.neutral),
+  };
+}
+
 function normalizePdfPath(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -197,7 +245,7 @@ function VehiclePrestartRegister() {
       let query = supabase
         .from("vehicle_prestart_submissions")
         .select(
-          "id, vehicle_label, vehicle_equipment_id, employee_name, employee_profile_id, odometer, created_at, form_data, pdf_path, employee_signed_off, employee_signed_off_at, signed_off_employee_name, submitted_status, submitted_at"
+          "id, vehicle_label, vehicle_equipment_id, employee_name, employee_profile_id, odometer, created_at, form_data, pdf_path, employee_signed_off, employee_signed_off_at, signed_off_employee_name, submitted_status, submitted_at, notify_manager, manager_alert_status, manager_alert_sent_at, manager_alert_error"
         )
         .order("created_at", { ascending: false });
 
@@ -509,7 +557,7 @@ function VehiclePrestartRegister() {
             >
               <thead>
                 <tr>
-                  {["Vehicle", "Employee", "Status", "Date", "Odometer", "Any Fails?", "Sign-off", "PDF"].map((heading) => (
+                  {["Vehicle", "Employee", "Status", "Date", "Odometer", "Any Fails?", "Manager Alert", "Sign-off", "PDF"].map((heading) => (
                     <th
                       key={heading}
                       style={{
@@ -529,6 +577,7 @@ function VehiclePrestartRegister() {
                   const fails = hasAnyFails(row);
                   const signoff = getSignoff(row);
                   const status = row.submitted_status || row.form_data?.submittedStatus || "submitted";
+                  const alert = managerAlertInfo(row);
                   const ref = pdfReference(row);
                   const pdfUrl = pdfMap[row.id];
                   const opening = openingPdfId === row.id;
@@ -571,6 +620,14 @@ function VehiclePrestartRegister() {
                         >
                           {fails ? "Yes" : "No"}
                         </span>
+                      </td>
+                      <td style={{ borderBottom: "1px solid #f8e0e0", padding: "0.35rem", minWidth: "120px" }}>
+                        <span style={managerAlertPillStyle(alert.tone)}>{alert.label}</span>
+                        {alert.detail ? (
+                          <div style={{ color: "#666", fontSize: "0.72rem", marginTop: 2, maxWidth: 180 }}>
+                            {alert.detail}
+                          </div>
+                        ) : null}
                       </td>
                       <td style={{ borderBottom: "1px solid #f8e0e0", padding: "0.35rem" }}>
                         {signoff.confirmed == null ? (
