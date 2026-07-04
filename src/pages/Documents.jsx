@@ -38,6 +38,69 @@ function prettyType(mime, name) {
   return "FILE";
 }
 
+function openUrlInNewTab(url) {
+  if (!url || typeof window === "undefined") return false;
+
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (opened) {
+    opened.opener = null;
+    return true;
+  }
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  return true;
+}
+
+function openBlankNewTab() {
+  if (typeof window === "undefined") return null;
+  const opened = window.open("about:blank", "_blank", "noopener,noreferrer");
+  if (opened) opened.opener = null;
+  return opened;
+}
+
+function sendTabToUrl(tab, url) {
+  if (!url) return false;
+  if (tab && !tab.closed) {
+    tab.location.href = url;
+    return true;
+  }
+  return openUrlInNewTab(url);
+}
+
+async function downloadSignedUrl(url, fileName = "document") {
+  if (!url) throw new Error("Missing file URL.");
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Download failed.");
+
+  const blob = await res.blob();
+  const blobUrl = window.URL.createObjectURL(blob);
+
+  try {
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = fileName || "document";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    window.URL.revokeObjectURL(blobUrl);
+  }
+}
+
+function formatDocumentDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString();
+}
+
 function escapePostgrestPattern(value) {
   return value.replace(/[%_]/g, (match) => "\\" + match);
 }
@@ -96,6 +159,7 @@ const debouncedQuery = useDebounced(query, 250);
   const [openKind, setOpenKind] = useState(""); // "pdf" | "office" | "download"
   const [openFileName, setOpenFileName] = useState("");
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [isSmallScreen, setIsSmallScreen] = useState(false);
 
   // Admin upload modal
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -110,11 +174,29 @@ const debouncedQuery = useDebounced(query, 250);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [versions, setVersions] = useState([]);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Pagination
   const PAGE_SIZE = 50;
   const [offset, setOffset] = useState(0);
   const hasMoreRef = useRef(true);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return undefined;
+
+    const media = window.matchMedia("(max-width: 640px)");
+    const syncSmallScreen = () => setIsSmallScreen(media.matches);
+    syncSmallScreen();
+
+    if (media.addEventListener) {
+      media.addEventListener("change", syncSmallScreen);
+      return () => media.removeEventListener("change", syncSmallScreen);
+    }
+
+    media.addListener(syncSmallScreen);
+    return () => media.removeListener(syncSmallScreen);
+  }, []);
 
   // Load role
   useEffect(() => {
@@ -137,12 +219,31 @@ useEffect(() => {
       setViewerOpen(false);
       setVersionsOpen(false);
       setUploadOpen(false);
+      if (!deleting) setDeleteConfirm(null);
     }
   };
 
   window.addEventListener("keydown", handleKey);
   return () => window.removeEventListener("keydown", handleKey);
-}, []);
+}, [deleting]);
+
+useEffect(() => {
+  if (typeof document === "undefined") return undefined;
+
+  const modalOpen = viewerOpen || versionsOpen || uploadOpen || !!deleteConfirm;
+  if (!modalOpen) return undefined;
+
+  const previousOverflow = document.body.style.overflow;
+  const previousTouchAction = document.body.style.touchAction;
+
+  document.body.style.overflow = "hidden";
+  document.body.style.touchAction = "none";
+
+  return () => {
+    document.body.style.overflow = previousOverflow;
+    document.body.style.touchAction = previousTouchAction;
+  };
+}, [viewerOpen, versionsOpen, uploadOpen, deleteConfirm]);
 
 // ✅ ADD AUTO-HIDE HERE
 useEffect(() => {
@@ -306,10 +407,17 @@ useEffect(() => {
 };
 
   const openDocument = async (docOrVersionContainer) => {
+    let pendingExternalTab = null;
     try {
       const doc = docOrVersionContainer;
       const v = doc?.currentVersion;
       if (!v?.storage_path) return;
+
+      const pdf = isPdf(v.mime_type, v.file_name);
+      const isOffice = !pdf && /(word|excel|spreadsheet|officedocument|msword|ms-excel)/i.test(v.mime_type);
+      const mobileDirectDownload = isSmallScreen && pdf;
+      const mobileExternalOpen = isSmallScreen && isOffice;
+      if (mobileExternalOpen) pendingExternalTab = openBlankNewTab();
 
       const { data, error } = await supabase.storage
         .from("documents")
@@ -319,13 +427,22 @@ useEffect(() => {
       const url = data?.signedUrl || "";
       if (!url) throw new Error("Could not create signed URL.");
 
-      const pdf = isPdf(v.mime_type, v.file_name);
-      const isOffice = !pdf && /(word|excel|spreadsheet|officedocument|msword|ms-excel)/i.test(v.mime_type);
+      if (mobileDirectDownload) {
+        await downloadSignedUrl(url, v.file_name || "document");
+        return;
+      }
+
+      if (mobileExternalOpen) {
+        sendTabToUrl(pendingExternalTab, url);
+        return;
+      }
+
       setOpenUrl(url);
       setOpenFileName(v.file_name || "document");     
       setOpenKind(pdf ? "pdf" : isOffice ? "office" : "download");
       setViewerOpen(true);
     } catch (e) {
+      if (pendingExternalTab && !pendingExternalTab.closed) pendingExternalTab.close();
       console.error("Open document error:", e);
       setError(e?.message || "Could not open document.");
     }
@@ -345,20 +462,7 @@ const downloadCurrentVersion = async (doc) => {
     const url = data?.signedUrl || "";
     if (!url) throw new Error("Could not create signed URL.");
 
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("Download failed.");
-
-    const blob = await res.blob();
-    const blobUrl = window.URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = v.file_name || "document";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    window.URL.revokeObjectURL(blobUrl);
+    await downloadSignedUrl(url, v.file_name || "document");
   } catch (e) {
     console.error("Download current version error:", e);
     setError(e?.message || "Could not download document.");
@@ -568,7 +672,7 @@ await fetchDocuments({ reset: true });
     try {
       const { data, error } = await supabase
         .from("document_versions")
-        .select("id, version_number, file_name, mime_type, size_bytes, storage_path, created_at")
+        .select("id, version_number, file_name, mime_type, size_bytes, storage_path, created_at, uploaded_by")
         .eq("document_id", docId)
         .order("version_number", { ascending: false });
 
@@ -588,28 +692,28 @@ const handleDownloadCurrent = async () => {
     if (!openUrl) return;
 
     // Force a real file download (works for PDF + Office + anything)
-    const res = await fetch(openUrl);
-    if (!res.ok) throw new Error("Download failed.");
-
-    const blob = await res.blob();
-    const blobUrl = window.URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = openFileName || selectedDoc?.currentVersion?.file_name || "document";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    window.URL.revokeObjectURL(blobUrl);
+    await downloadSignedUrl(openUrl, openFileName || selectedDoc?.currentVersion?.file_name || "document");
   } catch (e) {
     console.error("Download error:", e);
     setError(e?.message || "Could not download file.");
   }
 };
 
+const handleOpenDocumentLink = (event) => {
+  if (!isSmallScreen || !openUrl) return;
+  event.preventDefault();
+  handleDownloadCurrent();
+};
+
   const openVersion = async (versionRow) => {
+    let pendingExternalTab = null;
     try {
+      const pdf = isPdf(versionRow.mime_type, versionRow.file_name);
+      const isOffice = !pdf && /(word|excel|spreadsheet|officedocument|msword|ms-excel)/i.test(versionRow.mime_type);
+      const mobileDirectDownload = isSmallScreen && pdf;
+      const mobileExternalOpen = isSmallScreen && isOffice;
+      if (mobileExternalOpen) pendingExternalTab = openBlankNewTab();
+
       const { data, error } = await supabase.storage
         .from("documents")
         .createSignedUrl(versionRow.storage_path, 60 * 10);
@@ -618,26 +722,60 @@ const handleDownloadCurrent = async () => {
       const url = data?.signedUrl || "";
       if (!url) throw new Error("Could not create signed URL.");
 
-      const pdf = isPdf(versionRow.mime_type, versionRow.file_name);
-      const isOffice = !pdf && /(word|excel|spreadsheet|officedocument|msword|ms-excel)/i.test(versionRow.mime_type);
+      if (mobileDirectDownload) {
+        await downloadSignedUrl(url, versionRow.file_name || "document");
+        return;
+      }
+
+      if (mobileExternalOpen) {
+        sendTabToUrl(pendingExternalTab, url);
+        return;
+      }
+
       setOpenUrl(url);
       setOpenFileName(versionRow.file_name || "document");
       setOpenKind(pdf ? "pdf" : isOffice ? "office" : "download");
       setViewerOpen(true);
     } catch (e) {
+      if (pendingExternalTab && !pendingExternalTab.closed) pendingExternalTab.close();
       console.error("Open version error:", e);
       setError(e?.message || "Could not open version.");
     }
   };
 
-  
-const deleteVersion = async (versionRow) => {
-  if (!isAdmin) return;
+  const downloadVersion = async (versionRow) => {
+    try {
+      if (!versionRow?.storage_path) return;
 
-  const ok = window.confirm(
-    `Delete version v${versionRow.version_number}? This cannot be undone.`
-  );
-  if (!ok) return;
+      const { data, error } = await supabase.storage
+        .from("documents")
+        .createSignedUrl(versionRow.storage_path, 60 * 10);
+
+      if (error) throw error;
+      const url = data?.signedUrl || "";
+      if (!url) throw new Error("Could not create signed URL.");
+
+      await downloadSignedUrl(url, versionRow.file_name || "document");
+    } catch (e) {
+      console.error("Download version error:", e);
+      setError(e?.message || "Could not download version.");
+    }
+  };
+
+  const requestDeleteDocument = (doc) => {
+    if (!isAdmin || !doc?.id) return;
+    setDeleteConfirm({ type: "document", item: doc });
+  };
+
+  const requestDeleteVersion = (versionRow) => {
+    if (!isAdmin || !versionRow?.id) return;
+    setDeleteConfirm({ type: "version", item: versionRow });
+  };
+
+  
+const performDeleteVersion = async (versionRow) => {
+  if (!isAdmin) return;
+  const docId = selectedDoc?.id;
 
   try {
     if (versionRow.storage_path) {
@@ -650,28 +788,26 @@ const deleteVersion = async (versionRow) => {
       const { data } = await supabase
         .from("document_versions")
         .select("id")
-        .eq("document_id", selectedDoc.id)
+        .eq("document_id", docId)
         .order("version_number", { ascending: false })
         .limit(1);
 
       await supabase
         .from("documents")
         .update({ current_version_id: data?.[0]?.id || null })
-        .eq("id", selectedDoc.id);
+        .eq("id", docId);
     }
 
-    loadVersions(selectedDoc.id);
-    fetchDocuments({ reset: true });
+    if (docId) loadVersions(docId);
+    await fetchDocuments({ reset: true });
   } catch (e) {
+    console.error("Delete version error:", e);
     setError(e.message || "Failed to delete version");
+    throw e;
   }
 };
-const deleteDocument = async (doc) => {
+const performDeleteDocument = async (doc) => {
     if (!isAdmin || !doc?.id) return;
-    const ok = window.confirm(
-      `Delete "${doc.title}" and all versions? This cannot be undone.`
-    );
-    if (!ok) return;
 
     setError("");
     try {
@@ -701,6 +837,23 @@ const deleteDocument = async (doc) => {
     } catch (e) {
       console.error("Delete document error:", e);
       setError(e?.message || "Could not delete document.");
+      throw e;
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm || deleting) return;
+
+    setDeleting(true);
+    try {
+      if (deleteConfirm.type === "version") {
+        await performDeleteVersion(deleteConfirm.item);
+      } else {
+        await performDeleteDocument(deleteConfirm.item);
+      }
+      setDeleteConfirm(null);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -711,6 +864,18 @@ const deleteDocument = async (doc) => {
       isFavourite: favouriteSet.has(d.id),
     }));
   }, [docs, favouriteSet]);
+
+  const deleteConfirmTitle =
+    deleteConfirm?.type === "version"
+      ? `Delete version v${deleteConfirm.item?.version_number}?`
+      : deleteConfirm?.item?.title
+        ? `Delete "${deleteConfirm.item.title}"?`
+        : "Delete document?";
+
+  const deleteConfirmBody =
+    deleteConfirm?.type === "version"
+      ? "This version and its stored file will be permanently removed. If it is the current version, the latest remaining version will become current."
+      : "This document and all of its versions will be permanently removed from the portal.";
 
   return (
     <PageLayout
@@ -959,7 +1124,7 @@ const deleteDocument = async (doc) => {
 
                 <button
   type="button"
-  onClick={() => deleteDocument(selectedDoc)}
+  onClick={() => requestDeleteDocument(selectedDoc)}
   className="btn-pill danger"
 >
                   Delete
@@ -1126,6 +1291,7 @@ maxHeight: "100%",
     href={openUrl}
     target="_blank"
     rel="noreferrer"
+    onClick={handleOpenDocumentLink}
     className="btn-pill secondary documents-open-link"
   >
     Open document
@@ -1153,7 +1319,7 @@ maxHeight: "100%",
         {(openKind === "pdf" || openKind === "office") && (
           <div className="documents-viewer-fallback">
             <span>Preview not fitting your screen?</span>
-            <a href={openUrl} target="_blank" rel="noreferrer" className="btn-pill secondary">
+            <a href={openUrl} target="_blank" rel="noreferrer" onClick={handleOpenDocumentLink} className="btn-pill secondary">
               Open document
             </a>
             <button type="button" onClick={handleDownloadCurrent} className="btn-pill secondary">
@@ -1209,7 +1375,7 @@ maxHeight: "100%",
         <div
           role="dialog"
           aria-modal="true"
-          className="documents-modal-backdrop"
+          className="documents-modal-backdrop documents-versions-backdrop"
           onClick={() => setVersionsOpen(false)}
           style={{
             position: "fixed",
@@ -1237,7 +1403,7 @@ maxHeight: "100%",
             }}
           >
             <div
-              className="documents-modal-header"
+              className="documents-modal-header documents-versions-header"
               style={{
                 padding: "0.6rem 0.75rem",
                 borderBottom: "1px solid rgba(0,0,0,0.1)",
@@ -1247,49 +1413,54 @@ maxHeight: "100%",
                 gap: 10,
               }}
             >
-              <div style={{ fontWeight: 700 }}>Versions</div>
+              <div className="documents-modal-title-block">
+                <div className="documents-modal-title">Versions</div>
+                {selectedDoc?.title && (
+                  <div className="documents-modal-subtitle">{selectedDoc.title}</div>
+                )}
+              </div>
               <button
   type="button"
   onClick={() => setVersionsOpen(false)}
-  className="btn-pill secondary documents-modal-close"
+  className="btn-pill secondary documents-modal-close documents-versions-close"
 >
                 Close
               </button>
             </div>
 
-            <div className="documents-modal-body" style={{ padding: "0.75rem", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+            <div className="documents-modal-body documents-versions-body" style={{ padding: "0.75rem", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
               {versionsLoading ? (
                 <div style={{ color: "#666" }}>Loading…</div>
               ) : versions.length === 0 ? (
                 <div style={{ color: "#666" }}>No versions found.</div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                <div className="documents-version-list" style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                   {versions.map((v) => (
   <div
     key={v.id}
+    className="documents-version-entry"
     style={{
       display: "flex",
       flexDirection: "column",
       gap: "0.35rem",
     }}
   >
-    <button
-      type="button"
-      onClick={() => openVersion(v)}
+    <div
+      className="documents-version-row"
       style={{
         textAlign: "left",
         padding: "0.65rem 0.7rem",
         borderRadius: 12,
         border: "1px solid rgba(0,0,0,0.08)",
         background: "#fff",
-        cursor: "pointer",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-        <div style={{ fontWeight: 700 }}>
+      <div className="documents-version-meta" style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+        <div className="documents-version-label" style={{ fontWeight: 700 }}>
           v{v.version_number} • {prettyType(v.mime_type, v.file_name)}
           {selectedDoc?.currentVersion?.id !== v.id && (
             <span
+              className="documents-version-badge"
               style={{
                 marginLeft: 8,
                 padding: "2px 6px",
@@ -1302,31 +1473,121 @@ maxHeight: "100%",
             </span>
           )}
         </div>
-        <div style={{ color: "#777", fontSize: "0.9rem" }}>
-          {new Date(v.created_at).toLocaleDateString()}
+        <div className="documents-version-date" style={{ color: "#777", fontSize: "0.9rem" }}>
+          {formatDocumentDate(v.created_at)}
         </div>
       </div>
 
-      <div style={{ marginTop: 6, color: "#666", fontSize: "0.92rem" }}>
+      <div className="documents-version-file" style={{ marginTop: 6, color: "#666", fontSize: "0.92rem" }}>
         {v.file_name}
       </div>
-    </button>
 
+      {v.uploaded_by && (
+        <div className="documents-version-uploader">
+          Uploaded by {v.uploaded_by}
+        </div>
+      )}
+
+      <div className="documents-version-actions" style={{ display: "flex", justifyContent: "flex-start" }}>
+        <button
+          type="button"
+          onClick={() => openVersion(v)}
+          className="btn-pill secondary"
+        >
+          Open
+        </button>
+        <button
+          type="button"
+          onClick={() => downloadVersion(v)}
+          className="btn-pill secondary"
+        >
+          Download
+        </button>
    {isAdmin && (
-  <div style={{ display: "flex", justifyContent: "flex-start" }}>
     <button
       type="button"
-      onClick={() => deleteVersion(v)}
+      onClick={() => requestDeleteVersion(v)}
       className="btn-pill danger"
     >
       Delete version
     </button>
-  </div>
 )}
+      </div>
+    </div>
   </div>
 ))}
                 </div>
               )}
+            </div>
+            <div className="documents-versions-footer">
+              <button
+                type="button"
+                onClick={() => setVersionsOpen(false)}
+                className="btn-pill secondary documents-versions-footer-close"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteConfirm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="documents-delete-title"
+          className="documents-modal-backdrop documents-delete-backdrop"
+          onClick={() => {
+            if (!deleting) setDeleteConfirm(null);
+          }}
+        >
+          <div
+            className="documents-modal-card documents-delete-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="documents-modal-header documents-delete-header">
+              <div className="documents-modal-title-block">
+                <div id="documents-delete-title" className="documents-modal-title">
+                  {deleteConfirmTitle}
+                </div>
+                <div className="documents-modal-subtitle">This action cannot be undone.</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteConfirm(null)}
+                disabled={deleting}
+                className="btn-pill secondary documents-modal-close"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="documents-modal-body documents-delete-body">
+              <p>{deleteConfirmBody}</p>
+              {deleteConfirm?.item?.file_name && (
+                <div className="documents-delete-file">{deleteConfirm.item.file_name}</div>
+              )}
+            </div>
+
+            <div className="documents-delete-actions">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirm(null)}
+                disabled={deleting}
+                className="btn-pill secondary"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="btn-pill danger"
+              >
+                {deleting ? "Deleting…" : "Confirm delete"}
+              </button>
             </div>
           </div>
         </div>
@@ -1362,7 +1623,7 @@ maxHeight: "100%",
             }}
           >
             <div
-              className="documents-modal-header"
+              className="documents-modal-header documents-upload-header"
               style={{
                 padding: "0.6rem 0.75rem",
                 borderBottom: "1px solid rgba(0,0,0,0.1)",
@@ -1372,8 +1633,13 @@ maxHeight: "100%",
                 gap: 10,
               }}
             >
-              <div style={{ fontWeight: 700 }}>
-                {uploadMode === "new" ? "Add document" : "Upload new version"}
+              <div className="documents-modal-title-block">
+                <div className="documents-modal-title">
+                  {uploadMode === "new" ? "Add document" : "Add Version"}
+                </div>
+                {uploadMode === "newversion" && selectedDoc?.title && (
+                  <div className="documents-modal-subtitle">{selectedDoc.title}</div>
+                )}
               </div>
               <button
   type="button"
@@ -1385,42 +1651,64 @@ maxHeight: "100%",
             </div>
 
             <div className="documents-modal-body documents-upload-body" style={{ padding: "0.75rem", display: "grid", gap: "0.55rem" }}>
-              <input
-                className="maps-search-input"
-                type="text"
-                placeholder="Document title"
-                value={uploadTitle}
-                disabled={uploadMode === "newversion"} // keep stable on versions
-                onChange={(e) => setUploadTitle(e.target.value)}
-              />
+              <label className="documents-form-field">
+                <span>Document title</span>
+                <input
+                  className="maps-search-input"
+                  type="text"
+                  placeholder="Document title"
+                  value={uploadTitle}
+                  disabled={uploadMode === "newversion"} // keep stable on versions
+                  onChange={(e) => setUploadTitle(e.target.value)}
+                />
+              </label>
 
-              <select
-                className="maps-search-input"
-                value={uploadCategory}
-                onChange={(e) => setUploadCategory(e.target.value)}
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
+              <label className="documents-form-field">
+                <span>Category</span>
+                <select
+                  className="maps-search-input"
+                  value={uploadCategory}
+                  onChange={(e) => setUploadCategory(e.target.value)}
+                >
+                  {CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-              <input
-                className="maps-search-input"
-                type="text"
-                placeholder="Description (optional)"
-                value={uploadDesc}
-                onChange={(e) => setUploadDesc(e.target.value)}
-              />
+              <label className="documents-form-field">
+                <span>Description</span>
+                <input
+                  className="maps-search-input"
+                  type="text"
+                  placeholder="Description (optional)"
+                  value={uploadDesc}
+                  onChange={(e) => setUploadDesc(e.target.value)}
+                />
+              </label>
 
-              <input
-                type="file"
-                accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-              />
+              <label className="documents-form-field">
+                <span>File</span>
+                <input
+                  className="documents-file-input"
+                  type="file"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                />
+              </label>
+            </div>
 
-             <div style={{ display: "flex", justifyContent: "flex-start" }}>
+             <div className="documents-upload-actions" style={{ display: "flex", justifyContent: "flex-start" }}>
+  <button
+    type="button"
+    onClick={() => setUploadOpen(false)}
+    disabled={uploading}
+    className="btn-pill secondary"
+  >
+    Cancel
+  </button>
   <button
     type="button"
     onClick={uploadDocument}
@@ -1430,7 +1718,6 @@ maxHeight: "100%",
     {uploading ? "Uploading…" : "Upload"}
   </button>
 </div>
-            </div>
           </div>
         </div>
       )}
