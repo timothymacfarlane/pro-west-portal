@@ -5492,3 +5492,193 @@ body,
     justify-content: center;
   }
 }
+
+/* ============================= */
+/* Documents                      */
+/* ============================= */
+
+.documents-modal-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 9999 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right)) max(0.75rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left)) !important;
+  background: rgba(0, 0, 0, 0.45) !important;
+}
+
+.documents-modal-card {
+  width: min(96vw, 780px) !important;
+  max-height: min(86dvh, 760px) !important;
+  border: 1px solid var(--pw-border-soft) !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.24) !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.documents-modal-header {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 3 !important;
+  flex-shrink: 0 !important;
+  min-height: 52px !important;
+  background: #fff !important;
+}
+
+.documents-modal-close {
+  flex: 0 0 auto !important;
+  min-height: 36px !important;
+}
+
+.documents-modal-body {
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+
+.documents-viewer-backdrop {
+  align-items: stretch !important;
+}
+
+.documents-viewer-card {
+  width: min(100vw - 1rem, 1080px) !important;
+  height: calc(100dvh - 1.5rem) !important;
+  max-height: calc(100dvh - 1.5rem) !important;
+}
+
+.documents-viewer-header {
+  gap: 0.5rem !important;
+}
+
+.documents-viewer-title {
+  min-width: 0 !important;
+  flex: 1 1 260px !important;
+  color: var(--pw-primary-dark);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.documents-viewer-actions {
+  flex: 0 0 auto !important;
+  flex-wrap: wrap !important;
+  justify-content: flex-end !important;
+}
+
+.documents-viewer-body {
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+  background: #f6f7f9;
+}
+
+.documents-viewer-frame {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  min-height: 560px !important;
+  background: #fff;
+}
+
+.documents-viewer-fallback {
+  display: none;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--pw-border-soft);
+  background: #fff;
+  color: #555;
+  font-size: 0.85rem;
+}
+
+.documents-open-link {
+  text-decoration: none;
+}
+
+.documents-upload-card {
+  width: min(96vw, 720px) !important;
+}
+
+.documents-upload-body .maps-search-input {
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .documents-modal-backdrop {
+    align-items: stretch !important;
+    padding: max(0.5rem, env(safe-area-inset-top)) max(0.5rem, env(safe-area-inset-right)) max(0.5rem, env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left)) !important;
+  }
+
+  .documents-modal-card,
+  .documents-upload-card,
+  .documents-versions-card {
+    width: calc(100vw - 1rem) !important;
+    max-height: calc(100dvh - 1rem) !important;
+  }
+
+  .documents-viewer-card {
+    height: calc(100dvh - 1rem) !important;
+    max-height: calc(100dvh - 1rem) !important;
+  }
+
+  .documents-modal-header,
+  .documents-viewer-header {
+    align-items: flex-start !important;
+    padding: 0.55rem 0.6rem !important;
+  }
+
+  .documents-viewer-title {
+    flex-basis: 100% !important;
+    white-space: normal;
+    line-height: 1.25;
+    font-size: 0.92rem;
+  }
+
+  .documents-viewer-actions {
+    justify-content: flex-start !important;
+  }
+
+  .documents-modal-close {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+  }
+
+  .documents-viewer-actions .btn-pill,
+  .documents-viewer-fallback .btn-pill {
+    font-size: 0.75rem;
+    padding: 0.3rem 0.55rem;
+  }
+
+  .documents-viewer-fallback {
+    display: flex;
+  }
+
+  .documents-viewer-frame {
+    min-height: 68dvh !important;
+  }
+
+  .documents-office-frame {
+    min-height: 54dvh !important;
+  }
+
+  .documents-modal-body,
+  .documents-upload-body {
+    padding: 0.65rem !important;
+  }
+
+  .documents-upload-body .maps-search-input,
+  .documents-upload-body input[type="file"] {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .documents-modal-header {
+    padding-right: 5rem !important;
+  }
+}

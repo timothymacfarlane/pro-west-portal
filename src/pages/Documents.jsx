@@ -38,6 +38,10 @@ function prettyType(mime, name) {
   return "FILE";
 }
 
+function escapePostgrestPattern(value) {
+  return value.replace(/[%_]/g, (match) => "\\" + match);
+}
+
 function useDebounced(value, delayMs = 250) {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -137,23 +141,6 @@ useEffect(() => {
   };
 
   window.addEventListener("keydown", handleKey);
-
-  return () => {
-    window.removeEventListener("keydown", handleKey);
-  };
-}, []);
-
-// ESC key close
-useEffect(() => {
-  const handleKey = (e) => {
-    if (e.key === "Escape") {
-      setViewerOpen(false);
-      setVersionsOpen(false);
-      setUploadOpen(false);
-    }
-  };
-
-  window.addEventListener("keydown", handleKey);
   return () => window.removeEventListener("keydown", handleKey);
 }, []);
 
@@ -218,10 +205,10 @@ useEffect(() => {
         .order("title", { ascending: true })
         .range(currentOffset, currentOffset + PAGE_SIZE - 1);
 
-      const titleQ = normalizeSpace(debouncedQuery);
-      if (titleQ) {
-        // Fast contains search (works well with trigram index)
-        q = q.ilike("title", `%${titleQ}%`);
+      const searchText = normalizeSpace(debouncedQuery);
+      if (searchText) {
+        const pattern = `%${escapePostgrestPattern(searchText)}%`;
+        q = q.or(`title.ilike.${pattern},description.ilike.${pattern}`);
       }
 
       if (category !== "All") {
@@ -748,13 +735,13 @@ const deleteDocument = async (doc) => {
     </h3>
 
     <p className="card-subtitle" style={{ marginTop: "0.4rem" }}>
-      Start typing a title. Empty search shows all documents.
+      Start typing a title or description. Empty search shows all documents.
     </p>
 
     <div style={{ marginTop: "0.4rem" }}>
       <input
         type="text"
-        aria-label="Search documents by title"
+        aria-label="Search documents by title or description"
         inputMode="search"
         className="maps-search-input"
         value={query}
@@ -762,7 +749,7 @@ const deleteDocument = async (doc) => {
           setQuery(e.target.value);
           setShowSuggestions(true);
         }}
-        placeholder="Search by document title..."
+        placeholder="Search by title or description..."
       />
     </div>
   </div>
@@ -1078,6 +1065,8 @@ const deleteDocument = async (doc) => {
   <div
     role="dialog"
     aria-modal="true"
+    className="documents-modal-backdrop documents-viewer-backdrop"
+    onClick={() => setViewerOpen(false)}
    style={{
   position: "fixed",
   inset: 0,
@@ -1090,6 +1079,7 @@ const deleteDocument = async (doc) => {
 }}
   >
     <div
+      className="documents-modal-card documents-viewer-card"
       onClick={(e) => e.stopPropagation()}
      style={{
   width: "min(980px, 100vw)",
@@ -1104,6 +1094,7 @@ maxHeight: "100%",
 }}
     >
       <div
+  className="documents-modal-header documents-viewer-header"
   style={{
   padding: "0.6rem 0.75rem",
   borderBottom: "1px solid rgba(0,0,0,0.1)",
@@ -1119,11 +1110,11 @@ maxHeight: "100%",
   zIndex: 2,
 }}
       >
-        <div style={{ fontWeight: 700 }}>
-          {selectedDoc?.title || "Document"}
+        <div className="documents-viewer-title" style={{ fontWeight: 700 }}>
+          {selectedDoc?.title || openFileName || "Document"}
         </div>
 
-<div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+<div className="documents-viewer-actions" style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
  <button
   type="button"
   onClick={handleDownloadCurrent}
@@ -1131,16 +1122,26 @@ maxHeight: "100%",
 >
     Download
   </button>
+  <a
+    href={openUrl}
+    target="_blank"
+    rel="noreferrer"
+    className="btn-pill secondary documents-open-link"
+  >
+    Open document
+  </a>
         </div>
         <button
+  type="button"
   onClick={() => setViewerOpen(false)}
-  className="btn-pill secondary"
+  className="btn-pill secondary documents-modal-close"
 >
           Close
         </button>
       </div>
 
       <div
+  className="documents-viewer-body"
   style={{
     flex: 1,
     minHeight: 0,
@@ -1149,9 +1150,22 @@ maxHeight: "100%",
     paddingBottom: "env(safe-area-inset-bottom)",
   }}
 >
+        {(openKind === "pdf" || openKind === "office") && (
+          <div className="documents-viewer-fallback">
+            <span>Preview not fitting your screen?</span>
+            <a href={openUrl} target="_blank" rel="noreferrer" className="btn-pill secondary">
+              Open document
+            </a>
+            <button type="button" onClick={handleDownloadCurrent} className="btn-pill secondary">
+              Download
+            </button>
+          </div>
+        )}
+
         {openKind === "pdf" && (
           <iframe
             title="PDF viewer"
+            className="documents-viewer-frame documents-pdf-frame"
             src={openUrl}
            style={{
   width: "100%",
@@ -1166,6 +1180,7 @@ maxHeight: "100%",
         {openKind === "office" && (
           <iframe
             title="Office viewer"
+            className="documents-viewer-frame documents-office-frame"
             src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(openUrl)}`}
            style={{
   width: "100%",
@@ -1194,6 +1209,8 @@ maxHeight: "100%",
         <div
           role="dialog"
           aria-modal="true"
+          className="documents-modal-backdrop"
+          onClick={() => setVersionsOpen(false)}
           style={{
             position: "fixed",
             inset: 0,
@@ -1206,6 +1223,7 @@ maxHeight: "100%",
           }}
         >
           <div
+            className="documents-modal-card documents-versions-card"
             onClick={(e) => e.stopPropagation()}
             style={{
               width: "min(780px, 96vw)",
@@ -1219,6 +1237,7 @@ maxHeight: "100%",
             }}
           >
             <div
+              className="documents-modal-header"
               style={{
                 padding: "0.6rem 0.75rem",
                 borderBottom: "1px solid rgba(0,0,0,0.1)",
@@ -1232,13 +1251,13 @@ maxHeight: "100%",
               <button
   type="button"
   onClick={() => setVersionsOpen(false)}
-  className="btn-pill secondary"
+  className="btn-pill secondary documents-modal-close"
 >
                 Close
               </button>
             </div>
 
-            <div style={{ padding: "0.75rem", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+            <div className="documents-modal-body" style={{ padding: "0.75rem", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
               {versionsLoading ? (
                 <div style={{ color: "#666" }}>Loading…</div>
               ) : versions.length === 0 ? (
@@ -1318,6 +1337,8 @@ maxHeight: "100%",
         <div
           role="dialog"
           aria-modal="true"
+          className="documents-modal-backdrop"
+          onClick={() => setUploadOpen(false)}
           style={{
             position: "fixed",
             inset: 0,
@@ -1330,6 +1351,7 @@ maxHeight: "100%",
           }}
         >
           <div
+            className="documents-modal-card documents-upload-card"
             onClick={(e) => e.stopPropagation()}
             style={{
               width: "min(720px, 96vw)",
@@ -1340,6 +1362,7 @@ maxHeight: "100%",
             }}
           >
             <div
+              className="documents-modal-header"
               style={{
                 padding: "0.6rem 0.75rem",
                 borderBottom: "1px solid rgba(0,0,0,0.1)",
@@ -1355,13 +1378,13 @@ maxHeight: "100%",
               <button
   type="button"
   onClick={() => setUploadOpen(false)}
-  className="btn-pill secondary"
+  className="btn-pill secondary documents-modal-close"
 >
                 Close
               </button>
             </div>
 
-            <div style={{ padding: "0.75rem", display: "grid", gap: "0.55rem" }}>
+            <div className="documents-modal-body documents-upload-body" style={{ padding: "0.75rem", display: "grid", gap: "0.55rem" }}>
               <input
                 className="maps-search-input"
                 type="text"
