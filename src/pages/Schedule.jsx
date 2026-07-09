@@ -98,6 +98,7 @@ function Schedule() {
 
   const [selectedCell, setSelectedCell] = useState(null);
   const [isFlipped, setIsFlipped] = useState(false);
+  const isScheduleReadOnly = !isAdmin;
 
   const [weatherByDate, setWeatherByDate] = useState({});
   const [weatherLoading, setWeatherLoading] = useState(false);
@@ -177,71 +178,34 @@ const handlePrint = () => {
       };
     }
 
-    const { data: links, error: linksError } = await supabase
-      .from("schedule_job_ref_links")
-      .select("*")
-      .in("schedule_assignment_id", assignmentIds);
-
-    if (linksError) throw linksError;
-
-    const linksByAssignment = {};
-    for (const link of links || []) {
-      const key = String(link.schedule_assignment_id);
-      if (!linksByAssignment[key]) linksByAssignment[key] = [];
-      linksByAssignment[key].push(link);
-    }
-
-    const planningEntryIds = [
-      ...new Set((links || []).map((link) => link.job_planning_entry_id).filter((id) => id != null)),
-    ];
-
-    let planningEntries = [];
-    if (planningEntryIds.length > 0) {
-      const { data, error } = await supabase
-        .from("job_planning_entries")
-        .select("id, job_number, suburb")
-        .in("id", planningEntryIds);
-
-      if (error) throw error;
-      planningEntries = data || [];
-    }
-
-    const entryById = new Map(planningEntries.map((entry) => [String(entry.id), entry]));
-    const jobNumbers = [
-      ...new Set(
-        planningEntries
-          .map((entry) => String(entry.job_number || "").trim())
-          .filter((jobNumber) => /^\d+$/.test(jobNumber))
-          .map((jobNumber) => Number(jobNumber))
-      ),
-    ];
-
-    let jobsMeta = [];
-    if (jobNumbers.length > 0) {
-      const { data, error } = await supabase
-        .from("jobs")
-        .select("job_number, job_type_legacy, suburb")
-        .in("job_number", jobNumbers);
-
-      if (error) throw error;
-      jobsMeta = data || [];
-    }
-
-    const metaByJobNumber = new Map(
-      jobsMeta.map((job) => [String(job.job_number).trim(), job])
+    const { data: displayRows, error: displayError } = await supabase.rpc(
+      "get_schedule_linked_job_display",
+      { p_assignment_ids: assignmentIds }
     );
 
+    if (displayError) throw displayError;
+
+    const linksByAssignment = {};
     const detailsByAssignment = {};
-    for (const link of links || []) {
-      const entry = entryById.get(String(link.job_planning_entry_id));
-      const meta = metaByJobNumber.get(String(entry?.job_number || link.job_ref).trim());
-      const key = String(link.schedule_assignment_id);
+
+    for (const row of displayRows || []) {
+      const key = String(row.schedule_assignment_id);
+      const link = {
+        id: row.id,
+        schedule_assignment_id: row.schedule_assignment_id,
+        job_planning_entry_id: row.job_planning_entry_id,
+        job_ref: row.job_ref,
+      };
+
+      if (!linksByAssignment[key]) linksByAssignment[key] = [];
+      linksByAssignment[key].push(link);
+
       if (!detailsByAssignment[key]) detailsByAssignment[key] = [];
       detailsByAssignment[key].push({
-        job_ref: link.job_ref,
-        job_planning_entry_id: link.job_planning_entry_id,
-        category: meta?.job_type_legacy || "",
-        suburb: entry?.suburb || meta?.suburb || "",
+        job_ref: row.job_ref,
+        job_planning_entry_id: row.job_planning_entry_id,
+        category: row.category || "",
+        suburb: row.suburb || "",
       });
     }
 
@@ -266,29 +230,37 @@ const handlePrint = () => {
         const from = formatISO(weekDays[0]);
         const to = formatISO(weekDays[6]);
 
+        const assignmentQuery = supabase
+          .from("schedule_assignments")
+          .select("*")
+          .gte("date", from)
+          .lte("date", to);
+
+        const planningQuery = isAdmin
+          ? supabase
+              .from("job_planning_entries")
+              .select("*")
+              .gte("date", from)
+              .lte("date", to)
+              .not("assigned_to", "is", null)
+          : null;
+
         const [planningResult, assignmentResult] = await Promise.all([
-          supabase
-            .from("job_planning_entries")
-            .select("*")
-            .gte("date", from)
-            .lte("date", to)
-            .not("assigned_to", "is", null),
-          supabase
-            .from("schedule_assignments")
-            .select("*")
-            .gte("date", from)
-            .lte("date", to),
+          planningQuery || Promise.resolve({ data: [], error: null }),
+          assignmentQuery,
         ]);
 
         if (planningResult.error) throw planningResult.error;
         if (assignmentResult.error) throw assignmentResult.error;
 
-        const assignmentRows = await materializePlanningEntriesForSchedule(
-          supabase,
-          planningResult.data || [],
-          people,
-          assignmentResult.data || []
-        );
+        const assignmentRows = isAdmin
+          ? await materializePlanningEntriesForSchedule(
+              supabase,
+              planningResult.data || [],
+              people,
+              assignmentResult.data || []
+            )
+          : assignmentResult.data || [];
 
         const { linksByAssignment, detailsByAssignment } = await loadScheduleLinks(assignmentRows);
         if (cancelled) return;
@@ -412,7 +384,6 @@ const handlePrint = () => {
   };
 
   const onCellClick = (dateISO, personId) => {
-    if (!isAdmin) return;
     setSelectedCell({ dateISO, personId });
   };
 
@@ -908,7 +879,7 @@ const handleJobKeyDown = (e) => {
     <PageLayout
       icon="📅"
       title="Schedule"
-      subtitle={isAdmin ? "Weekly Schedule – click a cell to view or edit" : "Weekly Schedule"}
+      subtitle={isAdmin ? "Weekly Schedule – click a cell to view or edit" : "Weekly Schedule – click a cell to view"}
     >
       <div className="card schedule-card">
         <div className="schedule-header">
@@ -1028,7 +999,7 @@ const handleJobKeyDown = (e) => {
                     style={{
                       backgroundColor: cell.bg,
                       border: `1px solid ${cell.border || PALETTE.GRID_LINE}`,
-                      cursor: isAdmin ? "pointer" : "default",
+                      cursor: "pointer",
                     }}
                     onClick={() => onCellClick(cell.dateISO, p.id)}
                     title={tooltipText}
@@ -1103,7 +1074,7 @@ const handleJobKeyDown = (e) => {
                   style={{
                     backgroundColor: cell.bg,
                     border: `1px solid ${cell.border || PALETTE.GRID_LINE}`,
-                    cursor: isAdmin ? "pointer" : "default",
+                    cursor: "pointer",
                   }}
                   onClick={() => onCellClick(cell.dateISO, p.id)}
                   title={tooltipText}
@@ -1152,9 +1123,9 @@ const handleJobKeyDown = (e) => {
         </p>
       </div>
 
-      {isAdmin && selectedCell && (
+      {selectedCell && (
         <div className="card schedule-editor-card">
-          <h3 className="card-title">Edit assignment</h3>
+          <h3 className="card-title">{isScheduleReadOnly ? "View Assignment" : "Edit assignment"}</h3>
           <p className="card-subtitle">
             {sortedPeople.find((p) => p.id === selectedCell.personId)?.name || "Staff"} –{" "}
             {new Date(selectedCell.dateISO).toLocaleDateString("en-AU", {
@@ -1168,7 +1139,12 @@ const handleJobKeyDown = (e) => {
           <div className="schedule-editor-grid">
             <div className="schedule-editor-row">
               <label className="schedule-editor-label">Status</label>
-              <select className="maps-search-input" value={editStatus} onChange={(e) => setEditStatus(e.target.value)}>
+              <select
+                className="maps-search-input"
+                value={editStatus}
+                onChange={(e) => setEditStatus(e.target.value)}
+                disabled={isScheduleReadOnly || saving}
+              >
                 {STATUSES.map((st) => (
                   <option key={st} value={st}>
                     {st}
@@ -1185,6 +1161,7 @@ const handleJobKeyDown = (e) => {
                 value={editRegion}
                 onChange={(e) => setEditRegion(e.target.value)}
                 placeholder="e.g. North Run or Suburbs"
+                disabled={isScheduleReadOnly || saving}
               />
             </div>
 
@@ -1201,31 +1178,36 @@ const handleJobKeyDown = (e) => {
     className="schedule-job-chip"
   >
     {jn}
-    <button
-      type="button"
-      className="schedule-job-chip-remove"
-      onClick={() => removeJobNumber(jn)}
-      aria-label={`Remove job ${jn}`}
-    >
-      ×
-    </button>
+    {!isScheduleReadOnly && (
+      <button
+        type="button"
+        className="schedule-job-chip-remove"
+        onClick={() => removeJobNumber(jn)}
+        aria-label={`Remove job ${jn}`}
+      >
+        ×
+      </button>
+    )}
   </span>
 ))}
       </div>
     )}
 
     {/* Type to search */}
-    <input
-      className="maps-search-input"
-      type="text"
-      value={jobQuery}
-      onChange={(e) => setJobQuery(e.target.value)}
-      onKeyDown={handleJobKeyDown}
-      placeholder="Type job number (exact)…"
-    />
+    {!isScheduleReadOnly && (
+      <input
+        className="maps-search-input"
+        type="text"
+        value={jobQuery}
+        onChange={(e) => setJobQuery(e.target.value)}
+        onKeyDown={handleJobKeyDown}
+        placeholder="Type job number (exact)…"
+        disabled={saving}
+      />
+    )}
 
 {/* Dropdown suggestions */}
-{(jobLoading || jobSuggestions.length > 0) && (
+{!isScheduleReadOnly && (jobLoading || jobSuggestions.length > 0) && (
   <div
     style={{
       position: "absolute",
@@ -1289,17 +1271,22 @@ const handleJobKeyDown = (e) => {
                 value={editNotes}
                 onChange={(e) => setEditNotes(e.target.value)}
                 placeholder="Additional notes (optional)"
+                disabled={isScheduleReadOnly || saving}
               />
             </div>
           </div>
 
           <div style={{ marginTop: "0.6rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            <button type="button" className="btn-pill primary" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving…" : "Save"}
-            </button>
-            <button type="button" className="btn-pill" onClick={handleClear} disabled={saving}>
-              Clear
-            </button>
+            {!isScheduleReadOnly && (
+              <>
+                <button type="button" className="btn-pill primary" onClick={handleSave} disabled={saving}>
+                  {saving ? "Saving…" : "Save"}
+                </button>
+                <button type="button" className="btn-pill" onClick={handleClear} disabled={saving}>
+                  Clear
+                </button>
+              </>
+            )}
             <button type="button" className="btn-pill" onClick={() => setSelectedCell(null)} disabled={saving}>
               Close
             </button>
