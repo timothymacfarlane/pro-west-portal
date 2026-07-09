@@ -6,6 +6,11 @@ import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { cleanDisplayAddress } from "../lib/displayFormatters.js";
 import { getJobAddressWarning } from "../lib/jobAddress.js";
+import { loadSchedulePeople } from "../lib/schedulePeople.js";
+import {
+  syncPlanningEntryToSchedule,
+  unlinkPlanningEntryFromSchedule,
+} from "../lib/jobPlanningScheduleSync.js";
 
 // ---------- Date helpers ----------
 function getMonday(date) {
@@ -223,6 +228,31 @@ const NOTES_JOB_OPTION = {
   isNotesOnly: true,
 };
 
+const normalizeAssignedTo = (value) => {
+  const trimmed = String(value || "").trim();
+  return trimmed || null;
+};
+
+const NULL_ASSIGNED_TO_VALUES = new Set([
+  "select employee...",
+  "select employee…",
+  "null",
+  "undefined",
+]);
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const resolveAssignedEmployeeName = (assignedTo, employeeNameById) => {
+  const value = String(assignedTo || "").trim();
+  if (!value || NULL_ASSIGNED_TO_VALUES.has(value.toLowerCase())) return "";
+
+  const name = employeeNameById.get(value);
+  if (name) return name;
+
+  return UUID_PATTERN.test(value) ? "" : value;
+};
+
 function JobPlanning() {
   const navigate = useNavigate();
   const { user, isAdmin } = useAuth();
@@ -258,6 +288,7 @@ const [selectedDate, setSelectedDate] = useState(null);
 const [editItems, setEditItems] = useState([]);
 const [unscheduledItems, setUnscheduledItems] = useState([]);
 const [jobMetaByNumber, setJobMetaByNumber] = useState({});
+const [employeeOptions, setEmployeeOptions] = useState([]);
 const [highlightedJobKey, setHighlightedJobKey] = useState(null);
 const [highlightedPlanningJobKey, setHighlightedPlanningJobKey] = useState(null);
 const [draggedJobKey, setDraggedJobKey] = useState(null);
@@ -291,8 +322,13 @@ const [modalTarget, setModalTarget] = useState(null);
 const [editorModalOpen, setEditorModalOpen] = useState(false);
 const [newJobColour, setNewJobColour] = useState("");
 const [newJobNotes, setNewJobNotes] = useState("");
+const [newJobAssignedTo, setNewJobAssignedTo] = useState("");
 const [selectedJobSuggestion, setSelectedJobSuggestion] = useState(null);
 const calendarDays = useMemo(() => buildCalendarDays(currentMonth), [currentMonth]);
+const employeeNameById = useMemo(
+  () => new Map(employeeOptions.map((employee) => [employee.id, employee.name])),
+  [employeeOptions]
+);
 
   const calendarRows = useMemo(() => {
     return Array.from({ length: 6 }, (_, i) => calendarDays.slice(i * 7, i * 7 + 7));
@@ -302,6 +338,15 @@ const calendarDays = useMemo(() => buildCalendarDays(currentMonth), [currentMont
     month: "long",
     year: "numeric",
   });
+
+  const hasVisibleWeather = useMemo(
+    () =>
+      calendarDays.some((day) => {
+        const wx = weatherByDate[formatISO(day)];
+        return !!String(wx?.line1 || "").trim();
+      }),
+    [calendarDays, weatherByDate]
+  );
 
   const monthValue = formatMonthInput(currentMonth);
   const todayISO = formatISO(new Date());
@@ -612,6 +657,26 @@ const visibleJobNumbers = [
   };
 }, [calendarDays, isAppVisible]);
 
+useEffect(() => {
+  let cancelled = false;
+
+  const loadEmployees = async () => {
+    try {
+      const people = await loadSchedulePeople(supabase);
+      if (!cancelled) setEmployeeOptions(people);
+    } catch (err) {
+      console.error("Error loading schedule-visible employees for job planning:", err);
+      if (!cancelled) setEmployeeOptions([]);
+    }
+  };
+
+  loadEmployees();
+
+  return () => {
+    cancelled = true;
+  };
+}, []);
+
 // ---------- Load weather for visible calendar range ----------
 useEffect(() => {
   let cancelled = false;
@@ -654,6 +719,7 @@ const url =
       const psum = daily.precipitation_sum || [];
 
       const n = Math.min(times.length, tmin.length, tmax.length, codes.length);
+      if (n === 0) throw new Error("No weather forecast data returned");
 
       const map = {};
       for (let i = 0; i < n; i++) {
@@ -887,6 +953,7 @@ const openAddModal = (targetKey) => {
   setJobActiveIdx(-1);
   setNewJobColour("");
   setNewJobNotes("");
+  setNewJobAssignedTo("");
   setSelectedJobSuggestion(null);
 };
 
@@ -897,6 +964,7 @@ const closeAddModal = () => {
   setJobActiveIdx(-1);
   setNewJobColour("");
   setNewJobNotes("");
+  setNewJobAssignedTo("");
   setSelectedJobSuggestion(null);
 };
 
@@ -1084,6 +1152,7 @@ if (isNotesShortcut) {
       .select(`
         id,
         job_number,
+        job_category,
         full_address,
         street_number,
         street_name,
@@ -1146,6 +1215,7 @@ if (isNotesShortcut) {
 const results = (data || []).map((r) => ({
   id: r.id,
   job_number: String(r.job_number),
+  job_category: r.job_category || "",
   full_address: r.full_address || "",
   suburb: r.suburb || "",
   job_type_legacy: r.job_type_legacy || "",
@@ -1183,6 +1253,81 @@ return orderedResults;
   } finally {
     setJobLoading(false);
   }
+};
+
+const mergeJobMeta = (rows) => {
+  const list = (Array.isArray(rows) ? rows : [rows]).filter(Boolean);
+  if (list.length === 0) return;
+
+  setJobMetaByNumber((prev) => {
+    const next = { ...prev };
+
+    for (const row of list) {
+      const key = String(row.job_number || "").trim();
+      if (!key || key.toLowerCase() === "notes") continue;
+
+      next[key] = {
+        ...(next[key] || {}),
+        id: row.id || next[key]?.id,
+        job_category: row.job_category || next[key]?.job_category || "",
+        full_address: row.full_address || row.address || next[key]?.full_address || "",
+        street_number: row.street_number || next[key]?.street_number || "",
+        street_name: row.street_name || next[key]?.street_name || "",
+        suburb: row.suburb || next[key]?.suburb || "",
+        place_id: row.place_id || next[key]?.place_id || "",
+        client_company: row.client_company || next[key]?.client_company || "",
+        client_first_name: row.client_first_name || next[key]?.client_first_name || "",
+        client_surname: row.client_surname || next[key]?.client_surname || "",
+        lot_number: row.lot_number || next[key]?.lot_number || "",
+        plan_number: row.plan_number || next[key]?.plan_number || "",
+        job_type_legacy: row.job_type_legacy || next[key]?.job_type_legacy || "",
+        mga_zone: row.mga_zone ?? next[key]?.mga_zone,
+        mga_easting: row.mga_easting ?? next[key]?.mga_easting,
+        mga_northing: row.mga_northing ?? next[key]?.mga_northing,
+      };
+    }
+
+    return next;
+  });
+};
+
+const ensureJobMetaForRows = async (rows) => {
+  const jobNumbers = [
+    ...new Set(
+      (Array.isArray(rows) ? rows : [rows])
+        .map((row) => String(row?.job_number || "").trim())
+        .filter((jobNumber) => /^\d+$/.test(jobNumber))
+        .map((jobNumber) => Number(jobNumber))
+    ),
+  ];
+
+  if (jobNumbers.length === 0) return;
+
+  const { data, error } = await supabase
+    .from("jobs")
+    .select(`
+      id,
+      job_number,
+      job_category,
+      full_address,
+      street_number,
+      street_name,
+      suburb,
+      place_id,
+      client_company,
+      client_first_name,
+      client_surname,
+      lot_number,
+      plan_number,
+      job_type_legacy,
+      mga_zone,
+      mga_easting,
+      mga_northing
+    `)
+    .in("job_number", jobNumbers);
+
+  if (error) throw error;
+  mergeJobMeta(data || []);
 };
 
 useEffect(() => {
@@ -1276,6 +1421,7 @@ if (!isNotesOnly && targetItems.some((item) => String(item.job_number) === jobNu
     setError("");
 
     const suburb = await resolveSuburbForJob(job);
+    mergeJobMeta(job);
 
     if (targetKey === UNSCHEDULED_KEY) {
     const payload = {
@@ -1283,6 +1429,7 @@ if (!isNotesOnly && targetItems.some((item) => String(item.job_number) === jobNu
   suburb,
   notes: String(newJobNotes || "").trim(),
   colour: newJobColour,
+  assigned_to: normalizeAssignedTo(newJobAssignedTo),
   sort_order: targetItems.length,
   created_by: user?.id || null,
   updated_by: user?.id || null,
@@ -1296,6 +1443,7 @@ if (!isNotesOnly && targetItems.some((item) => String(item.job_number) === jobNu
         .single();
 
       if (error) throw error;
+      await ensureJobMetaForRows(data);
 
       const nextUnscheduled = [data, ...unscheduledItems].map((item, index) => ({
         ...item,
@@ -1321,6 +1469,7 @@ if (!isNotesOnly && targetItems.some((item) => String(item.job_number) === jobNu
   suburb,
   notes: String(newJobNotes || "").trim(),
   colour: newJobColour,
+  assigned_to: normalizeAssignedTo(newJobAssignedTo),
   sort_order: targetItems.length,
   created_by: user?.id || null,
   updated_by: user?.id || null,
@@ -1334,6 +1483,8 @@ if (!isNotesOnly && targetItems.some((item) => String(item.job_number) === jobNu
         .single();
 
       if (error) throw error;
+      await ensureJobMetaForRows(data);
+      await syncPlanningEntryToSchedule(supabase, data, employeeOptions);
 
       const nextDayItems = [data, ...(plansByDate[targetKey] || [])].map((item, index) => ({
         ...item,
@@ -1480,6 +1631,10 @@ const removeEditItem = async (item) => {
     } else {
       const sourceDate = selectedDate;
 
+      if (itemId != null) {
+        await unlinkPlanningEntryFromSchedule(supabase, itemId);
+      }
+
       let deleteQuery = supabase
         .from("job_planning_entries")
         .delete()
@@ -1541,6 +1696,10 @@ const moveItemToUnscheduled = async (item) => {
     setError("");
 
     if (item.id != null) {
+      await unlinkPlanningEntryFromSchedule(supabase, item.id);
+    }
+
+    if (item.id != null) {
       const { error: deleteError } = await supabase
         .from("job_planning_entries")
         .delete()
@@ -1554,6 +1713,7 @@ const moveItemToUnscheduled = async (item) => {
       suburb: String(item.suburb || "").trim(),
       notes: String(item.notes || "").trim(),
       colour: String(item.colour || "").trim(),
+      assigned_to: normalizeAssignedTo(item.assigned_to),
       sort_order: 0,
       created_by: user?.id || null,
       updated_by: user?.id || null,
@@ -1567,6 +1727,7 @@ const moveItemToUnscheduled = async (item) => {
       .single();
 
     if (insertError) throw insertError;
+    await ensureJobMetaForRows(insertedRow);
 
     const nextDayItems = (plansByDate[selectedDate] || [])
       .filter((x) => {
@@ -1652,6 +1813,10 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
       const { error: deleteError } = await deleteQuery;
       if (deleteError) throw deleteError;
     } else {
+      if (sourceItemId != null) {
+        await unlinkPlanningEntryFromSchedule(supabase, sourceItemId);
+      }
+
       let deleteQuery = supabase
         .from("job_planning_entries")
         .delete()
@@ -1680,6 +1845,7 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
       suburb: String(item.suburb || "").trim(),
       notes: String(item.notes || "").trim(),
       colour: String(item.colour || "").trim(),
+      assigned_to: normalizeAssignedTo(item.assigned_to),
       sort_order: currentTargetItems.length,
       created_by: user?.id || null,
       updated_by: user?.id || null,
@@ -1693,6 +1859,8 @@ const moveItemToSelectedDay = async (item, targetDateISO) => {
       .single();
 
     if (insertError) throw insertError;
+    await ensureJobMetaForRows(insertedRow);
+    await syncPlanningEntryToSchedule(supabase, insertedRow, employeeOptions);
 
     // 3) Update local state
     if (sourceKey === UNSCHEDULED_KEY) {
@@ -1797,6 +1965,10 @@ const moveCalendarItemToDay = async (sourceDateISO, item, targetDateISO) => {
     setSaving(true);
     setError("");
 
+    if (sourceItemId != null) {
+      await unlinkPlanningEntryFromSchedule(supabase, sourceItemId);
+    }
+
     let deleteQuery = supabase
       .from("job_planning_entries")
       .delete()
@@ -1823,6 +1995,7 @@ const moveCalendarItemToDay = async (sourceDateISO, item, targetDateISO) => {
       suburb: String(item.suburb || "").trim(),
       notes: String(item.notes || "").trim(),
       colour: String(item.colour || "").trim(),
+      assigned_to: normalizeAssignedTo(item.assigned_to),
       sort_order: currentTargetItems.length,
       created_by: user?.id || null,
       updated_by: user?.id || null,
@@ -1836,6 +2009,8 @@ const moveCalendarItemToDay = async (sourceDateISO, item, targetDateISO) => {
       .single();
 
     if (insertError) throw insertError;
+    await ensureJobMetaForRows(insertedRow);
+    await syncPlanningEntryToSchedule(supabase, insertedRow, employeeOptions);
 
     setPlansByDate((prev) => {
       const next = { ...prev };
@@ -1912,6 +2087,7 @@ const moveUnscheduledItemToDay = async (item, targetDateISO) => {
       suburb: String(item.suburb || "").trim(),
       notes: String(item.notes || "").trim(),
       colour: String(item.colour || "").trim(),
+      assigned_to: normalizeAssignedTo(item.assigned_to),
       sort_order: currentTargetItems.length,
       created_by: user?.id || null,
       updated_by: user?.id || null,
@@ -1925,6 +2101,8 @@ const moveUnscheduledItemToDay = async (item, targetDateISO) => {
       .single();
 
     if (insertError) throw insertError;
+    await ensureJobMetaForRows(insertedRow);
+    await syncPlanningEntryToSchedule(supabase, insertedRow, employeeOptions);
 
  let nextUnscheduledRows = [];
 
@@ -1987,6 +2165,10 @@ const moveCalendarItemToUnscheduled = async (sourceDateISO, item) => {
     setSaving(true);
     setError("");
 
+    if (sourceItemId != null) {
+      await unlinkPlanningEntryFromSchedule(supabase, sourceItemId);
+    }
+
     let deleteQuery = supabase
       .from("job_planning_entries")
       .delete()
@@ -2010,6 +2192,7 @@ const moveCalendarItemToUnscheduled = async (sourceDateISO, item) => {
       suburb: String(item.suburb || "").trim(),
       notes: String(item.notes || "").trim(),
       colour: String(item.colour || "").trim(),
+      assigned_to: normalizeAssignedTo(item.assigned_to),
       sort_order: unscheduledItems.length,
       created_by: user?.id || null,
       updated_by: user?.id || null,
@@ -2023,6 +2206,7 @@ const moveCalendarItemToUnscheduled = async (sourceDateISO, item) => {
       .single();
 
     if (insertError) throw insertError;
+    await ensureJobMetaForRows(insertedRow);
 
     setPlansByDate((prev) => {
       const next = { ...prev };
@@ -2138,6 +2322,7 @@ const persistCalendarOrder = async (bucketKey, rows) => {
           suburb: String(item.suburb || "").trim(),
           notes: String(item.notes || "").trim(),
           colour: String(item.colour || "").trim(),
+          assigned_to: normalizeAssignedTo(item.assigned_to),
           sort_order: index,
           created_by: user?.id || null,
           updated_by: user?.id || null,
@@ -2153,6 +2338,7 @@ const persistCalendarOrder = async (bucketKey, rows) => {
         if (error) throw error;
 
         const savedRows = data || [];
+        await ensureJobMetaForRows(savedRows);
         setUnscheduledItems(savedRows);
 
         if (selectedDate === UNSCHEDULED_KEY) {
@@ -2167,6 +2353,13 @@ const persistCalendarOrder = async (bucketKey, rows) => {
         setUnscheduledItems([]);
       }
     } else {
+      await Promise.all(
+        rows
+          .map((item) => item?.id)
+          .filter((id) => id != null)
+          .map((id) => unlinkPlanningEntryFromSchedule(supabase, id))
+      );
+
       const { error: deleteError } = await supabase
         .from("job_planning_entries")
         .delete()
@@ -2181,6 +2374,7 @@ const persistCalendarOrder = async (bucketKey, rows) => {
           suburb: String(item.suburb || "").trim(),
           notes: String(item.notes || "").trim(),
           colour: String(item.colour || "").trim(),
+          assigned_to: normalizeAssignedTo(item.assigned_to),
           sort_order: index,
           created_by: user?.id || null,
           updated_by: user?.id || null,
@@ -2196,6 +2390,10 @@ const persistCalendarOrder = async (bucketKey, rows) => {
         if (error) throw error;
 
         const savedRows = data || [];
+        await ensureJobMetaForRows(savedRows);
+        await Promise.all(
+          savedRows.map((row) => syncPlanningEntryToSchedule(supabase, row, employeeOptions))
+        );
 
         setPlansByDate((prev) => ({
           ...prev,
@@ -2320,6 +2518,7 @@ const handleSave = async () => {
           suburb: String(item.suburb || "").trim(),
           notes: String(item.notes || "").trim(),
           colour: String(item.colour || "").trim(),
+          assigned_to: normalizeAssignedTo(item.assigned_to),
           sort_order: index,
           created_by: user?.id || null,
           updated_by: user?.id || null,
@@ -2334,11 +2533,20 @@ const handleSave = async () => {
 
         if (error) throw error;
         insertedRows = data || [];
+        await ensureJobMetaForRows(insertedRows);
       }
 
       setUnscheduledItems(insertedRows);
       showToast("Jobs saved.");
     } else {
+      const existingDayItems = plansByDate[selectedDate] || [];
+      await Promise.all(
+        existingDayItems
+          .map((item) => item?.id)
+          .filter((id) => id != null)
+          .map((id) => unlinkPlanningEntryFromSchedule(supabase, id))
+      );
+
       const { error: deleteError } = await supabase
         .from("job_planning_entries")
         .delete()
@@ -2355,6 +2563,7 @@ const handleSave = async () => {
           suburb: String(item.suburb || "").trim(),
           notes: String(item.notes || "").trim(),
           colour: String(item.colour || "").trim(),
+          assigned_to: normalizeAssignedTo(item.assigned_to),
           sort_order: index,
           created_by: user?.id || null,
           updated_by: user?.id || null,
@@ -2369,6 +2578,10 @@ const handleSave = async () => {
 
         if (error) throw error;
         insertedRows = data || [];
+        await ensureJobMetaForRows(insertedRows);
+        await Promise.all(
+          insertedRows.map((row) => syncPlanningEntryToSchedule(supabase, row, employeeOptions))
+        );
       }
 
       setPlansByDate((prev) => {
@@ -2418,6 +2631,14 @@ editorLoadedRef.current = false;
 
       setUnscheduledItems([]);
     } else {
+      const existingDayItems = plansByDate[selectedDate] || [];
+      await Promise.all(
+        existingDayItems
+          .map((item) => item?.id)
+          .filter((id) => id != null)
+          .map((id) => unlinkPlanningEntryFromSchedule(supabase, id))
+      );
+
       const { error } = await supabase
         .from("job_planning_entries")
         .delete()
@@ -2530,7 +2751,7 @@ const confirmCalendarMove = ({ item, fromKey, toKey }) => {
   {weatherLoading && (
     <span style={{ marginLeft: "0.5rem", fontSize: "0.7rem" }}>(weather updating…)</span>
   )}
-  {weatherError && !weatherLoading && (
+  {weatherError && !weatherLoading && !hasVisibleWeather && (
     <span style={{ marginLeft: "0.5rem", fontSize: "0.7rem" }}>(weather unavailable)</span>
   )}
 </div>
@@ -2823,6 +3044,10 @@ void moveCalendarItemToUnscheduled(sourceBucketKey, draggedItem);
         ) : (
           unscheduledItems.map((item, index) => {
             const planningJobKey = makePlanningJobDomKey(UNSCHEDULED_KEY, item, index);
+            const assignedEmployeeName = resolveAssignedEmployeeName(
+              item.assigned_to,
+              employeeNameById
+            );
 
             return (
 <div
@@ -2888,6 +3113,10 @@ onDragOver={(e) => {
   <div className="job-planning-day-job-type">
     {jobMetaByNumber[String(item.job_number || "").trim()].job_type_legacy}
   </div>
+)}
+
+{assignedEmployeeName && (
+  <div className="job-planning-day-job-assigned">{assignedEmployeeName}</div>
 )}
 
 {item.notes && (
@@ -3065,6 +3294,10 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
                         ) : (
                           items.map((item, index) => {
                             const planningJobKey = makePlanningJobDomKey(iso, item, index);
+                            const assignedEmployeeName = resolveAssignedEmployeeName(
+                              item.assigned_to,
+                              employeeNameById
+                            );
 
                             return (
                          <div
@@ -3135,6 +3368,10 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
   <div className="job-planning-day-job-type">
     {jobMetaByNumber[String(item.job_number || "").trim()].job_type_legacy}
   </div>
+)}
+
+{assignedEmployeeName && (
+  <div className="job-planning-day-job-assigned">{assignedEmployeeName}</div>
 )}
 
 {item.notes && (
@@ -3495,6 +3732,24 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
                     </div>
 
                     <div className="schedule-editor-row">
+                      <label className="schedule-editor-label">Assign to</label>
+<select
+  className="maps-search-input"
+  value={item.assigned_to || ""}
+  onChange={(e) =>
+    updateEditItem(item.client_key, "assigned_to", e.target.value)
+  }
+>
+  <option value="">Select employee...</option>
+  {employeeOptions.map((employee) => (
+    <option key={employee.id} value={employee.id}>
+      {employee.name}
+    </option>
+  ))}
+</select>
+                    </div>
+
+                    <div className="schedule-editor-row">
                       <label className="schedule-editor-label">Notes</label>
 <textarea
   className="maps-search-input"
@@ -3697,6 +3952,22 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
 ))}
         </select>
       </div>
+
+<div className="schedule-editor-row" style={{ marginTop: "0.75rem" }}>
+  <label className="schedule-editor-label">Assign to</label>
+  <select
+    className="maps-search-input"
+    value={newJobAssignedTo}
+    onChange={(e) => setNewJobAssignedTo(e.target.value)}
+  >
+    <option value="">Select employee...</option>
+    {employeeOptions.map((employee) => (
+      <option key={employee.id} value={employee.id}>
+        {employee.name}
+      </option>
+    ))}
+  </select>
+</div>
 
 <div className="schedule-editor-row" style={{ marginTop: "0.75rem" }}>
   <label className="schedule-editor-label">Notes</label>

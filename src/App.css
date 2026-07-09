@@ -1550,6 +1550,20 @@
   color: #616161;
 }
 
+.schedule-cell-job-item + .schedule-cell-job-item {
+  margin-top: 0.18rem;
+}
+
+.schedule-cell-job-ref {
+  color: #1a1a1a;
+}
+
+.schedule-cell-job-meta {
+  font-size: 0.64rem;
+  line-height: 1.2;
+  color: #6f7782;
+}
+
 .schedule-footer-note {
   margin-top: 0.4rem;
   font-size: 0.75rem;
@@ -3517,6 +3531,13 @@ body,
   margin-top: 0.12rem;
 }
 
+.job-planning-day-job-assigned {
+  font-size: 0.66rem;
+  line-height: 1.2;
+  color: #777;
+  margin-top: 0.08rem;
+}
+
 .job-planning-day-job-notes {
   font-size: 0.68rem;
   color: #777;
@@ -4057,6 +4078,7 @@ body,
   }
 
   .job-planning-day-job-suburb,
+  .job-planning-day-job-assigned,
   .job-planning-day-job-notes,
   .job-planning-empty-note,
   .job-planning-drag-hint {
@@ -4276,6 +4298,7 @@ body,
 
  .job-planning-day-job-suburb,
 .job-planning-day-job-type,
+.job-planning-day-job-assigned,
 .job-planning-day-job-notes {
   font-size: 7pt !important;
   line-height: 1.2 !important;

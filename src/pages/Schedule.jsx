@@ -4,6 +4,14 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { cleanDisplayAddress } from "../lib/displayFormatters.js";
+import { loadSchedulePeople } from "../lib/schedulePeople.js";
+import {
+  cleanupEmptyScheduleAssignment,
+  joinScheduleJobRefs,
+  materializePlanningEntriesForSchedule,
+  splitScheduleJobRefs,
+  syncPlanningEntryToSchedule,
+} from "../lib/jobPlanningScheduleSync.js";
 
 // --- Statuses & colours ---
 const STATUSES = ["FIELD", "OFFICE", "AWAY", "LEAVE", "COURSE", "HOLD", "NON-WORK"];
@@ -82,6 +90,8 @@ function Schedule() {
   const [currentMonday, setCurrentMonday] = useState(() => getMonday(new Date()));
   const [people, setPeople] = useState([]);
   const [assignments, setAssignments] = useState({});
+  const [scheduleLinksByAssignmentId, setScheduleLinksByAssignmentId] = useState({});
+  const [scheduleLinkedJobsByAssignmentId, setScheduleLinkedJobsByAssignmentId] = useState({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -132,22 +142,8 @@ const handlePrint = () => {
     const loadPeople = async () => {
       setError("");
       try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("id, display_name, email, is_active, show_in_schedule")
-          .eq("is_active", true)
-          .eq("show_in_schedule", true)
-          .order("display_name", { ascending: true });
-
-        if (error) throw error;
+        const normalized = await loadSchedulePeople(supabase);
         if (cancelled) return;
-
-        const normalized = (data || [])
-          .map((p) => ({
-            id: p.id,
-            name: p.display_name || p.email || "Unnamed",
-          }))
-          .filter((p) => p.id);
 
         setPeople(normalized);
       } catch (err) {
@@ -168,16 +164,98 @@ const handlePrint = () => {
 
   const sortedPeople = useMemo(() => {
     if (!people || people.length === 0) return [];
-    const specialName = "Pro West Survey";
-    const normal = people.filter((p) => p.name !== specialName);
-    const special = people.filter((p) => p.name === specialName);
-    return [...normal, ...special];
+    return people;
   }, [people]);
+
+  const loadScheduleLinks = async (assignmentRows) => {
+    const assignmentIds = (assignmentRows || []).map((row) => row.id).filter((id) => id != null);
+
+    if (assignmentIds.length === 0) {
+      return {
+        linksByAssignment: {},
+        detailsByAssignment: {},
+      };
+    }
+
+    const { data: links, error: linksError } = await supabase
+      .from("schedule_job_ref_links")
+      .select("*")
+      .in("schedule_assignment_id", assignmentIds);
+
+    if (linksError) throw linksError;
+
+    const linksByAssignment = {};
+    for (const link of links || []) {
+      const key = String(link.schedule_assignment_id);
+      if (!linksByAssignment[key]) linksByAssignment[key] = [];
+      linksByAssignment[key].push(link);
+    }
+
+    const planningEntryIds = [
+      ...new Set((links || []).map((link) => link.job_planning_entry_id).filter((id) => id != null)),
+    ];
+
+    let planningEntries = [];
+    if (planningEntryIds.length > 0) {
+      const { data, error } = await supabase
+        .from("job_planning_entries")
+        .select("id, job_number, suburb")
+        .in("id", planningEntryIds);
+
+      if (error) throw error;
+      planningEntries = data || [];
+    }
+
+    const entryById = new Map(planningEntries.map((entry) => [String(entry.id), entry]));
+    const jobNumbers = [
+      ...new Set(
+        planningEntries
+          .map((entry) => String(entry.job_number || "").trim())
+          .filter((jobNumber) => /^\d+$/.test(jobNumber))
+          .map((jobNumber) => Number(jobNumber))
+      ),
+    ];
+
+    let jobsMeta = [];
+    if (jobNumbers.length > 0) {
+      const { data, error } = await supabase
+        .from("jobs")
+        .select("job_number, job_type_legacy, suburb")
+        .in("job_number", jobNumbers);
+
+      if (error) throw error;
+      jobsMeta = data || [];
+    }
+
+    const metaByJobNumber = new Map(
+      jobsMeta.map((job) => [String(job.job_number).trim(), job])
+    );
+
+    const detailsByAssignment = {};
+    for (const link of links || []) {
+      const entry = entryById.get(String(link.job_planning_entry_id));
+      const meta = metaByJobNumber.get(String(entry?.job_number || link.job_ref).trim());
+      const key = String(link.schedule_assignment_id);
+      if (!detailsByAssignment[key]) detailsByAssignment[key] = [];
+      detailsByAssignment[key].push({
+        job_ref: link.job_ref,
+        job_planning_entry_id: link.job_planning_entry_id,
+        category: meta?.job_type_legacy || "",
+        suburb: entry?.suburb || meta?.suburb || "",
+      });
+    }
+
+    return {
+      linksByAssignment,
+      detailsByAssignment,
+    };
+  };
 
   // Load assignments whenever the week changes
   useEffect(() => {
     let cancelled = false;
     if (!isAppVisible) return;
+    if (people.length === 0) return;
 
 
     const loadAssignments = async () => {
@@ -188,26 +266,48 @@ const handlePrint = () => {
         const from = formatISO(weekDays[0]);
         const to = formatISO(weekDays[6]);
 
-        const { data, error } = await supabase
-          .from("schedule_assignments")
-          .select("*")
-          .gte("date", from)
-          .lte("date", to);
+        const [planningResult, assignmentResult] = await Promise.all([
+          supabase
+            .from("job_planning_entries")
+            .select("*")
+            .gte("date", from)
+            .lte("date", to)
+            .not("assigned_to", "is", null),
+          supabase
+            .from("schedule_assignments")
+            .select("*")
+            .gte("date", from)
+            .lte("date", to),
+        ]);
 
-        if (error) throw error;
+        if (planningResult.error) throw planningResult.error;
+        if (assignmentResult.error) throw assignmentResult.error;
+
+        const assignmentRows = await materializePlanningEntriesForSchedule(
+          supabase,
+          planningResult.data || [],
+          people,
+          assignmentResult.data || []
+        );
+
+        const { linksByAssignment, detailsByAssignment } = await loadScheduleLinks(assignmentRows);
         if (cancelled) return;
 
         const map = {};
-        for (const row of data || []) {
+        for (const row of assignmentRows || []) {
           const key = `${row.date}|${row.person_id}`;
           if (!map[key]) map[key] = row;
         }
         setAssignments(map);
+        setScheduleLinksByAssignmentId(linksByAssignment);
+        setScheduleLinkedJobsByAssignmentId(detailsByAssignment);
       } catch (err) {
         console.error("Error loading assignments:", err);
         if (!cancelled) {
           setError("Could not load schedule for this week.");
           setAssignments({});
+          setScheduleLinksByAssignmentId({});
+          setScheduleLinkedJobsByAssignmentId({});
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -216,7 +316,7 @@ const handlePrint = () => {
 
     loadAssignments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentMonday, isAppVisible]);
+  }, [currentMonday, isAppVisible, people]);
 
   // Fetch weather for this week
   useEffect(() => {
@@ -324,6 +424,8 @@ const handlePrint = () => {
   const [jobSuggestions, setJobSuggestions] = useState([]);
   const [jobLoading, setJobLoading] = useState(false);
   const [selectedJobs, setSelectedJobs] = useState([]); // array of strings e.g. ["12345","67890"]
+  const [originalSelectedJobs, setOriginalSelectedJobs] = useState([]);
+  const [pendingDeletedPlanningEntryIds, setPendingDeletedPlanningEntryIds] = useState([]);
 
 
   const getCellVisual = (dateInput, personId) => {
@@ -335,12 +437,22 @@ const handlePrint = () => {
     const key = `${dateISO}|${personId}`;
     const a = assignments[key];
     const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+    const linkedJobs = a?.id != null ? scheduleLinkedJobsByAssignmentId[String(a.id)] || [] : [];
+    const linkedJobRefs = linkedJobs.map((job) => String(job.job_ref || "").trim()).filter(Boolean);
+    const storedJobRefs = splitScheduleJobRefs(a?.job_ref);
+    const jobRefs = linkedJobRefs.length > 0 ? linkedJobRefs : storedJobRefs;
+    const hasCurrentLinkedJob = linkedJobRefs.length > 0;
+    const statusValue = String(a?.status || "").trim();
+    const isDefaultFieldStatus = !statusValue || statusValue.toUpperCase() === "FIELD";
+    const hasManualDisplayData = !isDefaultFieldStatus || !!a?.touched;
+    const hasVisibleJobRefs = hasCurrentLinkedJob || (storedJobRefs.length > 0 && hasManualDisplayData);
+    const hasActiveAssignment = !!a && (hasVisibleJobRefs || hasManualDisplayData);
 
     let status;
     let touched = false;
 
-    if (a && a.status) {
-      status = a.status;
+    if (hasActiveAssignment) {
+      status = isDefaultFieldStatus ? "FIELD" : statusValue;
       touched = !!a.touched;
     } else if (isWeekend) {
       status = "NON-WORK";
@@ -352,8 +464,8 @@ const handlePrint = () => {
     let border;
     let statusColor;
 
-    if (status === "FIELD") {
-      if (touched) {
+    if (status === "FIELD" || (a && hasVisibleJobRefs && !status)) {
+      if (touched || (a && hasVisibleJobRefs && !status)) {
         bg = PALETTE.FIELD_TOUCHED_BG;
         border = PALETTE.FIELD_TOUCHED_BORDER;
         statusColor = "#1A1A1A";
@@ -376,16 +488,18 @@ const handlePrint = () => {
       bg,
       border,
       statusColor,
-      region: a?.region || "",
-      job_ref: a?.job_ref || "",
-      notes: a?.notes || "",
+      assignment_id: a?.id ?? null,
+      region: hasVisibleJobRefs ? a?.region || "" : "",
+      job_ref: hasVisibleJobRefs ? joinScheduleJobRefs(jobRefs) : "",
+      linked_jobs: hasCurrentLinkedJob ? linkedJobs : [],
+      notes: hasVisibleJobRefs ? a?.notes || "" : "",
     };
   };
 
   useEffect(() => {
     if (!selectedCell) return;
     const key = `${selectedCell.dateISO}|${selectedCell.personId}`;
-    const current = assignments[key];
+  const current = assignments[key];
 
     if (current) {
       setEditStatus(current.status || "FIELD");
@@ -396,6 +510,8 @@ const handlePrint = () => {
   .map((s) => s.trim())
   .filter(Boolean);
 setSelectedJobs(parts);
+setOriginalSelectedJobs(parts);
+setPendingDeletedPlanningEntryIds([]);
 setJobQuery("");
 setJobSuggestions([]);
       setEditNotes(current.notes || "");
@@ -405,10 +521,100 @@ setJobSuggestions([]);
       setEditJobRef("");
       setEditNotes("");
       setSelectedJobs([]);
+setOriginalSelectedJobs([]);
+setPendingDeletedPlanningEntryIds([]);
 setJobQuery("");
 setJobSuggestions([]);
     }
   }, [selectedCell, assignments]);
+
+  const getSelectedAssignmentLinks = () => {
+    if (!selectedCell) return [];
+    const key = `${selectedCell.dateISO}|${selectedCell.personId}`;
+    const assignment = assignments[key];
+    if (!assignment?.id) return [];
+    return scheduleLinksByAssignmentId[String(assignment.id)] || [];
+  };
+
+  const resolveSuburbForScheduleJob = async (jobRef) => {
+    const ref = String(jobRef || "").trim();
+    if (!/^\d+$/.test(ref)) return "";
+
+    const { data, error } = await supabase
+      .from("jobs")
+      .select("full_address, suburb")
+      .eq("job_number", Number(ref))
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data?.suburb || "";
+  };
+
+  const syncScheduleRefsToJobPlanning = async (assignmentRow, refs) => {
+    const currentLinks = scheduleLinksByAssignmentId[String(assignmentRow.id)] || [];
+    const pendingDeleteIds = new Set(pendingDeletedPlanningEntryIds.map((id) => String(id)));
+    const nextRefs = new Set(refs);
+    const originalRefs = new Set(originalSelectedJobs);
+
+    if (pendingDeletedPlanningEntryIds.length > 0) {
+      const { error } = await supabase
+        .from("job_planning_entries")
+        .delete()
+        .in("id", pendingDeletedPlanningEntryIds);
+      if (error) throw error;
+    }
+
+    for (const link of currentLinks) {
+      if (pendingDeleteIds.has(String(link.job_planning_entry_id))) continue;
+      if (!nextRefs.has(link.job_ref)) continue;
+
+      const { error } = await supabase
+        .from("job_planning_entries")
+        .update({
+          date: selectedCell.dateISO,
+          assigned_to: selectedCell.personId,
+          job_number: link.job_ref,
+          updated_by: user?.id || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", link.job_planning_entry_id);
+
+      if (error) throw error;
+    }
+
+    const linkedRefs = new Set(
+      currentLinks
+        .filter((link) => !pendingDeleteIds.has(String(link.job_planning_entry_id)))
+        .map((link) => link.job_ref)
+    );
+
+    const refsToCreate = refs.filter((ref) => !linkedRefs.has(ref) && !originalRefs.has(ref));
+    for (const ref of refsToCreate) {
+      const suburb = await resolveSuburbForScheduleJob(ref);
+      const { data: inserted, error } = await supabase
+        .from("job_planning_entries")
+        .insert({
+          date: selectedCell.dateISO,
+          job_number: ref,
+          suburb,
+          notes: "",
+          colour: "",
+          assigned_to: selectedCell.personId,
+          sort_order: 999,
+          created_by: user?.id || null,
+          updated_by: user?.id || null,
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      await syncPlanningEntryToSchedule(supabase, inserted, people);
+    }
+
+    return currentLinks.length > 0 && refs.length === 0;
+  };
 
   const handleSave = async () => {
     if (!selectedCell || !isAdmin) return;
@@ -420,11 +626,12 @@ setJobSuggestions([]);
       const existing = assignments[key];
 
       if (existing) {
+        const nextRefs = splitScheduleJobRefs(joinScheduleJobRefs(selectedJobs));
         const updatePayload = {
           status: editStatus || "FIELD",
-          region: editRegion,
-          job_ref: editJobRef,
-          notes: editNotes,
+          region: nextRefs.length > 0 ? editRegion : "",
+          job_ref: joinScheduleJobRefs(nextRefs),
+          notes: nextRefs.length > 0 ? editNotes : "",
           touched: true,
           updated_at: new Date().toISOString(),
         };
@@ -437,15 +644,31 @@ setJobSuggestions([]);
           .single();
 
         if (error) throw error;
-        setAssignments((prev) => ({ ...prev, [key]: data }));
+        const removedLastLinkedRef = await syncScheduleRefsToJobPlanning(data, nextRefs);
+        const removedLastExistingRef = splitScheduleJobRefs(existing.job_ref).length > 0 && nextRefs.length === 0;
+        const cleanedAssignment =
+          removedLastLinkedRef || removedLastExistingRef
+            ? await cleanupEmptyScheduleAssignment(supabase, data)
+            : data;
+        const nextAssignments = { ...assignments };
+        if (cleanedAssignment) {
+          nextAssignments[key] = cleanedAssignment;
+        } else {
+          delete nextAssignments[key];
+        }
+        const { linksByAssignment, detailsByAssignment } = await loadScheduleLinks(Object.values(nextAssignments));
+        setAssignments(nextAssignments);
+        setScheduleLinksByAssignmentId(linksByAssignment);
+        setScheduleLinkedJobsByAssignmentId(detailsByAssignment);
       } else {
+        const nextRefs = splitScheduleJobRefs(joinScheduleJobRefs(selectedJobs));
         const insertPayload = {
           date: selectedCell.dateISO,
           person_id: selectedCell.personId,
           status: editStatus || "FIELD",
-          region: editRegion,
-          job_ref: editJobRef,
-          notes: editNotes,
+          region: nextRefs.length > 0 ? editRegion : "",
+          job_ref: joinScheduleJobRefs(nextRefs),
+          notes: nextRefs.length > 0 ? editNotes : "",
           touched: true,
         };
 
@@ -456,8 +679,15 @@ setJobSuggestions([]);
           .single();
 
         if (error) throw error;
-        setAssignments((prev) => ({ ...prev, [key]: data }));
+        await syncScheduleRefsToJobPlanning(data, splitScheduleJobRefs(data.job_ref));
+        const nextAssignments = { ...assignments, [key]: data };
+        const { linksByAssignment, detailsByAssignment } = await loadScheduleLinks(Object.values(nextAssignments));
+        setAssignments(nextAssignments);
+        setScheduleLinksByAssignmentId(linksByAssignment);
+        setScheduleLinkedJobsByAssignmentId(detailsByAssignment);
       }
+      setPendingDeletedPlanningEntryIds([]);
+      setOriginalSelectedJobs([...selectedJobs]);
     } catch (err) {
       console.error("Error saving assignment:", err);
       const msg = err?.message || err?.details || err?.hint || "Unknown Supabase error";
@@ -526,6 +756,26 @@ const addJobNumber = (jobNumber) => {
 };
 
 const removeJobNumber = (jobNumber) => {
+  const linked = getSelectedAssignmentLinks().filter((link) => link.job_ref === jobNumber);
+  const alreadyPending = new Set(pendingDeletedPlanningEntryIds.map((id) => String(id)));
+  const linksToDelete = linked.filter(
+    (link) => !alreadyPending.has(String(link.job_planning_entry_id))
+  );
+
+  if (linksToDelete.length > 0) {
+    const confirmed = window.confirm(
+      `Removing job ${jobNumber} will also delete the linked Job Planning item${
+        linksToDelete.length === 1 ? "" : "s"
+      }. Continue?`
+    );
+    if (!confirmed) return;
+
+    setPendingDeletedPlanningEntryIds((prev) => [
+      ...prev,
+      ...linksToDelete.map((link) => link.job_planning_entry_id),
+    ]);
+  }
+
   setSelectedJobs((prev) => {
     const next = prev.filter((j) => j !== jobNumber);
     syncEditJobRef(next);
@@ -554,10 +804,32 @@ const handleJobKeyDown = (e) => {
       return;
     }
 
+    const linked = scheduleLinksByAssignmentId[String(existing.id)] || [];
+    if (linked.length > 0) {
+      const confirmed = window.confirm(
+        `Clearing this Schedule assignment will also delete ${linked.length} linked Job Planning item${
+          linked.length === 1 ? "" : "s"
+        }. Continue?`
+      );
+      if (!confirmed) return;
+    }
+
     setSaving(true);
     setError("");
 
     try {
+      if (linked.length > 0) {
+        const { error: deletePlanningError } = await supabase
+          .from("job_planning_entries")
+          .delete()
+          .in(
+            "id",
+            linked.map((link) => link.job_planning_entry_id)
+          );
+
+        if (deletePlanningError) throw deletePlanningError;
+      }
+
       const { error } = await supabase
         .from("schedule_assignments")
         .delete()
@@ -567,7 +839,10 @@ const handleJobKeyDown = (e) => {
 
       const newMap = { ...assignments };
       delete newMap[key];
+      const { linksByAssignment, detailsByAssignment } = await loadScheduleLinks(Object.values(newMap));
       setAssignments(newMap);
+      setScheduleLinksByAssignmentId(linksByAssignment);
+      setScheduleLinkedJobsByAssignmentId(detailsByAssignment);
       setSelectedCell(null);
     } catch (err) {
       console.error("Error clearing assignment:", err);
@@ -596,13 +871,38 @@ const handleJobKeyDown = (e) => {
         month: "short",
         year: "numeric",
       }),
-      `Status: ${cell.status}`,
+      cell.status && `Status: ${cell.status}`,
       cell.region && `Region: ${cell.region}`,
       cell.job_ref && `Job: ${cell.job_ref}`,
       cell.notes && `Notes: ${cell.notes}`,
     ]
       .filter(Boolean)
       .join("\n");
+
+  const renderScheduleJobRefs = (cell) => {
+    const refs = splitScheduleJobRefs(cell.job_ref);
+    if (refs.length === 0) return null;
+
+    const linkedByRef = new Map(
+      (cell.linked_jobs || []).map((job) => [String(job.job_ref || "").trim(), job])
+    );
+
+    return (
+      <div className="schedule-cell-job">
+        {refs.map((ref) => {
+          const linked = linkedByRef.get(ref);
+          const meta = [linked?.category, linked?.suburb].filter(Boolean).join(" · ");
+
+          return (
+            <div key={ref} className="schedule-cell-job-item">
+              <div className="schedule-cell-job-ref">Job: {ref}</div>
+              {meta && <div className="schedule-cell-job-meta">{meta}</div>}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   return (
     <PageLayout
@@ -737,7 +1037,7 @@ const handleJobKeyDown = (e) => {
                       {cell.status}
                     </div>
                     {cell.region && <div className="schedule-cell-region">{cell.region}</div>}
-                    {cell.job_ref && <div className="schedule-cell-job">Job: {cell.job_ref}</div>}
+                    {renderScheduleJobRefs(cell)}
                   </td>
                 );
               })}
@@ -812,7 +1112,7 @@ const handleJobKeyDown = (e) => {
                     {cell.status}
                   </div>
                   {cell.region && <div className="schedule-cell-region">{cell.region}</div>}
-                  {cell.job_ref && <div className="schedule-cell-job">Job: {cell.job_ref}</div>}
+                  {renderScheduleJobRefs(cell)}
                 </td>
               );
             })}

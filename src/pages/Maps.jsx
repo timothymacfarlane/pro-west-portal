@@ -9371,7 +9371,7 @@ return (
 >
             <div className="maps-tabs">
               {renderTabButton("layers", "Layers")}
-              {renderTabButton("jobLayers", "Job Layers")}
+              {renderTabButton("jobLayers", "Search")}
               {renderTabButton("notes", "Notes")}
               {renderTabButton("legend", "Legend")}
             </div>
