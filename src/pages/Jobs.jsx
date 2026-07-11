@@ -5,58 +5,17 @@ import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
 import { supabase } from "../lib/supabaseClient.js";
 import { cleanDisplayAddress } from "../lib/displayFormatters.js";
 import { getJobAddressWarning } from "../lib/jobAddress.js";
+import {
+  JOB_CATEGORY_OPTIONS,
+  PRIORITY_OPTIONS,
+  STATUS_OPTIONS,
+  getPriorityBadgeStyle,
+  getPriorityColor,
+  toggleFilterValue,
+} from "../lib/jobOptions.js";
 import { useNavigate, useLocation } from "react-router-dom";
 
 import proj4 from "proj4";
-
-const STATUS_OPTIONS = ["In progress", "On hold", "Complete"];
-
-const PRIORITY_OPTIONS = ["", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
-
-const JOB_CATEGORY_OPTIONS = [
-  "",
-  "Amalgamation",
-  "Boundary Identification",
-  "Boundary Repeg",
-  "Building Setout",
-  "Feature and Contour Survey",
-  "Repeg and Setout",
-  "Subdivision - Built Strata",
-  "Subdivision - Green Title",
-  "Subdivision - Survey Strata",
-  "Subdivision - Survey Strata Conversion",
-  "Vacant Site Survey",
-  "Other",
-];
-
-function getPriorityColor(priority) {
-  const n = Number(priority);
-  if (!Number.isFinite(n)) return "inherit";
-  if (n === 1) return "#4da3ff";      // blue
-  if (n >= 2 && n <= 3) return "#4caf50"; // green
-  if (n >= 4 && n <= 6) return "#ff9800"; // orange
-  if (n >= 7 && n <= 9) return "#f44336"; // red
-  return "inherit";
-}
-
-function getPriorityBadgeStyle(priority) {
-  const color = getPriorityColor(priority);
-
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 28,
-    padding: "4px 8px",
-    borderRadius: 999,
-    fontWeight: 900,
-    fontSize: 12,
-    lineHeight: 1,
-    color: "#fff",
-    background: color === "inherit" ? "rgba(255,255,255,0.12)" : color,
-    border: "1px solid rgba(255,255,255,0.10)",
-  };
-}
 
 // Full WA LGAs (unchanged)
 const LOCAL_AUTHORITIES = [
@@ -2806,19 +2765,6 @@ const topScrollInnerRef = useRef(null);
    // sorting
   const [sortKey, setSortKey] = useState("job_number");
   const [sortAsc, setSortAsc] = useState(false);
-
-  function toggleFilterValue(currentValues, value, setter) {
-  if (value === "All") {
-    setter([]);
-    return;
-  }
-
-  if (currentValues.includes(value)) {
-    setter(currentValues.filter((v) => v !== value));
-  } else {
-    setter([...currentValues, value]);
-  }
-}
 
 
 async function fetchJobByNumber(jobNumber) {

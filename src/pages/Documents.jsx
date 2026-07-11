@@ -22,6 +22,37 @@ function isPdf(mime, name) {
   return mime === "application/pdf" || n.endsWith(".pdf");
 }
 
+function isWordDocument(mime, name) {
+  const n = (name || "").toLowerCase();
+  const m = (mime || "").toLowerCase();
+  return (
+    n.endsWith(".doc") ||
+    n.endsWith(".docx") ||
+    m === "application/msword" ||
+    m === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    m.includes("msword") ||
+    m.includes("wordprocessingml")
+  );
+}
+
+function isOfficeDocument(mime, name) {
+  const n = (name || "").toLowerCase();
+  const m = (mime || "").toLowerCase();
+  return (
+    isWordDocument(mime, name) ||
+    n.endsWith(".xls") ||
+    n.endsWith(".xlsx") ||
+    m.includes("excel") ||
+    m.includes("spreadsheet") ||
+    m.includes("officedocument") ||
+    m.includes("ms-excel")
+  );
+}
+
+function officePreviewUrl(url) {
+  return "https://view.officeapps.live.com/op/embed.aspx?src=" + encodeURIComponent(url || "");
+}
+
 function extOf(name) {
   const n = (name || "").toLowerCase();
   const idx = n.lastIndexOf(".");
@@ -156,10 +187,23 @@ const debouncedQuery = useDebounced(query, 250);
 
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [openUrl, setOpenUrl] = useState("");
-  const [openKind, setOpenKind] = useState(""); // "pdf" | "office" | "download"
+  const [openPreviewUrl, setOpenPreviewUrl] = useState("");
+  const [openKind, setOpenKind] = useState(""); // "pdf" | "word" | "office" | "download"
   const [openFileName, setOpenFileName] = useState("");
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerStatus, setViewerStatus] = useState("idle");
+  const [viewerError, setViewerError] = useState("");
   const [isSmallScreen, setIsSmallScreen] = useState(false);
+
+  function closeViewer() {
+    setViewerOpen(false);
+    setOpenUrl("");
+    setOpenPreviewUrl("");
+    setOpenKind("");
+    setOpenFileName("");
+    setViewerStatus("idle");
+    setViewerError("");
+  }
 
   // Admin upload modal
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -216,7 +260,7 @@ const debouncedQuery = useDebounced(query, 250);
 useEffect(() => {
   const handleKey = (e) => {
     if (e.key === "Escape") {
-      setViewerOpen(false);
+      closeViewer();
       setVersionsOpen(false);
       setUploadOpen(false);
       if (!deleting) setDeleteConfirm(null);
@@ -228,6 +272,21 @@ useEffect(() => {
 }, [deleting]);
 
 useEffect(() => {
+  if (!viewerOpen || !["word", "office"].includes(openKind) || viewerStatus !== "loading") return undefined;
+
+  const t = setTimeout(() => {
+    setViewerStatus("error");
+    setViewerError(
+      openKind === "word"
+        ? "This Word document could not be previewed on this device."
+        : "This document could not be previewed on this device."
+    );
+  }, 15000);
+
+  return () => clearTimeout(t);
+}, [viewerOpen, openKind, openPreviewUrl, viewerStatus]);
+
+useEffect(() => {
   if (typeof document === "undefined") return undefined;
 
   const modalOpen = viewerOpen || versionsOpen || uploadOpen || !!deleteConfirm;
@@ -237,7 +296,7 @@ useEffect(() => {
   const previousTouchAction = document.body.style.touchAction;
 
   document.body.style.overflow = "hidden";
-  document.body.style.touchAction = "none";
+  document.body.style.touchAction = viewerOpen ? previousTouchAction : "none";
 
   return () => {
     document.body.style.overflow = previousOverflow;
@@ -414,9 +473,10 @@ useEffect(() => {
       if (!v?.storage_path) return;
 
       const pdf = isPdf(v.mime_type, v.file_name);
-      const isOffice = !pdf && /(word|excel|spreadsheet|officedocument|msword|ms-excel)/i.test(v.mime_type);
+      const word = isWordDocument(v.mime_type, v.file_name);
+      const isOffice = !pdf && isOfficeDocument(v.mime_type, v.file_name);
       const mobileDirectDownload = isSmallScreen && pdf;
-      const mobileExternalOpen = isSmallScreen && isOffice;
+      const mobileExternalOpen = isSmallScreen && isOffice && !word;
       if (mobileExternalOpen) pendingExternalTab = openBlankNewTab();
 
       const { data, error } = await supabase.storage
@@ -438,8 +498,11 @@ useEffect(() => {
       }
 
       setOpenUrl(url);
-      setOpenFileName(v.file_name || "document");     
-      setOpenKind(pdf ? "pdf" : isOffice ? "office" : "download");
+      setOpenPreviewUrl(pdf ? url : isOffice ? officePreviewUrl(url) : url);
+      setOpenFileName(v.file_name || "document");
+      setOpenKind(pdf ? "pdf" : word ? "word" : isOffice ? "office" : "download");
+      setViewerStatus(pdf || isOffice ? "loading" : "ready");
+      setViewerError("");
       setViewerOpen(true);
     } catch (e) {
       if (pendingExternalTab && !pendingExternalTab.closed) pendingExternalTab.close();
@@ -700,7 +763,7 @@ const handleDownloadCurrent = async () => {
 };
 
 const handleOpenDocumentLink = (event) => {
-  if (!isSmallScreen || !openUrl) return;
+  if (!isSmallScreen || !openUrl || openKind !== "pdf") return;
   event.preventDefault();
   handleDownloadCurrent();
 };
@@ -709,9 +772,10 @@ const handleOpenDocumentLink = (event) => {
     let pendingExternalTab = null;
     try {
       const pdf = isPdf(versionRow.mime_type, versionRow.file_name);
-      const isOffice = !pdf && /(word|excel|spreadsheet|officedocument|msword|ms-excel)/i.test(versionRow.mime_type);
+      const word = isWordDocument(versionRow.mime_type, versionRow.file_name);
+      const isOffice = !pdf && isOfficeDocument(versionRow.mime_type, versionRow.file_name);
       const mobileDirectDownload = isSmallScreen && pdf;
-      const mobileExternalOpen = isSmallScreen && isOffice;
+      const mobileExternalOpen = isSmallScreen && isOffice && !word;
       if (mobileExternalOpen) pendingExternalTab = openBlankNewTab();
 
       const { data, error } = await supabase.storage
@@ -733,8 +797,11 @@ const handleOpenDocumentLink = (event) => {
       }
 
       setOpenUrl(url);
+      setOpenPreviewUrl(pdf ? url : isOffice ? officePreviewUrl(url) : url);
       setOpenFileName(versionRow.file_name || "document");
-      setOpenKind(pdf ? "pdf" : isOffice ? "office" : "download");
+      setOpenKind(pdf ? "pdf" : word ? "word" : isOffice ? "office" : "download");
+      setViewerStatus(pdf || isOffice ? "loading" : "ready");
+      setViewerError("");
       setViewerOpen(true);
     } catch (e) {
       if (pendingExternalTab && !pendingExternalTab.closed) pendingExternalTab.close();
@@ -1225,13 +1292,13 @@ const performDeleteDocument = async (doc) => {
         )}
       </div>
 
-      {/* Viewer modal (PDF inline; others download) */}
+      {/* Viewer modal (PDF and Word/Office previews, with download fallback) */}
       {viewerOpen && (
   <div
     role="dialog"
     aria-modal="true"
     className="documents-modal-backdrop documents-viewer-backdrop"
-    onClick={() => setViewerOpen(false)}
+    onClick={closeViewer}
    style={{
   position: "fixed",
   inset: 0,
@@ -1299,7 +1366,7 @@ maxHeight: "100%",
         </div>
         <button
   type="button"
-  onClick={() => setViewerOpen(false)}
+  onClick={closeViewer}
   className="btn-pill secondary documents-modal-close"
 >
           Close
@@ -1316,9 +1383,9 @@ maxHeight: "100%",
     paddingBottom: "env(safe-area-inset-bottom)",
   }}
 >
-        {(openKind === "pdf" || openKind === "office") && (
-          <div className="documents-viewer-fallback">
-            <span>Preview not fitting your screen?</span>
+        {(openKind === "pdf" || openKind === "word" || openKind === "office") && viewerStatus !== "error" && (
+          <div className="documents-viewer-fallback documents-viewer-helpbar">
+            <span>{viewerStatus === "loading" ? "Preparing preview…" : "Preview not fitting your screen?"}</span>
             <a href={openUrl} target="_blank" rel="noreferrer" onClick={handleOpenDocumentLink} className="btn-pill secondary">
               Open document
             </a>
@@ -1328,11 +1395,32 @@ maxHeight: "100%",
           </div>
         )}
 
+        {(openKind === "word" || openKind === "office") && viewerStatus === "error" && (
+          <div className="documents-viewer-error-panel">
+            <div className="documents-viewer-error-title">
+              {viewerError || "This Word document could not be previewed on this device."}
+            </div>
+            <div className="documents-viewer-error-actions">
+              <a href={openUrl} target="_blank" rel="noreferrer" className="btn-pill secondary">
+                Open
+              </a>
+              <button type="button" onClick={handleDownloadCurrent} className="btn-pill secondary">
+                Download
+              </button>
+              <button type="button" onClick={closeViewer} className="btn-pill primary">
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
         {openKind === "pdf" && (
           <iframe
+            key={openPreviewUrl}
             title="PDF viewer"
             className="documents-viewer-frame documents-pdf-frame"
-            src={openUrl}
+            src={openPreviewUrl}
+            onLoad={() => setViewerStatus("ready")}
            style={{
   width: "100%",
   height: "100%",
@@ -1343,11 +1431,21 @@ maxHeight: "100%",
           />
         )}
 
-        {openKind === "office" && (
+        {(openKind === "word" || openKind === "office") && viewerStatus !== "error" && (
           <iframe
-            title="Office viewer"
+            key={openPreviewUrl}
+            title={openKind === "word" ? "Word document viewer" : "Office viewer"}
             className="documents-viewer-frame documents-office-frame"
-            src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(openUrl)}`}
+            src={openPreviewUrl}
+            onLoad={() => setViewerStatus("ready")}
+            onError={() => {
+              setViewerStatus("error");
+              setViewerError(
+                openKind === "word"
+                  ? "This Word document could not be previewed on this device."
+                  : "This document could not be previewed on this device."
+              );
+            }}
            style={{
   width: "100%",
   height: "100%",
@@ -1365,6 +1463,12 @@ maxHeight: "100%",
             </a>
           </div>
         )}
+      </div>
+
+      <div className="documents-viewer-footer">
+        <button type="button" onClick={closeViewer} className="btn-pill primary">
+          Close
+        </button>
       </div>
     </div>
   </div>

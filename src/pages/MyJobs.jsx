@@ -4,9 +4,45 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
 import { getJobAddressWarning } from "../lib/jobAddress.js";
+import {
+  JOB_CATEGORY_OPTIONS,
+  PRIORITY_OPTIONS,
+  STATUS_OPTIONS,
+  getPriorityBadgeStyle,
+  getPriorityColor,
+  toggleFilterValue,
+} from "../lib/jobOptions.js";
 
-const STATUS_OPTIONS = ["In progress", "On hold", "Complete"];
 const PAGE_SIZE = 30;
+
+const JOB_SELECT_COLUMNS = [
+  "id",
+  "job_number",
+  "client_name",
+  "client_company",
+  "client_first_name",
+  "client_surname",
+  "status",
+  "assigned_to",
+  "priority",
+  "job_category",
+  "job_type_legacy",
+  "job_date_legacy",
+  "lot_number",
+  "plan_number",
+  "ct",
+  "notes",
+  "full_address",
+  "street_number",
+  "street_name",
+  "suburb",
+  "local_authority",
+  "place_id",
+  "mga_zone",
+  "mga_easting",
+  "mga_northing",
+  "updated_at",
+].join(",");
 
 function addressSummaryFromRow(r) {
   return getJobAddressWarning(r).displayAddress;
@@ -17,6 +53,27 @@ function formatDateAU(v) {
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return String(v);
   return d.toLocaleDateString("en-AU");
+}
+
+function getStatusTextStyle(status) {
+  const value = String(status || "").trim().toLowerCase();
+  let color = "#f0f0f0";
+  if (value === "in progress") color = "#4da3ff";
+  if (value === "on hold") color = "#ff9800";
+  if (value === "complete") color = "#4caf50";
+
+  return {
+    color,
+    fontWeight: 900,
+    fontSize: 12,
+    lineHeight: 1.2,
+    overflowWrap: "anywhere",
+  };
+}
+
+function priorityLabel(priority) {
+  const value = String(priority || "").trim();
+  return value ? "Priority " + value : "";
 }
 
 function Toast({ text, kind = "ok", onClose }) {
@@ -158,8 +215,12 @@ function MyJobs() {
   const [myDisplayName, setMyDisplayName] = useState("");
 
   // filters
-  const [assigneeMode, setAssigneeMode] = useState("__my__"); // __my__ | __all__ | name
-  const [statusFilter, setStatusFilter] = useState("__all__"); // __all__ | status
+  const [assigneeMode, setAssigneeMode] = useState("__my__"); // __my__ | __all__ | __unassigned__ | name
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [jobCategoryFilter, setJobCategoryFilter] = useState([]);
+  const [statusFilter, setStatusFilter] = useState([]);
+  const [priorityFilter, setPriorityFilter] = useState([]);
 
   // list
   const [rows, setRows] = useState([]);
@@ -176,9 +237,12 @@ function MyJobs() {
   // toast
   const [toast, setToast] = useState({ text: "", kind: "ok" });
   const toastTimerRef = useRef(null);
+  const fetchSeqRef = useRef(0);
+  const skipNextFilterFetchRef = useRef(false);
 
   const selectedAssignee = useMemo(() => {
     if (assigneeMode === "__all__") return "__all__";
+    if (assigneeMode === "__unassigned__") return "__unassigned__";
     if (assigneeMode === "__my__") return (myDisplayName || "").trim();
     return (assigneeMode || "").trim();
   }, [assigneeMode, myDisplayName]);
@@ -197,9 +261,80 @@ function MyJobs() {
     toastTimerRef.current = setTimeout(() => setToast({ text: "", kind: "ok" }), 2600);
   }
 
+  function currentFilterValues(overrides = {}) {
+    return {
+      selectedAssignee: overrides.selectedAssignee ?? selectedAssignee,
+      search: overrides.search ?? appliedSearch,
+      jobCategory: overrides.jobCategory ?? jobCategoryFilter,
+      status: overrides.status ?? statusFilter,
+      priority: overrides.priority ?? priorityFilter,
+    };
+  }
+
+  function applyMyJobsFilters(query, filters = currentFilterValues()) {
+    let q = query;
+
+    if (filters.selectedAssignee === "__unassigned__") {
+      q = q.or("assigned_to.is.null,assigned_to.eq.,assigned_to.eq.{}");
+    } else if (filters.selectedAssignee !== "__all__") {
+      q = q.eq("assigned_to", filters.selectedAssignee);
+    }
+
+    if (filters.status.length > 0) {
+      q = q.in("status", filters.status);
+    }
+
+    if (filters.jobCategory.length > 0) {
+      q = q.in("job_category", filters.jobCategory);
+    }
+
+    if (filters.priority.length > 0) {
+      q = q.in("priority", filters.priority.map((p) => Number(p)).filter((p) => Number.isFinite(p)));
+    }
+
+    const globalTrim = (filters.search || "").trim().replace(/^#/, "");
+    if (globalTrim.length >= 3) {
+      const isNumeric = /^\d+$/.test(globalTrim);
+
+      if (isNumeric) {
+        const like = "%" + globalTrim + "%";
+        q = q.or(
+          [
+            "job_number_text.ilike." + like,
+            "street_number.ilike." + like,
+            "full_address.ilike." + like,
+            "suburb.ilike." + like,
+            "lot_number.ilike." + like,
+            "plan_number.ilike." + like,
+            "notes.ilike." + like,
+            "client_company.ilike." + like,
+          ].join(",")
+        );
+      } else {
+        const ts = globalTrim
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((w) => w + ":*")
+          .join(" & ");
+
+        q = q.textSearch("search_tsv", ts, { type: "tsquery" });
+      }
+    }
+
+    return q;
+  }
+
   useEffect(() => {
     return () => toastTimerRef.current && clearTimeout(toastTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAppliedSearch(searchInput);
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   // Load staff list (same pattern as Timesheets admin dropdown)
   useEffect(() => {
@@ -236,8 +371,12 @@ function MyJobs() {
     loadStaff();
   }, [user]);
 
-  async function fetchJobs({ append = false, from = 0 } = {}) {
+  async function fetchJobs({ append = false, from = 0, filters: filterOverrides = null } = {}) {
     if (!user) return;
+
+    const requestId = ++fetchSeqRef.current;
+    const filters = currentFilterValues(filterOverrides || {});
+    const isLatest = () => requestId === fetchSeqRef.current;
 
     if (!append) {
       setLoading(true);
@@ -247,63 +386,39 @@ function MyJobs() {
     }
 
     try {
+      if (filters.selectedAssignee !== "__all__" && filters.selectedAssignee !== "__unassigned__" && !filters.selectedAssignee) {
+        if (isLatest()) {
+          setRows([]);
+          setHasMore(false);
+        }
+        return;
+      }
+
       let q = supabase
         .from("jobs")
-        .select(
-          [
-            "id",
-            "job_number",
-            "client_name",
-            "client_company",
-            "status",
-            "assigned_to",
-            "job_type_legacy",
-            "job_date_legacy",
-            "lot_number",
-            "plan_number",
-            "ct",
-            "notes",
-            "full_address",
-            "street_number",
-            "street_name",
-            "suburb",
-            "local_authority",
-            "place_id",
-            "mga_zone",
-            "mga_easting",
-            "mga_northing",
-            "updated_at",
-          ].join(",")
-        )
+        .select(JOB_SELECT_COLUMNS)
         .order("job_number", { ascending: false })
         .range(from, from + PAGE_SIZE - 1);
 
-      if (statusFilter !== "__all__") q = q.eq("status", statusFilter);
-
-      // assignee filter
-      if (selectedAssignee !== "__all__") {
-        // if my name is missing (edge case), return none until we have it
-        if (!selectedAssignee) {
-          setRows([]);
-          setHasMore(false);
-          return;
-        }
-        q = q.eq("assigned_to", selectedAssignee);
-      }
+      q = applyMyJobsFilters(q, filters);
 
       const { data, error } = await q;
       if (error) throw error;
+      if (!isLatest()) return;
 
       const next = data || [];
       setRows((prev) => (append ? [...prev, ...next] : next));
       setHasMore(next.length === PAGE_SIZE);
     } catch (e) {
+      if (!isLatest()) return;
       setErr(e?.message || "Failed to load jobs.");
       setRows([]);
       setHasMore(false);
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (isLatest()) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   }
 
@@ -319,45 +434,17 @@ function MyJobs() {
     try {
       let q = supabase
         .from("jobs")
-        .select(
-          [
-            "id",
-            "job_number",
-            "client_name",
-            "client_company",
-            "status",
-            "assigned_to",
-            "job_type_legacy",
-            "job_date_legacy",
-            "lot_number",
-            "plan_number",
-            "ct",
-            "notes",
-            "full_address",
-            "street_number",
-            "street_name",
-            "suburb",
-            "local_authority",
-            "place_id",
-            "mga_zone",
-            "mga_easting",
-            "mga_northing",
-            "updated_at",
-          ].join(",")
-        )
+        .select(JOB_SELECT_COLUMNS)
         .order("job_number", { ascending: false })
         .range(0, target - 1);
 
-      if (statusFilter !== "__all__") q = q.eq("status", statusFilter);
-
-      if (selectedAssignee !== "__all__") {
-        if (!selectedAssignee) {
-          setRows([]);
-          setHasMore(false);
-          return;
-        }
-        q = q.eq("assigned_to", selectedAssignee);
+      if (selectedAssignee !== "__all__" && selectedAssignee !== "__unassigned__" && !selectedAssignee) {
+        setRows([]);
+        setHasMore(false);
+        return;
       }
+
+      q = applyMyJobsFilters(q);
 
       const { data, error } = await q;
       if (error) throw error;
@@ -372,8 +459,7 @@ function MyJobs() {
         .order("job_number", { ascending: false })
         .range(target, target);
 
-      if (statusFilter !== "__all__") q2 = q2.eq("status", statusFilter);
-      if (selectedAssignee !== "__all__") q2 = q2.eq("assigned_to", selectedAssignee);
+      q2 = applyMyJobsFilters(q2);
 
       const { data: extra, error: extraErr } = await q2;
       if (extraErr) {
@@ -391,9 +477,14 @@ function MyJobs() {
 
   // initial + refetch on filter changes
   useEffect(() => {
+    if (skipNextFilterFetchRef.current) {
+      skipNextFilterFetchRef.current = false;
+      return;
+    }
+
     fetchJobs({ append: false, from: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, statusFilter, selectedAssignee]);
+  }, [user, selectedAssignee, appliedSearch, jobCategoryFilter, statusFilter, priorityFilter]);
 
   function openReassign(job) {
     setReassignJob(job);
@@ -437,6 +528,9 @@ function MyJobs() {
 
             // If current view is filtered to a specific assignee, and the new assignee doesn't match,
             // remove it immediately.
+            if (selectedAssignee === "__unassigned__") {
+              return !newName;
+            }
             if (selectedAssignee !== "__all__") {
               return (newName || "") === (selectedAssignee || "");
             }
@@ -458,13 +552,36 @@ function MyJobs() {
     }
   }
 
+  async function handleRefresh() {
+    if (loading || loadingMore) return;
+
+    const defaultSelectedAssignee = (myDisplayName || "").trim();
+    const defaultFilters = {
+      selectedAssignee: defaultSelectedAssignee,
+      search: "",
+      jobCategory: [],
+      status: [],
+      priority: [],
+    };
+
+    skipNextFilterFetchRef.current = true;
+    setSearchInput("");
+    setAppliedSearch("");
+    setAssigneeMode("__my__");
+    setJobCategoryFilter([]);
+    setStatusFilter([]);
+    setPriorityFilter([]);
+
+    await fetchJobs({ append: false, from: 0, filters: defaultFilters });
+  }
+
   const actions = (
     <button
       className="btn-pill"
       type="button"
-      onClick={() => fetchJobs({ append: false, from: 0 })}
+      onClick={handleRefresh}
       disabled={loading || loadingMore}
-      title="Refresh list"
+      title="Reset filters and refresh list"
     >
       Refresh
     </button>
@@ -476,20 +593,30 @@ function MyJobs() {
         <h3 className="card-title">Filters</h3>
         <p className="card-subtitle">Default is your jobs. Switch to All or another worker when needed.</p>
 
-        <div style={{ marginTop: "0.6rem", display: "flex", flexWrap: "wrap", gap: "0.6rem" }}>
-          {/* Surveyor / All dropdown (same style as timesheets dropdown) */}
-          <div className="card-row">
-            <span className="card-row-label">Surveyor</span>
+        <div className="jobs-search-row" style={{ marginTop: 10 }}>
+          <div className="jobs-mobile-card">
+            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>Global Search</div>
+            <input
+              className="maps-search-input"
+              placeholder="Search…(client, suburb, lot/plan, address, etc.)"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+            />
+          </div>
+
+          <div className="jobs-mobile-card">
+            <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>Surveyor</div>
             <select
               className="maps-search-input"
               aria-label="Filter by surveyor"
-              style={{ maxWidth: "260px" }}
+              style={{ width: "100%" }}
               value={assigneeMode}
               onChange={(e) => setAssigneeMode(e.target.value)}
               disabled={!user || loading}
             >
               <option value="__my__">My Jobs</option>
               <option value="__all__">All</option>
+              <option value="__unassigned__">Unassigned</option>
               <option disabled>────────</option>
               {assigneeDropdownOptions.map((name) => (
                 <option key={name} value={name}>
@@ -499,32 +626,116 @@ function MyJobs() {
             </select>
           </div>
 
-          {/* Status filter */}
-          <div className="card-row">
-            <span className="card-row-label">Status</span>
-            <select
-              className="maps-search-input"
-              aria-label="Filter by status"
-              style={{ maxWidth: "220px" }}
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              disabled={loading}
-            >
-              <option value="__all__">All</option>
-              {STATUS_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+          <div className="jobs-filters-wrap jobs-filters-full">
+            <div className="jobs-filters-row">
+              <div className="jobs-filters-group">
+                <div className="jobs-filters-label">
+                  Category{jobCategoryFilter.length > 0 ? ` (${jobCategoryFilter.length})` : ""}
+                </div>
+                <div className="jobs-filter-pills">
+                  <button
+                    type="button"
+                    className={`jobs-filter-pill ${jobCategoryFilter.length === 0 ? "is-active" : ""}`}
+                    onClick={() => setJobCategoryFilter([])}
+                    disabled={loading}
+                  >
+                    All
+                  </button>
+                  {JOB_CATEGORY_OPTIONS.filter((o) => o !== "").map((o) => (
+                    <button
+                      key={o}
+                      type="button"
+                      className={`jobs-filter-pill ${jobCategoryFilter.includes(o) ? "is-active" : ""}`}
+                      onClick={() => toggleFilterValue(jobCategoryFilter, o, setJobCategoryFilter)}
+                      disabled={loading}
+                    >
+                      {o}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="jobs-filters-group">
+                <div className="jobs-filters-label">
+                  Status{statusFilter.length > 0 ? ` (${statusFilter.length})` : ""}
+                </div>
+                <div className="jobs-filter-pills">
+                  <button
+                    type="button"
+                    className={`jobs-filter-pill ${statusFilter.length === 0 ? "is-active" : ""}`}
+                    onClick={() => setStatusFilter([])}
+                    disabled={loading}
+                  >
+                    All
+                  </button>
+                  {STATUS_OPTIONS.map((status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      className={`jobs-filter-pill ${statusFilter.includes(status) ? "is-active" : ""}`}
+                      onClick={() => toggleFilterValue(statusFilter, status, setStatusFilter)}
+                      disabled={loading}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="jobs-filters-group">
+                <div className="jobs-filters-label">
+                  Priority{priorityFilter.length > 0 ? ` (${priorityFilter.length})` : ""}
+                </div>
+                <div className="jobs-filter-pills">
+                  <button
+                    type="button"
+                    className={`jobs-filter-pill ${priorityFilter.length === 0 ? "is-active" : ""}`}
+                    onClick={() => setPriorityFilter([])}
+                    disabled={loading}
+                  >
+                    All Priorities
+                  </button>
+                  {PRIORITY_OPTIONS.filter((p) => p !== "").map((priority) => (
+                    <button
+                      key={priority}
+                      type="button"
+                      className={`jobs-filter-pill ${priorityFilter.includes(priority) ? "is-active" : ""}`}
+                      onClick={() => toggleFilterValue(priorityFilter, priority, setPriorityFilter)}
+                      disabled={loading}
+                      style={{
+                        borderColor: priorityFilter.includes(priority) ? getPriorityColor(priority) : undefined,
+                        boxShadow: priorityFilter.includes(priority) ? `inset 0 0 0 1px ${getPriorityColor(priority)}` : undefined,
+                      }}
+                    >
+                      <span className="myjobs-priority-filter-content">
+                        <span
+                          className="myjobs-priority-filter-number"
+                          style={{ background: getPriorityColor(priority) }}
+                        >
+                          {priority}
+                        </span>
+                        <span>Priority {priority}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="card-row">
+          <div className="card-row jobs-filters-full" style={{ marginTop: 0 }}>
             <span className="card-row-label">Showing</span>
             <span className="card-row-value">
               <b>{rows.length}</b> job{rows.length === 1 ? "" : "s"}
-              {selectedAssignee !== "__all__" && selectedAssignee ? ` for ${selectedAssignee}` : ""}
-              {statusFilter !== "__all__" ? ` • ${statusFilter}` : ""}
+              {selectedAssignee === "__unassigned__"
+                ? " for Unassigned"
+                : selectedAssignee !== "__all__" && selectedAssignee
+                  ? ` for ${selectedAssignee}`
+                  : ""}
+              {appliedSearch.trim() ? ` • Search: ${appliedSearch.trim()}` : ""}
+              {jobCategoryFilter.length > 0 ? ` • Categories: ${jobCategoryFilter.join(", ")}` : ""}
+              {statusFilter.length > 0 ? ` • Status: ${statusFilter.join(", ")}` : ""}
+              {priorityFilter.length > 0 ? ` • Priorities: ${priorityFilter.join(", ")}` : ""}
             </span>
           </div>
         </div>
@@ -567,7 +778,8 @@ function MyJobs() {
           {rows.map((r) => {
             const addr = addressSummaryFromRow(r);
             const addressState = getJobAddressWarning(r);
-            const client = (r.client_company || r.client_name || "—").trim();
+            const clientPerson = [r.client_first_name, r.client_surname].filter(Boolean).join(" ").trim();
+            const client = (r.client_company || clientPerson || r.client_name || "—").trim();
 
             return (
               <div
@@ -580,12 +792,28 @@ function MyJobs() {
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-                  <div style={{ minWidth: 220 }}>
-                    <div style={{ fontWeight: 950, fontSize: 14 }}>
-                      #{r.job_number ?? "—"}{" "}
-                      <span style={{ fontSize: 12, opacity: 0.8, fontWeight: 800 }}>
-                        • {r.status || "—"}
-                      </span>
+                  <div style={{ minWidth: 0, flex: "1 1 260px" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 7,
+                        flexWrap: "wrap",
+                        fontWeight: 950,
+                        fontSize: 14,
+                        lineHeight: 1.25,
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      <span>#{r.job_number ?? "—"}</span>
+                      <span style={{ opacity: 0.55 }}>-</span>
+                      <span style={getStatusTextStyle(r.status)}>{r.status || "—"}</span>
+                      {r.priority ? (
+                        <>
+                          <span style={{ opacity: 0.55 }}>-</span>
+                          <span style={getPriorityBadgeStyle(r.priority)}>{priorityLabel(r.priority)}</span>
+                        </>
+                      ) : null}
                     </div>
                     <div className={addressState.label ? "manual-address-warning" : ""} style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
                       {addr}
@@ -622,6 +850,7 @@ function MyJobs() {
 
                 {/* Extra summary row (mobile-friendly wrap) */}
                 <div style={{ marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, opacity: 0.78 }}>
+                  <span><b>Job Category:</b> {r.job_category || "—"}</span>
                   <span><b>Job type:</b> {r.job_type_legacy || "—"}</span>
                   <span><b>Job date:</b> {formatDateAU(r.job_date_legacy)}</span>
                   <span><b>Lot/Plan:</b> {(r.lot_number || "—") + " / " + (r.plan_number || "—")}</span>
