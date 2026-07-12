@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabaseClient.js";
@@ -181,6 +181,8 @@ function EquipmentRegister() {
   const [equipmentTypeFilter, setEquipmentTypeFilter] = useState("__all__");
   const [refreshKey, setRefreshKey] = useState(0);
   const [equipmentModal, setEquipmentModal] = useState({ open: false, mode: "new", item: null });
+  const [equipmentMobileHeaderOffset, setEquipmentMobileHeaderOffset] = useState(0);
+  const equipmentModalCardRef = useRef(null);
   const [equipmentForm, setEquipmentForm] = useState(EMPTY_EQUIPMENT);
   const [serviceModal, setServiceModal] = useState({ open: false, item: null });
   const [serviceForm, setServiceForm] = useState({ service_date: "", notes: "", files: [] });
@@ -336,6 +338,37 @@ function EquipmentRegister() {
     if (!user) return;
     loadData();
   }, [loadData, refreshKey, user]);
+
+  useEffect(() => {
+    if (!equipmentModal.open) return;
+
+    function updateEquipmentModalOffset() {
+      const isMobileModal = window.matchMedia?.("(max-width: 768px)").matches;
+      if (!isMobileModal) {
+        setEquipmentMobileHeaderOffset(0);
+        return;
+      }
+
+      const header = document.querySelector(".app-header");
+      const headerHeight = header?.getBoundingClientRect?.().height || 0;
+      setEquipmentMobileHeaderOffset(Math.ceil(headerHeight));
+    }
+
+    updateEquipmentModalOffset();
+    window.addEventListener("resize", updateEquipmentModalOffset);
+    window.visualViewport?.addEventListener("resize", updateEquipmentModalOffset);
+
+    const frame = requestAnimationFrame(() => {
+      updateEquipmentModalOffset();
+      equipmentModalCardRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updateEquipmentModalOffset);
+      window.visualViewport?.removeEventListener("resize", updateEquipmentModalOffset);
+    };
+  }, [equipmentModal.open, equipmentModal.mode, equipmentModal.item?.id]);
 
   const handleRefresh = () => {
     setSearch("");
@@ -921,8 +954,15 @@ function EquipmentRegister() {
       </div>
 
       {equipmentModal.open && (
-        <div className="modal-backdrop">
-          <div className="modal-card equipment-modal-card">
+        <div
+          className="modal-backdrop equipment-modal-backdrop"
+          style={{
+            "--equipment-modal-mobile-top-offset": equipmentMobileHeaderOffset
+              ? `calc(${equipmentMobileHeaderOffset}px + env(safe-area-inset-top))`
+              : undefined,
+          }}
+        >
+          <div ref={equipmentModalCardRef} className="modal-card equipment-modal-card">
             <div className="modal-header">
               <h3>{equipmentModal.mode === "new" ? "Add equipment" : "Edit equipment"}</h3>
               <button className="btn-pill" type="button" onClick={() => setEquipmentModal({ open: false, mode: "new", item: null })}>

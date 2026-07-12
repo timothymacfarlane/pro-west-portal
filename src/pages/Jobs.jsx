@@ -520,6 +520,8 @@ function JobModal({ open, mode, isAdmin, onClose, onSaved, initial, staffOptions
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [mobileHeaderOffset, setMobileHeaderOffset] = useState(0);
+  const modalCardRef = useRef(null);
   const MAX_STICKER_NOTES = 143;
   const STICKER_CHARS_PER_LINE = 35;
   const STICKER_MAX_LINES = 4;
@@ -680,6 +682,38 @@ setNotes(i.notes ?? "");
 
   setError("");
 }, [open, mode, initial?.id]);
+
+useEffect(() => {
+  if (!open) return;
+
+  function updateMobileHeaderOffset() {
+    const isMobileModal = window.matchMedia?.("(max-width: 860px)").matches;
+    if (!isMobileModal) {
+      setMobileHeaderOffset(0);
+      return;
+    }
+
+    const header = document.querySelector(".app-header");
+    const headerHeight = header?.getBoundingClientRect?.().height || 0;
+    setMobileHeaderOffset(Math.ceil(headerHeight));
+  }
+
+  updateMobileHeaderOffset();
+  window.addEventListener("resize", updateMobileHeaderOffset);
+  window.visualViewport?.addEventListener("resize", updateMobileHeaderOffset);
+
+  const frame = requestAnimationFrame(() => {
+    updateMobileHeaderOffset();
+    modalCardRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  });
+
+  return () => {
+    cancelAnimationFrame(frame);
+    window.removeEventListener("resize", updateMobileHeaderOffset);
+    window.visualViewport?.removeEventListener("resize", updateMobileHeaderOffset);
+  };
+}, [open, mode, initial?.id]);
+
 const [jobCategory, setJobCategory] = useState(initial?.job_category ?? "");
   const [jobTypeLegacy, setJobTypeLegacy] = useState(initial?.job_type_legacy ?? "");
   const [jobDateLegacy, setJobDateLegacy] = useState(initial?.job_date_legacy ?? "");
@@ -1705,6 +1739,9 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
       alignItems: "center",
       justifyContent: "center",
       padding: 16,
+      "--jobmodal-mobile-top-offset": mobileHeaderOffset
+         ? `calc(${mobileHeaderOffset}px + env(safe-area-inset-top))`
+        : undefined,
     }}
   >
 <ClientFormModal
@@ -1728,6 +1765,7 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
 />
 
 <div
+  ref={modalCardRef}
   className="card jobmodal-card"
   style={{
     width: "min(980px, calc(100vw - 32px))",
@@ -2373,22 +2411,27 @@ onChange={(e) => {
 
   @media (max-width: 860px) {
     .jobmodal-overlay {
-      align-items: stretch !important;
-      justify-content: stretch !important;
-      padding: 0 !important;
+      --jobmodal-mobile-top-offset: calc(118px + env(safe-area-inset-top));
+      align-items: flex-start !important;
+      justify-content: center !important;
+      padding: var(--jobmodal-mobile-top-offset) 0 env(safe-area-inset-bottom) !important;
+      overflow: hidden !important;
+      box-sizing: border-box !important;
     }
 
     .jobmodal-card {
       width: 100vw !important;
       max-width: 100vw !important;
-      height: 100dvh !important;
-      max-height: 100dvh !important;
+      height: calc(100dvh - var(--jobmodal-mobile-top-offset) - env(safe-area-inset-bottom)) !important;
+      max-height: calc(100dvh - var(--jobmodal-mobile-top-offset) - env(safe-area-inset-bottom)) !important;
+      min-height: 0 !important;
       margin: 0 !important;
       border-radius: 0 !important;
       padding: 10px 10px 14px !important;
       overflow-y: auto !important;
       overflow-x: hidden !important;
       -webkit-overflow-scrolling: touch;
+      scroll-padding-top: 10px;
     }
 
   .jobmodal-header {
@@ -2532,6 +2575,12 @@ onChange={(e) => {
 }
     .jobmodal-footer-actions > button:last-child {
       grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 860px) and (orientation: landscape) {
+    .jobmodal-overlay {
+      --jobmodal-mobile-top-offset: calc(54px + env(safe-area-inset-top));
     }
   }
 `}</style>

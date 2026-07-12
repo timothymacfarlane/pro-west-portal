@@ -306,6 +306,8 @@ const dragAutoScrollFrameRef = useRef(null);
 const dragAutoScrollDirectionRef = useRef({ x: 0, y: 0 });
 const planningSearchHighlightTimerRef = useRef(null);
 const planningSearchRef = useRef(null);
+const editorModalCardRef = useRef(null);
+const addModalCardRef = useRef(null);
 const planningJobCardRefs = useRef(new Map());
 
 const [planningJobSearch, setPlanningJobSearch] = useState("");
@@ -893,7 +895,13 @@ useEffect(() => {
   document.body.style.overflow = "hidden";
   document.body.style.touchAction = "none";
 
+  const frame = requestAnimationFrame(() => {
+    editorModalCardRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    addModalCardRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  });
+
   return () => {
+    cancelAnimationFrame(frame);
     document.body.style.overflow = previousOverflow;
     document.body.style.touchAction = previousTouchAction;
   };
@@ -3412,6 +3420,7 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
    {editorModalOpen && selectedDate && (
   <div className="job-planning-modal-overlay">
     <div
+      ref={editorModalCardRef}
       className="job-planning-modal-card job-planning-editor-modal-card"
       onClick={(e) => e.stopPropagation()}
     >
@@ -3810,6 +3819,7 @@ if (sourceBucketKey === UNSCHEDULED_KEY) {
  {modalTarget && (
   <div className="job-planning-modal-overlay">
     <div
+      ref={addModalCardRef}
       className="job-planning-modal-card"
       onClick={(e) => e.stopPropagation()}
     >

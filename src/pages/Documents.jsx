@@ -208,6 +208,8 @@ const debouncedQuery = useDebounced(query, 250);
   // Admin upload modal
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadMode, setUploadMode] = useState("new"); // new | newversion
+  const [uploadMobileHeaderOffset, setUploadMobileHeaderOffset] = useState(0);
+  const uploadModalCardRef = useRef(null);
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadCategory, setUploadCategory] = useState("Miscellaneous");
   const [uploadDesc, setUploadDesc] = useState("");
@@ -270,6 +272,37 @@ useEffect(() => {
   window.addEventListener("keydown", handleKey);
   return () => window.removeEventListener("keydown", handleKey);
 }, [deleting]);
+
+useEffect(() => {
+  if (!uploadOpen) return undefined;
+
+  function updateUploadModalOffset() {
+    const isMobileModal = window.matchMedia?.("(max-width: 640px)").matches;
+    if (!isMobileModal) {
+      setUploadMobileHeaderOffset(0);
+      return;
+    }
+
+    const header = document.querySelector(".app-header");
+    const headerHeight = header?.getBoundingClientRect?.().height || 0;
+    setUploadMobileHeaderOffset(Math.ceil(headerHeight));
+  }
+
+  updateUploadModalOffset();
+  window.addEventListener("resize", updateUploadModalOffset);
+  window.visualViewport?.addEventListener("resize", updateUploadModalOffset);
+
+  const frame = requestAnimationFrame(() => {
+    updateUploadModalOffset();
+    uploadModalCardRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  });
+
+  return () => {
+    cancelAnimationFrame(frame);
+    window.removeEventListener("resize", updateUploadModalOffset);
+    window.visualViewport?.removeEventListener("resize", updateUploadModalOffset);
+  };
+}, [uploadOpen, uploadMode, selectedDoc?.id]);
 
 useEffect(() => {
   if (!viewerOpen || !["word", "office"].includes(openKind) || viewerStatus !== "loading") return undefined;
@@ -1702,7 +1735,7 @@ maxHeight: "100%",
         <div
           role="dialog"
           aria-modal="true"
-          className="documents-modal-backdrop"
+          className="documents-modal-backdrop documents-upload-backdrop"
           onClick={() => setUploadOpen(false)}
           style={{
             position: "fixed",
@@ -1713,9 +1746,13 @@ maxHeight: "100%",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            "--documents-upload-mobile-top-offset": uploadMobileHeaderOffset
+              ? `calc(${uploadMobileHeaderOffset}px + env(safe-area-inset-top))`
+              : undefined,
           }}
         >
           <div
+            ref={uploadModalCardRef}
             className="documents-modal-card documents-upload-card"
             onClick={(e) => e.stopPropagation()}
             style={{

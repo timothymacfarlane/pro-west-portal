@@ -3075,10 +3075,10 @@ textarea {
     position: fixed;
     left: 8px;
     right: 8px;
-    top: 64px;              /* adjust if your header height differs */
+    top: calc(118px + env(safe-area-inset-top));
     width: auto;
     max-width: none;
-    max-height: calc(100vh - 80px);
+    max-height: calc(100dvh - 118px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     overflow-y: auto;
   }
 }
@@ -3995,7 +3995,25 @@ body,
   }
 
 
-   .job-planning-add-btn {
+   .job-planning-modal-overlay {
+    align-items: flex-start;
+    justify-content: center;
+    padding: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right)) max(0.75rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left));
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+
+  .job-planning-modal-card {
+    width: min(calc(100vw - 1.5rem), 760px);
+    max-width: min(calc(100vw - 1.5rem), 760px);
+    max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    box-sizing: border-box;
+  }
+
+  .job-planning-add-btn {
     width: 20px;
     height: 20px;
     min-width: 20px;
@@ -4940,6 +4958,33 @@ body,
   flex-wrap: wrap;
 }
 
+@media (max-width: 768px) {
+  .modal-backdrop {
+    align-items: flex-start;
+    justify-content: center;
+    padding: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right)) max(0.75rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left));
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+
+  .modal-card {
+    width: min(calc(100vw - 1.5rem), 760px);
+    max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    box-sizing: border-box;
+  }
+
+  .modal-header {
+    align-items: flex-start;
+  }
+
+  .modal-actions {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
 /* ============================= */
 /* Equipment Register            */
 /* ============================= */
@@ -5174,7 +5219,39 @@ body,
 
   .equipment-modal-card {
     width: calc(100vw - 1rem);
-    max-height: calc(100dvh - 1rem);
+    max-height: calc(100dvh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+
+  .equipment-modal-backdrop {
+    inset: var(--equipment-modal-mobile-top-offset, calc(118px + env(safe-area-inset-top))) 0 0 0;
+    padding: 0.5rem max(0.5rem, env(safe-area-inset-right)) max(0.5rem, env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
+    align-items: flex-start;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .equipment-modal-backdrop .equipment-modal-card {
+    display: block;
+    height: calc(100dvh - var(--equipment-modal-mobile-top-offset, calc(118px + env(safe-area-inset-top))) - 1rem - env(safe-area-inset-bottom));
+    max-height: none;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
+
+  .equipment-modal-backdrop .equipment-modal-card > .modal-header {
+    flex: 0 0 auto;
+  }
+
+  .equipment-modal-backdrop .equipment-modal-body {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+    overflow: visible;
+    padding-right: 0;
+    min-height: 0;
   }
 
   .equipment-modal-body {
@@ -5953,6 +6030,46 @@ body,
     flex: 1 1 120px !important;
     justify-content: center !important;
     min-height: 40px !important;
+  }
+
+  .documents-upload-backdrop {
+    inset: var(--documents-upload-mobile-top-offset, calc(118px + env(safe-area-inset-top))) 0 0 0 !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    padding: 0.5rem max(0.5rem, env(safe-area-inset-right)) max(0.5rem, env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left)) !important;
+    overflow: hidden !important;
+  }
+
+  .documents-upload-backdrop .documents-upload-card {
+    display: block !important;
+    width: calc(100vw - 1rem) !important;
+    height: calc(100dvh - var(--documents-upload-mobile-top-offset, calc(118px + env(safe-area-inset-top))) - 1rem - env(safe-area-inset-bottom)) !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    overscroll-behavior: contain !important;
+    touch-action: pan-y !important;
+  }
+
+  .documents-upload-backdrop .documents-upload-header {
+    position: relative !important;
+    top: auto !important;
+    z-index: auto !important;
+    min-height: 0 !important;
+    padding-right: calc(5rem + env(safe-area-inset-right)) !important;
+  }
+
+  .documents-upload-backdrop .documents-upload-body {
+    overflow: visible !important;
+    min-height: 0 !important;
+    padding: 0.65rem !important;
+    padding-bottom: 0.65rem !important;
+  }
+
+  .documents-upload-backdrop .documents-upload-actions {
+    padding-bottom: max(0.85rem, env(safe-area-inset-bottom)) !important;
   }
 
   .documents-versions-card {
