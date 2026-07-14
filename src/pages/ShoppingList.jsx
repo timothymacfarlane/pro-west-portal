@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -39,6 +39,8 @@ export default function ShoppingList() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [shoppingListModalHeaderOffset, setShoppingListModalHeaderOffset] = useState(0);
+  const shoppingListModalCardRef = useRef(null);
   const [itemText, setItemText] = useState("");
 
   const [error, setError] = useState("");
@@ -122,6 +124,37 @@ const { data, error: loadError } = await supabase
 
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!modalOpen) return;
+
+    function updateShoppingListModalOffset() {
+      const isMobileModal = window.matchMedia?.("(max-width: 768px)").matches;
+      if (!isMobileModal) {
+        setShoppingListModalHeaderOffset(0);
+        return;
+      }
+
+      const header = document.querySelector(".app-header");
+      const headerHeight = header?.getBoundingClientRect?.().height || 0;
+      setShoppingListModalHeaderOffset(Math.ceil(headerHeight));
+    }
+
+    updateShoppingListModalOffset();
+    window.addEventListener("resize", updateShoppingListModalOffset);
+    window.visualViewport?.addEventListener("resize", updateShoppingListModalOffset);
+
+    const frame = requestAnimationFrame(() => {
+      updateShoppingListModalOffset();
+      shoppingListModalCardRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updateShoppingListModalOffset);
+      window.visualViewport?.removeEventListener("resize", updateShoppingListModalOffset);
+    };
+  }, [modalOpen, editingItem?.id]);
 
   function openAddModal() {
     setEditingItem(null);
@@ -354,8 +387,15 @@ async function handleClearList() {
         </div>
 
         {modalOpen && (
-          <div className="modal-backdrop">
-            <div className="modal-card shopping-list-modal">
+          <div
+            className="modal-backdrop shopping-list-modal-backdrop"
+            style={{
+              "--shopping-list-modal-mobile-top-offset": shoppingListModalHeaderOffset
+                ? `${shoppingListModalHeaderOffset}px`
+                : undefined,
+            }}
+          >
+            <div ref={shoppingListModalCardRef} className="modal-card shopping-list-modal">
               <div className="modal-header">
   <h3>{editingItem ? "Edit item" : "Add item"}</h3>
 </div>

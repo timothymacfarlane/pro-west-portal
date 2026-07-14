@@ -460,10 +460,10 @@ const handlePrint = () => {
       border,
       statusColor,
       assignment_id: a?.id ?? null,
-      region: hasVisibleJobRefs ? a?.region || "" : "",
+      region: hasActiveAssignment ? a?.region || "" : "",
       job_ref: hasVisibleJobRefs ? joinScheduleJobRefs(jobRefs) : "",
       linked_jobs: hasCurrentLinkedJob ? linkedJobs : [],
-      notes: hasVisibleJobRefs ? a?.notes || "" : "",
+      notes: hasActiveAssignment ? a?.notes || "" : "",
     };
   };
 
@@ -600,9 +600,9 @@ setJobSuggestions([]);
         const nextRefs = splitScheduleJobRefs(joinScheduleJobRefs(selectedJobs));
         const updatePayload = {
           status: editStatus || "FIELD",
-          region: nextRefs.length > 0 ? editRegion : "",
+          region: editRegion,
           job_ref: joinScheduleJobRefs(nextRefs),
-          notes: nextRefs.length > 0 ? editNotes : "",
+          notes: editNotes,
           touched: true,
           updated_at: new Date().toISOString(),
         };
@@ -637,9 +637,9 @@ setJobSuggestions([]);
           date: selectedCell.dateISO,
           person_id: selectedCell.personId,
           status: editStatus || "FIELD",
-          region: nextRefs.length > 0 ? editRegion : "",
+          region: editRegion,
           job_ref: joinScheduleJobRefs(nextRefs),
-          notes: nextRefs.length > 0 ? editNotes : "",
+          notes: editNotes,
           touched: true,
         };
 
@@ -1009,6 +1009,7 @@ const handleJobKeyDown = (e) => {
                     </div>
                     {cell.region && <div className="schedule-cell-region">{cell.region}</div>}
                     {renderScheduleJobRefs(cell)}
+                    {cell.notes && <div className="schedule-cell-notes">{cell.notes}</div>}
                   </td>
                 );
               })}
@@ -1084,6 +1085,7 @@ const handleJobKeyDown = (e) => {
                   </div>
                   {cell.region && <div className="schedule-cell-region">{cell.region}</div>}
                   {renderScheduleJobRefs(cell)}
+                  {cell.notes && <div className="schedule-cell-notes">{cell.notes}</div>}
                 </td>
               );
             })}

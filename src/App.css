@@ -1564,6 +1564,14 @@
   color: #6f7782;
 }
 
+.schedule-cell-notes {
+  margin-top: 0.12rem;
+  font-size: 0.64rem;
+  line-height: 1.2;
+  color: #616161;
+  overflow-wrap: anywhere;
+}
+
 .schedule-footer-note {
   margin-top: 0.4rem;
   font-size: 0.75rem;
@@ -4861,6 +4869,28 @@ body,
   .shopping-list-textarea {
     min-height: 180px;
     font-size: 16px; /* prevents iOS zoom */
+  }
+
+  .modal-backdrop.shopping-list-modal-backdrop {
+    inset: var(--shopping-list-modal-mobile-top-offset, calc(118px + env(safe-area-inset-top))) 0 0 0;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 0.5rem max(0.5rem, env(safe-area-inset-right)) max(0.5rem, env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+
+  .shopping-list-modal-backdrop .shopping-list-modal {
+    width: min(calc(100vw - 1rem), 760px);
+    height: calc(100dvh - var(--shopping-list-modal-mobile-top-offset, calc(118px + env(safe-area-inset-top))) - 1rem - env(safe-area-inset-bottom));
+    max-height: none;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    box-sizing: border-box;
   }
 }
 

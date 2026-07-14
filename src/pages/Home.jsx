@@ -15,7 +15,9 @@ function Home() {
           To access Pro West Portal: <strong>https://pro-west-portal.netlify.app/</strong>
         </p>
         <ul style={{ fontSize: "0.85rem", marginTop: "0.3rem", paddingLeft: "1.1rem" }}>
-          <strong>Current Version - v1.3.3</strong>
+          <strong>Current Version - v1.3.4</strong>
+          <br />
+          v1.3.4 - 14/07/2026 - Numerous bug fixes.
           <br />
           v1.3.3 - 12/07/2026 - Mobile device optimisation.
           <br />
@@ -24,9 +26,9 @@ function Home() {
           v1.3.1 - 09/07/2026 - Schedule Page bug fix.
           <br />
           v1.3.0 - 09/07/2026 - Schedule Page linked to Job Planning Page - Admin.
+          {/* 
           <br />
-          v1.2.3 - 04/07/2026 - Documents Page amendments for mobile device.
-          {/*   
+          v1.2.3 - 04/07/2026 - Documents Page amendments for mobile device.  
           <br />
           v1.2.2 - 04/07/2026 - Vehicle Prestart notify manager checkbox now working.     
           <br />
