@@ -367,9 +367,12 @@ const MRWA_ROADS_NETWORK_MAPSERVER =
   "https://gisservices.mainroads.wa.gov.au/arcgis/rest/services/OpenData/RoadAssets_DataPortal/MapServer";
 const MRWA_ROADS_NETWORK_KEY = "mrwaRoadsNetwork";
 const MRWA_ROADS_NETWORK_LAYER_ID = 17;
+const MRWA_ROADS_NETWORK_QUERY = `${MRWA_ROADS_NETWORK_MAPSERVER}/${MRWA_ROADS_NETWORK_LAYER_ID}/query`;
 const MRWA_ROADS_NETWORK_NAME = "Roads Network";
 const MRWA_ROADS_NETWORK_ROAD_NAME_FIELD = "ROAD_NAME";
 const MRWA_ROADS_NETWORK_IDENTIFY_TOLERANCE_PX = 6;
+const MRWA_ROADS_NETWORK_QUERY_PAGE_SIZE = 2000;
+const MRWA_ROADS_NETWORK_MAX_FEATURES_PER_VIEW = 12000;
 const MRWA_RRM_KEY = "mrwaRrms";
 const MRWA_RRM_NAME = "MRWA RRMs";
 const MRWA_RRM_WHERE = "ControlType = 'RRM'";
@@ -470,6 +473,100 @@ const MRWA_ROADS_NETWORK_DRAWING_INFO = {
     fieldDelimiter: ",",
   },
 };
+function styleMrwaRoadsNetworkFeature(feature) {
+  const networkType = String(feature?.getProperty?.("NETWORK_TYPE") || "").trim();
+
+  if (networkType === "State Road") {
+    return {
+      clickable: false,
+      strokeColor: "#00c5ff",
+      strokeOpacity: 0.8,
+      strokeWeight: 3,
+    };
+  }
+
+  if (networkType === "Local Road") {
+    return {
+      clickable: false,
+      strokeColor: "#cccccc",
+      strokeOpacity: 0.8,
+      strokeWeight: 3,
+    };
+  }
+
+  if (networkType === "Main Roads Controlled Path") {
+    return {
+      clickable: false,
+      strokeColor: "#c500ff",
+      strokeOpacity: 0.8,
+      strokeWeight: 3,
+    };
+  }
+
+  if (networkType === "Miscellaneous Road") {
+    return {
+      clickable: false,
+      strokeColor: "#ffaa00",
+      strokeOpacity: 0.8,
+      strokeWeight: 3,
+    };
+  }
+
+  if (networkType === "Crossover") {
+    return {
+      clickable: false,
+      strokeColor: "#000000",
+      strokeOpacity: 0.8,
+      strokeWeight: 3,
+    };
+  }
+
+  return {
+    clickable: false,
+    strokeColor: "#00c5ff",
+    strokeOpacity: 0.8,
+    strokeWeight: 3,
+  };
+}
+
+function buildMrwaRoadsNetworkLayer(visible = false) {
+  return {
+    id: MRWA_ROADS_NETWORK_KEY,
+    name: MRWA_ROADS_NETWORK_NAME,
+    type: "line",
+    visible,
+    data: {
+      url: MRWA_ROADS_NETWORK_QUERY,
+      where: "1=1",
+      outFields: ["OBJECTID", "ROAD_NAME", "NETWORK_TYPE"],
+      minZoom: MIN_GEODETIC_ZOOM,
+      maxFeatures: MRWA_ROADS_NETWORK_MAX_FEATURES_PER_VIEW,
+      paginate: true,
+      pageSize: MRWA_ROADS_NETWORK_QUERY_PAGE_SIZE,
+      orderByFields: "OBJECTID",
+      fetchThrottleMs: 0,
+      style: styleMrwaRoadsNetworkFeature,
+      lineLabels: {
+        fields: [MRWA_ROADS_NETWORK_ROAD_NAME_FIELD],
+        networkTypeField: "NETWORK_TYPE",
+        gridPx: 150,
+        minPathMeters: 35,
+        maxLabels: 90,
+        mobileMaxLabels: 35,
+        fontSize: (zoom) => (zoom >= 16 ? "12px" : "11px"),
+      },
+      identifyTolerance: MRWA_ROADS_NETWORK_IDENTIFY_TOLERANCE_PX,
+      roadNameField: MRWA_ROADS_NETWORK_ROAD_NAME_FIELD,
+      drawingInfo: MRWA_ROADS_NETWORK_DRAWING_INFO,
+      exportable: true,
+      exportFormats: ["dxf"],
+      dxfLabelFields: [MRWA_ROADS_NETWORK_ROAD_NAME_FIELD],
+      idFields: ["OBJECTID"],
+      outputLayerName: "Roads_Network",
+      exportSourceDatum: "GDA94",
+    },
+  };
+}
 
 // Info popup sections intentionally follow the Layers panel order.
 // Add new information-enabled layers here when they are added to the panel.
@@ -1612,12 +1709,22 @@ function getCentroidFromGoogleGeometry(geometry, googleMaps) {
   return b.getCenter();
 }
 
-function buildInvisibleLabelMarker({ googleMaps, map, position, text, color, fontSize = "10px", fontWeight = "700" }) {
+function buildInvisibleLabelMarker({
+  googleMaps,
+  map,
+  position,
+  text,
+  color,
+  fontSize = "10px",
+  fontWeight = "700",
+  className = "",
+  zIndex = 1,
+}) {
   return new googleMaps.Marker({
     position,
     map,
     clickable: false,
-    zIndex: 1,
+    zIndex,
     icon: {
       path: "M 0 0",
       strokeOpacity: 0,
@@ -1629,8 +1736,248 @@ function buildInvisibleLabelMarker({ googleMaps, map, position, text, color, fon
       color,
       fontWeight,
       fontSize,
+      className,
     },
   });
+}
+
+function normaliseRoadLabelAngle(angle) {
+  if (!Number.isFinite(angle)) return 0;
+
+  let next = angle;
+  while (next > 180) next -= 360;
+  while (next < -180) next += 360;
+  if (next > 90) next -= 180;
+  if (next < -90) next += 180;
+  return next;
+}
+
+function buildProjectedLineLabelOverlay({
+  googleMaps,
+  map,
+  position,
+  directionStart,
+  directionEnd,
+  text,
+  color,
+  fontSize = "10px",
+  fontWeight = "700",
+  className = "maps-road-label",
+  zIndex = 2,
+}) {
+  class ProjectedLineLabelOverlay extends googleMaps.OverlayView {
+    constructor() {
+      super();
+      this.position = position;
+      this.directionStart = directionStart;
+      this.directionEnd = directionEnd;
+      this.text = String(text || "");
+      this.div = null;
+      this.textEl = null;
+    }
+
+    onAdd() {
+      const div = document.createElement("div");
+      div.className = className;
+      div.style.position = "absolute";
+      div.style.pointerEvents = "none";
+      div.style.zIndex = String(zIndex);
+
+      const textEl = document.createElement("span");
+      textEl.className = `${className}-text`;
+      textEl.textContent = this.text;
+      textEl.style.color = color;
+      textEl.style.fontSize = fontSize;
+      textEl.style.fontWeight = fontWeight;
+      textEl.style.pointerEvents = "none";
+
+      div.appendChild(textEl);
+      this.div = div;
+      this.textEl = textEl;
+      this.getPanes()?.overlayLayer?.appendChild(div);
+    }
+
+    draw() {
+      if (!this.div || !this.textEl) return;
+
+      const projection = this.getProjection();
+      if (!projection) return;
+
+      const anchorPixel = projection.fromLatLngToDivPixel(this.position);
+      if (!anchorPixel) return;
+
+      let angle = 0;
+      const startPixel = projection.fromLatLngToDivPixel(this.directionStart);
+      const endPixel = projection.fromLatLngToDivPixel(this.directionEnd);
+      if (startPixel && endPixel) {
+        const dx = endPixel.x - startPixel.x;
+        const dy = endPixel.y - startPixel.y;
+        if (Math.hypot(dx, dy) >= 1) {
+          angle = normaliseRoadLabelAngle((Math.atan2(dy, dx) * 180) / Math.PI);
+        }
+      }
+
+      this.div.style.left = `${anchorPixel.x}px`;
+      this.div.style.top = `${anchorPixel.y}px`;
+      this.textEl.style.transform = `rotate(${angle.toFixed(2)}deg)`;
+    }
+
+    onRemove() {
+      if (this.div?.parentNode) {
+        this.div.parentNode.removeChild(this.div);
+      }
+      this.div = null;
+      this.textEl = null;
+    }
+  }
+
+  const overlay = new ProjectedLineLabelOverlay();
+  overlay.setMap(map);
+  return overlay;
+}
+
+function getGeojsonLineCoordinateSets(geometry) {
+  if (!geometry) return [];
+  if (geometry.type === "LineString") return [geometry.coordinates || []];
+  if (geometry.type === "MultiLineString") return geometry.coordinates || [];
+  return [];
+}
+
+function getCoordinateDistanceMeters(a, b) {
+  const lng1 = Number(a?.[0]);
+  const lat1 = Number(a?.[1]);
+  const lng2 = Number(b?.[0]);
+  const lat2 = Number(b?.[1]);
+  if (![lng1, lat1, lng2, lat2].every(Number.isFinite)) return 0;
+
+  const radians = Math.PI / 180;
+  const midLat = ((lat1 + lat2) / 2) * radians;
+  const metersPerDegreeLat = 111320;
+  const metersPerDegreeLng = Math.cos(midLat) * 111320;
+  const dx = (lng2 - lng1) * metersPerDegreeLng;
+  const dy = (lat2 - lat1) * metersPerDegreeLat;
+  return Math.hypot(dx, dy);
+}
+
+function getPathLengthMeters(coords = []) {
+  let total = 0;
+  for (let i = 1; i < coords.length; i += 1) {
+    total += getCoordinateDistanceMeters(coords[i - 1], coords[i]);
+  }
+  return total;
+}
+
+function getCoordinateAtPathDistance(coords = [], targetMeters = 0) {
+  if (!coords.length) return null;
+  if (coords.length === 1) return coords[0];
+
+  const total = getPathLengthMeters(coords);
+  if (!total) return coords[Math.floor(coords.length / 2)] || coords[0];
+
+  const target = Math.max(0, Math.min(total, Number(targetMeters) || 0));
+  let walked = 0;
+
+  for (let i = 1; i < coords.length; i += 1) {
+    const start = coords[i - 1];
+    const end = coords[i];
+    const segment = getCoordinateDistanceMeters(start, end);
+    if (!segment) continue;
+
+    if (walked + segment >= target) {
+      const ratio = (target - walked) / segment;
+      const lng = Number(start?.[0]) + (Number(end?.[0]) - Number(start?.[0])) * ratio;
+      const lat = Number(start?.[1]) + (Number(end?.[1]) - Number(start?.[1])) * ratio;
+      return [lng, lat];
+    }
+
+    walked += segment;
+  }
+
+  return coords[coords.length - 1];
+}
+
+function getLineLabelPlacement(coords = [], fraction = 0.5, directionWindowMeters = 45) {
+  if (!coords.length) return null;
+
+  const total = getPathLengthMeters(coords);
+  if (!total) {
+    const fallback = coords[Math.floor(coords.length / 2)] || coords[0];
+    return {
+      anchor: fallback,
+      directionStart: coords[0] || fallback,
+      directionEnd: coords[coords.length - 1] || fallback,
+    };
+  }
+
+  const target = total * fraction;
+  const windowMeters = Math.max(12, Math.min(Number(directionWindowMeters) || 45, total));
+  let directionStart = getCoordinateAtPathDistance(coords, target - windowMeters / 2);
+  let directionEnd = getCoordinateAtPathDistance(coords, target + windowMeters / 2);
+
+  if (getCoordinateDistanceMeters(directionStart, directionEnd) < 2) {
+    directionStart = null;
+    directionEnd = null;
+    let walked = 0;
+
+    for (let i = 1; i < coords.length; i += 1) {
+      const segmentStart = coords[i - 1];
+      const segmentEnd = coords[i];
+      const segment = getCoordinateDistanceMeters(segmentStart, segmentEnd);
+      if (!segment) continue;
+
+      if (walked + segment >= target) {
+        directionStart = segmentStart;
+        directionEnd = segmentEnd;
+        break;
+      }
+
+      walked += segment;
+    }
+  }
+
+  const anchor = getCoordinateAtPathDistance(coords, target);
+  return {
+    anchor,
+    directionStart: directionStart || coords[0] || anchor,
+    directionEnd: directionEnd || coords[coords.length - 1] || anchor,
+  };
+}
+
+function getLongestLinePath(geometry) {
+  const paths = getGeojsonLineCoordinateSets(geometry).filter((coords) => coords?.length >= 2);
+  if (!paths.length) return { coords: [], lengthMeters: 0 };
+
+  return paths
+    .map((coords) => ({ coords, lengthMeters: getPathLengthMeters(coords) }))
+    .sort((a, b) => b.lengthMeters - a.lengthMeters)[0];
+}
+
+function getRoadLabelText(props = {}, fields = []) {
+  for (const field of fields) {
+    const text = String(props?.[field] || "").trim();
+    if (!text) continue;
+    const lower = text.toLowerCase();
+    if (["-", "null", "undefined", "unnamed", "unknown"].includes(lower)) continue;
+    return text;
+  }
+  return "";
+}
+
+function getRoadLabelMinZoom(networkType) {
+  const type = String(networkType || "").trim();
+  if (type === "State Road") return 12;
+  if (type === "Main Roads Controlled Path") return 14;
+  if (type === "Miscellaneous Road") return 14;
+  return 15;
+}
+
+function getRoadLabelPriority(networkType) {
+  const type = String(networkType || "").trim();
+  if (type === "State Road") return 5;
+  if (type === "Main Roads Controlled Path") return 4;
+  if (type === "Miscellaneous Road") return 3;
+  if (type === "Local Road") return 2;
+  return 1;
 }
 
 function getPolygonLabelText(feature, fields = []) {
@@ -6526,9 +6873,12 @@ if (pointSets.length) {
       const hasProjectGrid = prev.some((l) => l.id === LGATE_214_PROJECT_GRID_KEY);
       const hasDistricts = prev.some((l) => l.id === LGATE_229_DISTRICTS_KEY);
       const hasMrwaProjectZones = prev.some((l) => l.id === MRWA_PROJECT_ZONES_KEY);
-      const hasRoadsNetwork = prev.some((l) => l.id === MRWA_ROADS_NETWORK_KEY);
       const existingLayerIds = new Set(prev.map((l) => l.id));
-      const next = [...prev];
+      const next = prev.map((layer) =>
+        layer.id === MRWA_ROADS_NETWORK_KEY
+          ? buildMrwaRoadsNetworkLayer(layer.visible)
+          : layer
+      );
 
     if (!hasSSM)
   next.push({
@@ -7491,21 +7841,8 @@ if (!hasDistricts)
     },
   });
 
-if (!hasRoadsNetwork)
-  next.push({
-    id: MRWA_ROADS_NETWORK_KEY,
-    name: MRWA_ROADS_NETWORK_NAME,
-    type: "imageOverlay",
-    visible: false,
-    data: {
-      mapServerUrl: MRWA_ROADS_NETWORK_MAPSERVER,
-      layerId: MRWA_ROADS_NETWORK_LAYER_ID,
-      opacity: 0.8,
-      identifyTolerance: MRWA_ROADS_NETWORK_IDENTIFY_TOLERANCE_PX,
-      roadNameField: MRWA_ROADS_NETWORK_ROAD_NAME_FIELD,
-      drawingInfo: MRWA_ROADS_NETWORK_DRAWING_INFO,
-    },
-  });
+if (!existingLayerIds.has(MRWA_ROADS_NETWORK_KEY))
+  next.push(buildMrwaRoadsNetworkLayer(false));
 
 if (!hasMrwaProjectZones)
   next.push({
@@ -8138,7 +8475,7 @@ useEffect(() => {
       lines.setMap(map);
       lines.setStyle(layer.data?.style || { clickable: false });
 
-      store = { lines };
+      store = { lines, labels: [] };
       lineLayersRef.current.set(layer.id, store);
     } else {
       store.lines.setMap(map);
@@ -8148,8 +8485,133 @@ useEffect(() => {
     return store;
   };
 
+  const clearLabels = (store) => {
+    (store.labels || []).forEach((marker) => {
+      try {
+        marker.setMap(null);
+      } catch {
+        // ignore
+      }
+    });
+    store.labels = [];
+  };
+
   const clearLayer = (store) => {
     store.lines.forEach((f) => store.lines.remove(f));
+    clearLabels(store);
+  };
+
+  const getScreenGridKey = (position, text, gridPx) => {
+    const projection = map.getProjection?.();
+    const zoomScale = 2 ** Math.floor(Number(zoom) || 0);
+
+    if (projection && Number.isFinite(zoomScale) && zoomScale > 0) {
+      const point = projection.fromLatLngToPoint(position);
+      if (point) {
+        return [
+          text.toLowerCase(),
+          Math.floor((point.x * zoomScale) / gridPx),
+          Math.floor((point.y * zoomScale) / gridPx),
+        ].join("|");
+      }
+    }
+
+    return [
+      text.toLowerCase(),
+      Math.round(position.lat() * 100),
+      Math.round(position.lng() * 100),
+    ].join("|");
+  };
+
+  const buildLineLabels = (layer, featureCollection) => {
+    const labelCfg = layer.data?.lineLabels;
+    if (!labelCfg) return [];
+
+    const isMobileDevice = typeof window !== "undefined" && window.innerWidth <= 900;
+    const maxLabels =
+      isMobileDevice && Number.isFinite(labelCfg.mobileMaxLabels)
+        ? labelCfg.mobileMaxLabels
+        : labelCfg.maxLabels ?? 80;
+    if (maxLabels <= 0) return [];
+
+    const gridPx = labelCfg.gridPx || 150;
+    const minPathMeters = labelCfg.minPathMeters || 0;
+    const candidates = [];
+
+    (featureCollection?.features || []).forEach((feature) => {
+      const props = feature?.properties || {};
+      const text = getRoadLabelText(props, labelCfg.fields || []);
+      if (!text) return;
+
+      const networkType = props?.[labelCfg.networkTypeField || "NETWORK_TYPE"];
+      const minZoom = getRoadLabelMinZoom(networkType);
+      if ((zoom ?? 0) < minZoom) return;
+
+      const { coords, lengthMeters } = getLongestLinePath(feature?.geometry);
+      if (!coords?.length || lengthMeters < minPathMeters) return;
+
+      const placement = getLineLabelPlacement(coords, 0.5, labelCfg.directionWindowMeters || 45);
+      const anchorLng = Number(placement?.anchor?.[0]);
+      const anchorLat = Number(placement?.anchor?.[1]);
+      const startLng = Number(placement?.directionStart?.[0]);
+      const startLat = Number(placement?.directionStart?.[1]);
+      const endLng = Number(placement?.directionEnd?.[0]);
+      const endLat = Number(placement?.directionEnd?.[1]);
+      if (
+        ![
+          anchorLng,
+          anchorLat,
+          startLng,
+          startLat,
+          endLng,
+          endLat,
+        ].every(Number.isFinite)
+      ) {
+        return;
+      }
+
+      candidates.push({
+        text,
+        position: new googleMaps.LatLng(anchorLat, anchorLng),
+        directionStart: new googleMaps.LatLng(startLat, startLng),
+        directionEnd: new googleMaps.LatLng(endLat, endLng),
+        priority: getRoadLabelPriority(networkType),
+        lengthMeters,
+      });
+    });
+
+    const seen = new Set();
+    const markers = [];
+    candidates
+      .sort((a, b) => b.priority - a.priority || b.lengthMeters - a.lengthMeters)
+      .forEach((candidate) => {
+        if (markers.length >= maxLabels) return;
+
+        const key = getScreenGridKey(candidate.position, candidate.text, gridPx);
+        if (seen.has(key)) return;
+        seen.add(key);
+
+        markers.push(
+          buildProjectedLineLabelOverlay({
+            googleMaps,
+            map,
+            position: candidate.position,
+            directionStart: candidate.directionStart,
+            directionEnd: candidate.directionEnd,
+            text: candidate.text,
+            color: labelCfg.color || "#1f1f1f",
+            fontWeight: labelCfg.fontWeight || "800",
+            fontSize:
+              typeof labelCfg.fontSize === "function"
+                ? labelCfg.fontSize(zoom)
+                : labelCfg.fontSize || "11px",
+            className: labelCfg.className || "maps-road-label",
+            zIndex: labelCfg.zIndex || 2,
+          })
+        );
+      });
+
+    return markers;
   };
 
   lineLayers.forEach((layer) => {
@@ -8168,8 +8630,9 @@ useEffect(() => {
       if (!bounds) continue;
       if ((zoom ?? 0) < (layer.data?.minZoom ?? 0)) continue;
 
+      const throttleMs = layer.data?.fetchThrottleMs ?? CADASTRE_FETCH_THROTTLE_MS;
       const now = Date.now();
-      if (now - (lastFetchRef.current[layer.id] || 0) < CADASTRE_FETCH_THROTTLE_MS) {
+      if (throttleMs > 0 && now - (lastFetchRef.current[layer.id] || 0) < throttleMs) {
         continue;
       }
       lastFetchRef.current[layer.id] = now;
@@ -8201,6 +8664,7 @@ useEffect(() => {
         clearLayer(store);
         if (cancelled) return;
         store.lines.addGeoJson(preparedGeojson);
+        store.labels = buildLineLabels(layer, preparedGeojson);
         if (POWER_LAYER_IDS.has(layer.id)) {
           setLayerLoadNotice("");
         }
@@ -8348,7 +8812,7 @@ useEffect(() => {
     roadsNetworkOverlayRef.current = null;
   };
 
-  if (!map || !googleMaps || !isAppVisible || !layer?.visible) {
+  if (!map || !googleMaps || !isAppVisible || !layer?.visible || layer?.type !== "imageOverlay") {
     contourIdentifySeqRef.current += 1;
     removeOverlay();
     return undefined;

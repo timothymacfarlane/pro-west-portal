@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -14,6 +15,7 @@ function addressSummaryFromRow(r) {
 }
 
 function Take5Register() {
+  const location = useLocation();
   const { user } = useAuth();
 
 const [staff, setStaff] = useState([]);
@@ -32,6 +34,20 @@ const [jobFilterSuggestions, setJobFilterSuggestions] = useState([]);
 const [jobFilterLoading, setJobFilterLoading] = useState(false);
 const [dateFilter, setDateFilter] = useState("");
 const debounceJobFilterRef = useRef(null);
+
+useEffect(() => {
+  const frame = requestAnimationFrame(() => {
+    const scrollOwner = document.querySelector(".main-content");
+    if (scrollOwner && typeof scrollOwner.scrollTo === "function") {
+      scrollOwner.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      return;
+    }
+
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  });
+
+  return () => cancelAnimationFrame(frame);
+}, [location.key, location.pathname]);
 
 const selectedSurveyor = useMemo(() => {
   if (surveyorMode === "__all__") return "__all__";

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
@@ -300,6 +301,7 @@ function drawRiskRow(doc, label, result, x, y, rowWidth) {
 /* -------------- Component ---------------- */
 
 function Take5() {
+  const location = useLocation();
   const { user, profile, displayName } = useAuth();
   const derivedDisplayName = useMemo(
   () =>
@@ -364,6 +366,35 @@ const [previousTake5Id, setPreviousTake5Id] = useState("");
 const [previousTake5Options, setPreviousTake5Options] = useState([]);
 const [previousTake5Loading, setPreviousTake5Loading] = useState(false);
 const [previousTake5Message, setPreviousTake5Message] = useState("");
+const take5TopRef = useRef(null);
+
+  useEffect(() => {
+    const resetScroll = () => {
+      const scrollOwner = document.querySelector(".main-content");
+      if (scrollOwner && typeof scrollOwner.scrollTo === "function") {
+        scrollOwner.scrollTo({ top: 0, left: 0, behavior: "auto" });
+        return;
+      }
+
+      if (take5TopRef.current && typeof take5TopRef.current.scrollIntoView === "function") {
+        take5TopRef.current.scrollIntoView({ block: "start", behavior: "auto" });
+        return;
+      }
+
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    };
+
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      resetScroll();
+      secondFrame = requestAnimationFrame(resetScroll);
+    });
+
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, [location.key, location.pathname, step]);
 
 const [swms, setSwms] = useState("");
 const [jha, setJha] = useState("");
@@ -580,27 +611,6 @@ useEffect(() => {
 useEffect(() => {
   setSignatureName(employeeName || "");
 }, [employeeName]);
-
-useEffect(() => {
-  const scrollTarget =
-    document.querySelector(".page-body") ||
-    document.querySelector("main") ||
-    document.querySelector("[data-take5]");
-
-  requestAnimationFrame(() => {
-    if (scrollTarget && typeof scrollTarget.scrollTo === "function") {
-      scrollTarget.scrollTo({
-        top: 0,
-        behavior: "auto",
-      });
-    } else {
-      window.scrollTo({
-        top: 0,
-        behavior: "auto",
-      });
-    }
-  });
-}, [step]);
 
 useEffect(() => {
   let isMounted = true;
@@ -1278,6 +1288,7 @@ const hasUnreducedHazardRisk = useCallback(() => {
 }, [hazards]);
 
   const proceedToNextStep = useCallback(() => {
+    document.activeElement?.blur?.();
     setShowRedWarning(false);
     setIncompleteWarning("");
     setStep((s) => Math.min(s + 1, totalSteps));
@@ -1309,6 +1320,7 @@ const hasUnreducedHazardRisk = useCallback(() => {
 ]);
 
   const prevStep = useCallback(() => {
+    document.activeElement?.blur?.();
     setIncompleteWarning("");
     setShowRedWarning(false);
     setShowRiskReductionWarning(false);
@@ -3103,6 +3115,7 @@ const footerBarStyle = {
         </button>
       }
     >
+      <div ref={take5TopRef} aria-hidden="true" />
       {renderRiskMatrixModal()}
       {renderRedWarningModal()}
       {renderRiskReductionWarningModal()}

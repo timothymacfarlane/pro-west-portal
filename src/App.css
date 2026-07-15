@@ -1106,6 +1106,25 @@
   font-weight: 800;
 }
 
+.maps-road-label {
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transform-origin: center center;
+  white-space: nowrap;
+}
+
+.maps-road-label-text {
+  display: inline-block;
+  pointer-events: none;
+  transform-origin: center center;
+  text-shadow:
+    -1px -1px 0 rgba(255, 255, 255, 0.95),
+    1px -1px 0 rgba(255, 255, 255, 0.95),
+    -1px 1px 0 rgba(255, 255, 255, 0.95),
+    1px 1px 0 rgba(255, 255, 255, 0.95),
+    0 1px 3px rgba(255, 255, 255, 0.9);
+}
+
 .maps-legend-divider {
   height: 1px;
   background: rgba(0,0,0,0.08);

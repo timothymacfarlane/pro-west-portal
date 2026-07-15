@@ -19,6 +19,7 @@ const EQUIPMENT_TYPES = [
 
 const SET_NUMBER_TYPES = new Set(["Controller", "Prism", "Radio Handle", "Total Station"]);
 const SET_NUMBERS = ["-", "5", "6", "7", "8", "9"];
+const SET_NUMBER_FILTER_OPTIONS = ["5", "6", "7", "8", "9"];
 const MAX_ATTACHMENT_SIZE_BYTES = 15 * 1024 * 1024;
 const ALLOWED_ATTACHMENT_EXTENSIONS = new Set([
   "csv",
@@ -179,6 +180,7 @@ function EquipmentRegister() {
   const [search, setSearch] = useState("");
   const [assignedFilter, setAssignedFilter] = useState("__my__");
   const [equipmentTypeFilter, setEquipmentTypeFilter] = useState("__all__");
+  const [setNumberFilter, setSetNumberFilter] = useState("__all__");
   const [refreshKey, setRefreshKey] = useState(0);
   const [equipmentModal, setEquipmentModal] = useState({ open: false, mode: "new", item: null });
   const [equipmentMobileHeaderOffset, setEquipmentMobileHeaderOffset] = useState(0);
@@ -247,6 +249,10 @@ function EquipmentRegister() {
         return false;
       }
 
+      if (setNumberFilter !== "__all__" && String(item.set_number ?? "") !== setNumberFilter) {
+        return false;
+      }
+
       if (!q) return true;
 
       const haystack = [
@@ -266,7 +272,7 @@ function EquipmentRegister() {
 
       return haystack.includes(q);
     });
-  }, [equipment, effectiveAssignedFilter, equipmentTypeFilter, profileMap, search]);
+  }, [equipment, effectiveAssignedFilter, equipmentTypeFilter, profileMap, search, setNumberFilter]);
 
   const loadProfiles = useCallback(async () => {
     const { data, error: pErr } = await supabase
@@ -374,6 +380,7 @@ function EquipmentRegister() {
     setSearch("");
     setAssignedFilter("__my__");
     setEquipmentTypeFilter("__all__");
+    setSetNumberFilter("__all__");
     setEquipmentModal({ open: false, mode: "new", item: null });
     setServiceModal({ open: false, item: null });
     setConfirmModal({ open: false, title: "", message: "", confirmLabel: "Delete", onConfirm: null });
@@ -758,6 +765,24 @@ function EquipmentRegister() {
             {EQUIPMENT_TYPES.map((type) => (
               <option key={type} value={type}>
                 {type}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="card-row" style={{ marginTop: "0.6rem" }}>
+          <span className="card-row-label">Set Number</span>
+          <select
+            className="maps-search-input"
+            value={setNumberFilter}
+            onChange={(e) => setSetNumberFilter(e.target.value)}
+            disabled={loading}
+            style={{ maxWidth: 280 }}
+          >
+            <option value="__all__">All</option>
+            {SET_NUMBER_FILTER_OPTIONS.map((setNumber) => (
+              <option key={setNumber} value={setNumber}>
+                {setNumber}
               </option>
             ))}
           </select>
