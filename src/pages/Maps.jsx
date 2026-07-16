@@ -197,6 +197,73 @@ const DRAINAGE_PIPES_NAME = "Drainage Pipes";
 const DRAINAGE_PIPES_OUT_FIELDS = ["OBJECTID"];
 const DRAINAGE_PIPES_QUERY_PAGE_SIZE = 2000;
 const DRAINAGE_PIPES_MAX_FEATURES_PER_VIEW = 6000;
+const SLIP_INFRASTRUCTURE_MAPSERVER =
+  "https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Infrastructure_and_Utilities/MapServer";
+const WANNEROO_DRAINAGE_PITS_QUERY = `${SLIP_INFRASTRUCTURE_MAPSERVER}/36/query`;
+const WANNEROO_DRAINAGE_PITS_KEY = "wannerooDrainagePits";
+const WANNEROO_DRAINAGE_PITS_NAME = "Wanneroo Drainage Pits";
+const WANNEROO_DRAINAGE_PITS_OUT_FIELDS = [
+  "objectid",
+  "pit_no",
+  "sub_name",
+  "st_name",
+  "type",
+  "con_type",
+  "lid_type",
+  "dia_width",
+];
+const WANNEROO_DRAINAGE_PIPES_QUERY = `${SLIP_INFRASTRUCTURE_MAPSERVER}/37/query`;
+const WANNEROO_DRAINAGE_PIPES_KEY = "wannerooDrainagePipes";
+const WANNEROO_DRAINAGE_PIPES_NAME = "Wanneroo Drainage Pipes";
+const WANNEROO_DRAINAGE_PIPES_OUT_FIELDS = ["oid", "ogc_fid", "st_name", "dia_width", "material"];
+const WCORP_DRAINAGE_PITS_QUERY = `${SLIP_INFRASTRUCTURE_MAPSERVER}/3/query`;
+const WCORP_DRAINAGE_PITS_KEY = "wcorpDrainagePits";
+const WCORP_DRAINAGE_PITS_NAME = "Water Corp Drainage Pits";
+const WCORP_DRAINAGE_PITS_OUT_FIELDS = [
+  "objectid",
+  "id",
+  "sap_id",
+  "sap_name",
+  "status",
+  "pacid",
+  "cover_shape",
+  "chamber_type",
+  "owner",
+  "material",
+  "drainnum",
+];
+const WCORP_DRAINAGE_PIPES_QUERY = `${SLIP_INFRASTRUCTURE_MAPSERVER}/23/query`;
+const WCORP_DRAINAGE_PIPES_KEY = "wcorpDrainagePipes";
+const WCORP_DRAINAGE_PIPES_NAME = "Water Corp Drainage Pipes";
+const WCORP_DRAINAGE_PIPES_OUT_FIELDS = [
+  "objectid",
+  "id",
+  "drainnum",
+  "status",
+  "pipe_material",
+  "size_height",
+  "pipe_shape",
+  "owner",
+  "mainname",
+  "maintype",
+];
+const SLIP_DRAINAGE_QUERY_PAGE_SIZE = 2000;
+const SLIP_DRAINAGE_MAX_FEATURES_PER_VIEW = 6000;
+const WANNEROO_DRAINAGE_PITS_MAX_FEATURES_PER_VIEW = 25000;
+const DRAINAGE_PIT_SYMBOL = {
+  path: (typeof window !== "undefined" && window.google?.maps?.SymbolPath?.CIRCLE) || 0,
+  fillColor: "#2E7D32",
+  fillOpacity: 1,
+  strokeColor: "#0B3D16",
+  strokeWeight: 1.5,
+  scale: 4.5,
+};
+const DRAINAGE_PIPE_STYLE = {
+  clickable: false,
+  strokeColor: "#2E7D32",
+  strokeWeight: 3,
+  strokeOpacity: 0.6,
+};
 const POWER_LAYER_IDS = new Set([
   "power034",
   "power031",
@@ -579,6 +646,8 @@ const INFO_LAYER_ORDER_IDS = [
   "projectGrid214",
   "mrwaProjectZones",
   "drainagePits",
+  "wannerooDrainagePits",
+  "wcorpDrainagePits",
   "power034",
   "power031",
   "power029",
@@ -1457,6 +1526,23 @@ function formatPopupValueOrDash(value) {
   return text;
 }
 
+function getDrainagePitPopupValue(row = {}) {
+  return getFirstDefinedValue(row, [
+    "Pit_Type",
+    "pit_type",
+    "type",
+    "chamber_type",
+    "cover_shape",
+    "lid_type",
+    "con_type",
+    "sap_name",
+    "sub_name",
+    "pacid",
+    "pit_no",
+    "id",
+  ]);
+}
+
 function buildDrainagePitPopupHtml({ features = null, props = null } = {}) {
   const items = Array.isArray(features) && features.length ? features : [props || {}];
   const deduped = [];
@@ -1464,26 +1550,33 @@ function buildDrainagePitPopupHtml({ features = null, props = null } = {}) {
 
   items.forEach((item, index) => {
     const source = item?.properties || item || {};
-    const key = cleanInfoPart(source.OBJECTID) || cleanInfoPart(source.objectid) || String(index);
+    const key =
+      cleanInfoPart(source.OBJECTID) ||
+      cleanInfoPart(source.objectid) ||
+      cleanInfoPart(source.oid) ||
+      cleanInfoPart(source.id) ||
+      String(index);
     if (seen.has(key)) return;
     seen.add(key);
     deduped.push(source);
   });
 
-  const rows = deduped.length ? deduped : [{}];
+  const rows = deduped
+    .map((row, index) => ({ row, index, value: getDrainagePitPopupValue(row) }))
+    .filter(({ value }) => hasPopupValue(value));
 
   return `
     <div style="font-family: Inter, sans-serif; font-size: 13px; min-width: 220px;">
       <div data-pw-drag-handle="1" style="font-weight:800; font-size:14px; margin-bottom:8px; color:#111;">
-        ${rows.length === 1 ? "DRAINAGE PIT" : "DRAINAGE PITS"}
+        ${deduped.length === 1 ? "DRAINAGE PIT" : "DRAINAGE PITS"}
       </div>
 
       ${rows
-        .map((row, index) => `
+        .map(({ value }, index) => `
         <div style="${index ? "margin-top:8px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.12);" : ""}">
           <div style="padding:2px 0;">
             <span style="font-weight:700; color:#333;">Pit Type:</span>
-            <span style="color:#111; word-break:break-word; overflow-wrap:anywhere;">${escapeHtml(formatPopupValueOrDash(row.Pit_Type))}</span>
+            <span style="color:#111; word-break:break-word; overflow-wrap:anywhere;">${escapeHtml(value)}</span>
           </div>
         </div>`)
         .join("")}
@@ -2035,6 +2128,120 @@ function getFeatureZValue(props = {}, layer) {
   const zFields = layer?.data?.zFields || [];
   const v = getFirstDefinedValue(props, zFields);
   return v !== undefined && v !== null && String(v).trim() !== "" ? v : "";
+}
+
+function getGeojsonPolygonCoordinateSets(geometry) {
+  if (!geometry) return [];
+  if (geometry.type === "Polygon") return [geometry.coordinates || []];
+  if (geometry.type === "MultiPolygon") return geometry.coordinates || [];
+  return [];
+}
+
+function getRingSignedAreaAndCentroid(ring = []) {
+  let twiceArea = 0;
+  let cx = 0;
+  let cy = 0;
+
+  for (let i = 0; i < ring.length - 1; i += 1) {
+    const [x1, y1] = ring[i] || [];
+    const [x2, y2] = ring[i + 1] || [];
+    if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
+
+    const cross = x1 * y2 - x2 * y1;
+    twiceArea += cross;
+    cx += (x1 + x2) * cross;
+    cy += (y1 + y2) * cross;
+  }
+
+  if (!twiceArea) return { area: 0, centroid: null };
+  return {
+    area: twiceArea / 2,
+    centroid: [cx / (3 * twiceArea), cy / (3 * twiceArea)],
+  };
+}
+
+function isPointInGeojsonRing(point, ring = []) {
+  const [x, y] = point || [];
+  if (![x, y].every(Number.isFinite)) return false;
+
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const [xi, yi] = ring[i] || [];
+    const [xj, yj] = ring[j] || [];
+    if (![xi, yi, xj, yj].every(Number.isFinite)) continue;
+
+    const intersects = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi || 1) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function isPointInGeojsonPolygonRings(point, rings = []) {
+  const outer = rings[0] || [];
+  if (!isPointInGeojsonRing(point, outer)) return false;
+
+  for (let i = 1; i < rings.length; i += 1) {
+    if (isPointInGeojsonRing(point, rings[i])) return false;
+  }
+  return true;
+}
+
+function getGeojsonRingAveragePoint(ring = []) {
+  const points = ring.filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat));
+  if (!points.length) return null;
+
+  const total = points.reduce(
+    (acc, [lng, lat]) => {
+      acc.lng += lng;
+      acc.lat += lat;
+      return acc;
+    },
+    { lng: 0, lat: 0 }
+  );
+
+  return [total.lng / points.length, total.lat / points.length];
+}
+
+function getRepresentativePointForGeojsonPolygon(geometry) {
+  const polygons = getGeojsonPolygonCoordinateSets(geometry);
+  if (!polygons.length) return null;
+
+  const candidates = polygons
+    .map((rings) => {
+      const outer = rings?.[0] || [];
+      const { area, centroid } = getRingSignedAreaAndCentroid(outer);
+      return { rings, outer, area: Math.abs(area), centroid };
+    })
+    .filter((candidate) => candidate.outer.length >= 3)
+    .sort((a, b) => b.area - a.area);
+
+  for (const candidate of candidates) {
+    const fallback = getGeojsonRingAveragePoint(candidate.outer);
+    const point = candidate.centroid || fallback;
+    if (point && isPointInGeojsonPolygonRings(point, candidate.rings)) return point;
+    if (fallback) return fallback;
+  }
+
+  return null;
+}
+
+function convertGeojsonPolygonsToRepresentativePoints(featureCollection) {
+  return {
+    ...featureCollection,
+    features: (featureCollection?.features || [])
+      .map((feature) => {
+        const point = getRepresentativePointForGeojsonPolygon(feature?.geometry);
+        if (!point) return null;
+        return {
+          ...feature,
+          geometry: {
+            type: "Point",
+            coordinates: point,
+          },
+        };
+      })
+      .filter(Boolean),
+  };
 }
 
 function getPolygonPathsFromDataGeometry(geometry) {
@@ -6863,6 +7070,10 @@ if (pointSets.length) {
       const hasWaterMeters = prev.some((l) => l.id === "water006");
       const hasDrainagePits = prev.some((l) => l.id === DRAINAGE_PITS_KEY);
       const hasDrainagePipes = prev.some((l) => l.id === DRAINAGE_PIPES_KEY);
+      const hasWannerooDrainagePits = prev.some((l) => l.id === WANNEROO_DRAINAGE_PITS_KEY);
+      const hasWannerooDrainagePipes = prev.some((l) => l.id === WANNEROO_DRAINAGE_PIPES_KEY);
+      const hasWcorpDrainagePits = prev.some((l) => l.id === WCORP_DRAINAGE_PITS_KEY);
+      const hasWcorpDrainagePipes = prev.some((l) => l.id === WCORP_DRAINAGE_PIPES_KEY);
       const hasPowerDistUnderground = prev.some((l) => l.id === "power034");
       const hasPowerDistOverhead = prev.some((l) => l.id === "power031");
       const hasPowerDistPoles = prev.some((l) => l.id === "power029");
@@ -7117,14 +7328,7 @@ if (!hasDrainagePits)
       maxFeatures: DRAINAGE_PITS_MAX_FEATURES_PER_VIEW,
       paginate: true,
       pageSize: DRAINAGE_PITS_QUERY_PAGE_SIZE,
-      symbol: {
-        path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
-        fillColor: "#2E7D32",
-        fillOpacity: 1,
-        strokeColor: "#0B3D16",
-        strokeWeight: 1.5,
-        scale: 4.5,
-      },
+      symbol: DRAINAGE_PIT_SYMBOL,
       layerTag: "DRAINAGE PIT",
       exportable: true,
       exportFormats: ["csv", "dxf"],
@@ -7170,12 +7374,96 @@ if (!hasDrainagePipes)
       dxfLabelFields: [],
       exportFieldOrder: [],
       idFields: ["OBJECTID"],
-      style: {
-        clickable: false,
-        strokeColor: "#2E7D32",
-        strokeWeight: 3,
-        strokeOpacity: 0.6,
-      },
+      style: DRAINAGE_PIPE_STYLE,
+    },
+  });
+if (!hasWannerooDrainagePits)
+  next.push({
+    id: WANNEROO_DRAINAGE_PITS_KEY,
+    name: WANNEROO_DRAINAGE_PITS_NAME,
+    type: "point",
+    visible: false,
+    data: {
+      url: WANNEROO_DRAINAGE_PITS_QUERY,
+      where: "1=1",
+      outFields: WANNEROO_DRAINAGE_PITS_OUT_FIELDS,
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: WANNEROO_DRAINAGE_PITS_MAX_FEATURES_PER_VIEW,
+      paginate: true,
+      pageSize: SLIP_DRAINAGE_QUERY_PAGE_SIZE,
+      orderByFields: "objectid",
+      symbol: DRAINAGE_PIT_SYMBOL,
+      layerTag: "DRAINAGE PIT",
+      idFields: ["objectid", "OBJECTID", "pit_no"],
+      nameFields: ["type", "lid_type", "con_type", "pit_no", "sub_name"],
+      label: null,
+      filterFn: () => true,
+      prepareGeojson: convertGeojsonPolygonsToRepresentativePoints,
+      popupBuilder: ({ props }) => buildDrainagePitPopupHtml({ props }),
+      cluster: false,
+    },
+  });
+if (!hasWannerooDrainagePipes)
+  next.push({
+    id: WANNEROO_DRAINAGE_PIPES_KEY,
+    name: WANNEROO_DRAINAGE_PIPES_NAME,
+    type: "line",
+    visible: false,
+    data: {
+      url: WANNEROO_DRAINAGE_PIPES_QUERY,
+      where: "1=1",
+      outFields: WANNEROO_DRAINAGE_PIPES_OUT_FIELDS,
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: SLIP_DRAINAGE_MAX_FEATURES_PER_VIEW,
+      paginate: true,
+      pageSize: SLIP_DRAINAGE_QUERY_PAGE_SIZE,
+      orderByFields: "oid",
+      idFields: ["oid", "ogc_fid"],
+      style: DRAINAGE_PIPE_STYLE,
+    },
+  });
+if (!hasWcorpDrainagePits)
+  next.push({
+    id: WCORP_DRAINAGE_PITS_KEY,
+    name: WCORP_DRAINAGE_PITS_NAME,
+    type: "point",
+    visible: false,
+    data: {
+      url: WCORP_DRAINAGE_PITS_QUERY,
+      where: "1=1",
+      outFields: WCORP_DRAINAGE_PITS_OUT_FIELDS,
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: SLIP_DRAINAGE_MAX_FEATURES_PER_VIEW,
+      paginate: true,
+      pageSize: SLIP_DRAINAGE_QUERY_PAGE_SIZE,
+      orderByFields: "objectid",
+      symbol: DRAINAGE_PIT_SYMBOL,
+      layerTag: "DRAINAGE PIT",
+      idFields: ["objectid", "OBJECTID", "id", "sap_id", "pacid"],
+      nameFields: ["chamber_type", "cover_shape", "sap_name", "pacid", "id"],
+      label: null,
+      filterFn: () => true,
+      popupBuilder: ({ props }) => buildDrainagePitPopupHtml({ props }),
+      cluster: false,
+    },
+  });
+if (!hasWcorpDrainagePipes)
+  next.push({
+    id: WCORP_DRAINAGE_PIPES_KEY,
+    name: WCORP_DRAINAGE_PIPES_NAME,
+    type: "line",
+    visible: false,
+    data: {
+      url: WCORP_DRAINAGE_PIPES_QUERY,
+      where: "1=1",
+      outFields: WCORP_DRAINAGE_PIPES_OUT_FIELDS,
+      minZoom: MIN_CADASTRE_ZOOM,
+      maxFeatures: SLIP_DRAINAGE_MAX_FEATURES_PER_VIEW,
+      paginate: true,
+      pageSize: SLIP_DRAINAGE_QUERY_PAGE_SIZE,
+      orderByFields: "objectid",
+      idFields: ["objectid", "OBJECTID", "id"],
+      style: DRAINAGE_PIPE_STYLE,
     },
   });
 if (!hasPowerDistUnderground)
@@ -8041,7 +8329,11 @@ const syncClusterer = () => {
         );
         if (cancelled) return;
 
-        let features = geojson.features || [];
+        const preparedGeojson =
+          typeof layer.data?.prepareGeojson === "function"
+            ? layer.data.prepareGeojson(geojson)
+            : geojson;
+        let features = preparedGeojson.features || [];
         if (POWER_LAYER_IDS.has(layer.id)) {
           setLayerLoadNotice("");
         }
@@ -10181,7 +10473,14 @@ onBlur={() => {
   <div className="layers-list">
 {/* Drainage */}
 <div className="layer-subheading">Drainage</div>
-{[DRAINAGE_PITS_KEY, DRAINAGE_PIPES_KEY]
+{[
+  DRAINAGE_PITS_KEY,
+  DRAINAGE_PIPES_KEY,
+  WANNEROO_DRAINAGE_PITS_KEY,
+  WANNEROO_DRAINAGE_PIPES_KEY,
+  WCORP_DRAINAGE_PITS_KEY,
+  WCORP_DRAINAGE_PIPES_KEY,
+]
   .map((id) => layers.find((l) => l.id === id))
   .filter(Boolean)
   .map((l) => (
