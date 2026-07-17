@@ -1,4 +1,4 @@
-const APP_VERSION = "v1.3.6";
+const APP_VERSION = "v1.3.7";
 
 function HeaderActions({ extraActions }) {
   return (

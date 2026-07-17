@@ -250,6 +250,24 @@ const WCORP_DRAINAGE_PIPES_OUT_FIELDS = [
 const SLIP_DRAINAGE_QUERY_PAGE_SIZE = 2000;
 const SLIP_DRAINAGE_MAX_FEATURES_PER_VIEW = 6000;
 const WANNEROO_DRAINAGE_PITS_MAX_FEATURES_PER_VIEW = 25000;
+const DRAINAGE_SOURCE_PROPERTY = "__drainageSource";
+const DRAINAGE_SOURCE_MAIN_ROADS = "Main Roads WA";
+const DRAINAGE_SOURCE_WANNEROO = "City of Wanneroo";
+const DRAINAGE_SOURCE_WATER_CORP = "Water Corporation";
+const DRAINAGE_PIT_LAYER_IDS = [
+  DRAINAGE_PITS_KEY,
+  WANNEROO_DRAINAGE_PITS_KEY,
+  WCORP_DRAINAGE_PITS_KEY,
+];
+const DRAINAGE_PIPE_LAYER_IDS = [
+  DRAINAGE_PIPES_KEY,
+  WANNEROO_DRAINAGE_PIPES_KEY,
+  WCORP_DRAINAGE_PIPES_KEY,
+];
+const DRAINAGE_GROUPED_LAYER_IDS = new Set([
+  ...DRAINAGE_PIT_LAYER_IDS,
+  ...DRAINAGE_PIPE_LAYER_IDS,
+]);
 const DRAINAGE_PIT_SYMBOL = {
   path: (typeof window !== "undefined" && window.google?.maps?.SymbolPath?.CIRCLE) || 0,
   fillColor: "#2E7D32",
@@ -1543,6 +1561,22 @@ function getDrainagePitPopupValue(row = {}) {
   ]);
 }
 
+function addDrainageSourceToFeatureCollection(featureCollection, source) {
+  const text = cleanInfoPart(source);
+  if (!text) return featureCollection;
+
+  return {
+    ...featureCollection,
+    features: (featureCollection?.features || []).map((feature) => ({
+      ...feature,
+      properties: {
+        ...(feature?.properties || {}),
+        [DRAINAGE_SOURCE_PROPERTY]: text,
+      },
+    })),
+  };
+}
+
 function buildDrainagePitPopupHtml({ features = null, props = null } = {}) {
   const items = Array.isArray(features) && features.length ? features : [props || {}];
   const deduped = [];
@@ -1564,6 +1598,9 @@ function buildDrainagePitPopupHtml({ features = null, props = null } = {}) {
   const rows = deduped
     .map((row, index) => ({ row, index, value: getDrainagePitPopupValue(row) }))
     .filter(({ value }) => hasPopupValue(value));
+  const dataSource = deduped
+    .map((row) => cleanInfoPart(row[DRAINAGE_SOURCE_PROPERTY]))
+    .find(Boolean) || "";
 
   return `
     <div style="font-family: Inter, sans-serif; font-size: 13px; min-width: 220px;">
@@ -1580,6 +1617,11 @@ function buildDrainagePitPopupHtml({ features = null, props = null } = {}) {
           </div>
         </div>`)
         .join("")}
+      ${dataSource ? `
+        <div style="padding:2px 0; ${rows.length ? "margin-top:6px;" : ""}">
+          <span style="font-weight:700; color:#333;">Data Source:</span>
+          <span style="color:#111; word-break:break-word; overflow-wrap:anywhere;">${escapeHtml(dataSource)}</span>
+        </div>` : ""}
     </div>
   `;
 }
@@ -7323,6 +7365,7 @@ if (!hasDrainagePits)
     data: {
       url: DRAINAGE_PITS_QUERY,
       where: "1=1",
+      drainageSource: DRAINAGE_SOURCE_MAIN_ROADS,
       outFields: DRAINAGE_PITS_OUT_FIELDS,
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: DRAINAGE_PITS_MAX_FEATURES_PER_VIEW,
@@ -7356,6 +7399,7 @@ if (!hasDrainagePipes)
     data: {
       url: DRAINAGE_PIPES_QUERY,
       where: "1=1",
+      drainageSource: DRAINAGE_SOURCE_MAIN_ROADS,
       outFields: DRAINAGE_PIPES_OUT_FIELDS,
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: DRAINAGE_PIPES_MAX_FEATURES_PER_VIEW,
@@ -7386,6 +7430,7 @@ if (!hasWannerooDrainagePits)
     data: {
       url: WANNEROO_DRAINAGE_PITS_QUERY,
       where: "1=1",
+      drainageSource: DRAINAGE_SOURCE_WANNEROO,
       outFields: WANNEROO_DRAINAGE_PITS_OUT_FIELDS,
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: WANNEROO_DRAINAGE_PITS_MAX_FEATURES_PER_VIEW,
@@ -7412,6 +7457,7 @@ if (!hasWannerooDrainagePipes)
     data: {
       url: WANNEROO_DRAINAGE_PIPES_QUERY,
       where: "1=1",
+      drainageSource: DRAINAGE_SOURCE_WANNEROO,
       outFields: WANNEROO_DRAINAGE_PIPES_OUT_FIELDS,
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: SLIP_DRAINAGE_MAX_FEATURES_PER_VIEW,
@@ -7431,6 +7477,7 @@ if (!hasWcorpDrainagePits)
     data: {
       url: WCORP_DRAINAGE_PITS_QUERY,
       where: "1=1",
+      drainageSource: DRAINAGE_SOURCE_WATER_CORP,
       outFields: WCORP_DRAINAGE_PITS_OUT_FIELDS,
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: SLIP_DRAINAGE_MAX_FEATURES_PER_VIEW,
@@ -7456,6 +7503,7 @@ if (!hasWcorpDrainagePipes)
     data: {
       url: WCORP_DRAINAGE_PIPES_QUERY,
       where: "1=1",
+      drainageSource: DRAINAGE_SOURCE_WATER_CORP,
       outFields: WCORP_DRAINAGE_PIPES_OUT_FIELDS,
       minZoom: MIN_CADASTRE_ZOOM,
       maxFeatures: SLIP_DRAINAGE_MAX_FEATURES_PER_VIEW,
@@ -8206,12 +8254,27 @@ DPIRD_CONTOUR_LAYER_CONFIGS.forEach((config) => {
       return;
     }
 
+    const hasPitVisibility = DRAINAGE_PIT_LAYER_IDS.some((id) =>
+      Object.prototype.hasOwnProperty.call(vis, id)
+    );
+    const hasPipeVisibility = DRAINAGE_PIPE_LAYER_IDS.some((id) =>
+      Object.prototype.hasOwnProperty.call(vis, id)
+    );
+    const pitVisible = DRAINAGE_PIT_LAYER_IDS.some((id) => !!vis[id]);
+    const pipeVisible = DRAINAGE_PIPE_LAYER_IDS.some((id) => !!vis[id]);
+
     setLayers((prev) =>
-      prev.map((l) =>
-        Object.prototype.hasOwnProperty.call(vis, l.id)
+      prev.map((l) => {
+        if (DRAINAGE_PIT_LAYER_IDS.includes(l.id)) {
+          return hasPitVisibility ? { ...l, visible: pitVisible } : l;
+        }
+        if (DRAINAGE_PIPE_LAYER_IDS.includes(l.id)) {
+          return hasPipeVisibility ? { ...l, visible: pipeVisible } : l;
+        }
+        return Object.prototype.hasOwnProperty.call(vis, l.id)
           ? { ...l, visible: !!vis[l.id] }
-          : l
-      )
+          : l;
+      })
     );
 
     appliedPersistedLayersRef.current = true;
@@ -8221,7 +8284,12 @@ DPIRD_CONTOUR_LAYER_CONFIGS.forEach((config) => {
   useEffect(() => {
     if (!layers?.length) return;
     const layerVisibility = {};
-    layers.forEach((l) => (layerVisibility[l.id] = !!l.visible));
+    layers.forEach((l) => {
+      if (DRAINAGE_GROUPED_LAYER_IDS.has(l.id) && l.id !== DRAINAGE_PITS_KEY && l.id !== DRAINAGE_PIPES_KEY) {
+        return;
+      }
+      layerVisibility[l.id] = !!l.visible;
+    });
     safeWriteState({ layerVisibility });
   }, [layers]);
 
@@ -8333,7 +8401,11 @@ const syncClusterer = () => {
           typeof layer.data?.prepareGeojson === "function"
             ? layer.data.prepareGeojson(geojson)
             : geojson;
-        let features = preparedGeojson.features || [];
+        const sourcedGeojson = addDrainageSourceToFeatureCollection(
+          preparedGeojson,
+          layer.data?.drainageSource
+        );
+        let features = sourcedGeojson.features || [];
         if (POWER_LAYER_IDS.has(layer.id)) {
           setLayerLoadNotice("");
         }
@@ -8945,7 +9017,11 @@ useEffect(() => {
         );
         if (cancelled) return;
 
-        const preparedGeojson = dedupeFeatureCollectionForExport(geojson, layer);
+        const sourcedGeojson = addDrainageSourceToFeatureCollection(
+          geojson,
+          layer.data?.drainageSource
+        );
+        const preparedGeojson = dedupeFeatureCollectionForExport(sourcedGeojson, layer);
         const maxFeatures = layer.data?.maxFeatures ?? MAX_FEATURES_PER_VIEW;
         if ((preparedGeojson.features?.length || 0) > maxFeatures) {
           console.warn(`${layer.name}: too many features in view, zoom in further.`);
@@ -9206,9 +9282,25 @@ useEffect(() => {
 }, [contourLayers, viewTick, isAppVisible]);
 
   const toggleLayer = (id) => {
-    setLayers((prev) =>
-      prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l))
-    );
+    setLayers((prev) => {
+      if (id === DRAINAGE_PITS_KEY) {
+        const current = prev.find((l) => l.id === DRAINAGE_PITS_KEY)?.visible;
+        const next = !current;
+        return prev.map((l) =>
+          DRAINAGE_PIT_LAYER_IDS.includes(l.id) ? { ...l, visible: next } : l
+        );
+      }
+
+      if (id === DRAINAGE_PIPES_KEY) {
+        const current = prev.find((l) => l.id === DRAINAGE_PIPES_KEY)?.visible;
+        const next = !current;
+        return prev.map((l) =>
+          DRAINAGE_PIPE_LAYER_IDS.includes(l.id) ? { ...l, visible: next } : l
+        );
+      }
+
+      return prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l));
+    });
   };
 
   const cadLayer = useMemo(() => layers.find((l) => l.id === "cad001"), [layers]);
@@ -10476,10 +10568,6 @@ onBlur={() => {
 {[
   DRAINAGE_PITS_KEY,
   DRAINAGE_PIPES_KEY,
-  WANNEROO_DRAINAGE_PITS_KEY,
-  WANNEROO_DRAINAGE_PIPES_KEY,
-  WCORP_DRAINAGE_PITS_KEY,
-  WCORP_DRAINAGE_PIPES_KEY,
 ]
   .map((id) => layers.find((l) => l.id === id))
   .filter(Boolean)
