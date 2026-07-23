@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext.jsx";
+import {
+  isCurrentEmployeeProfile,
+  profileEmployeeOption,
+} from "../lib/profileVisibility.js";
 
 // Reuse the Yes/No toggle behaviour from Take5
 const yesNoOptions = ["Yes", "No"];
@@ -294,15 +298,9 @@ function FieldError({ children }) {
 /* ---------------- Component ---------------- */
 
 function VehiclePrestart() {
-  const { user, profile, displayName } = useAuth();
-  const derivedDisplayName =
-    profile?.display_name ||
-    displayName ||
-    user?.user_metadata?.full_name ||
-    user?.email ||
-    "";
+  const { user, profile } = useAuth();
 
-  const [employeeName, setEmployeeName] = useState(derivedDisplayName);
+  const [employeeName, setEmployeeName] = useState("");
   const [employeeId, setEmployeeId] = useState("");
   const [employeeOptions, setEmployeeOptions] = useState([]);
   const [vehicle, setVehicle] = useState("");
@@ -370,13 +368,6 @@ function VehiclePrestart() {
     });
   };
 
-  // Keep employee default aligned with Take 5, but leave manual selections alone.
-  useEffect(() => {
-    if (!employeeOptions.length && derivedDisplayName && !employeeName) {
-      setEmployeeName(derivedDisplayName);
-    }
-  }, [derivedDisplayName, employeeName, employeeOptions.length]);
-
   useEffect(() => {
     let isMounted = true;
 
@@ -388,17 +379,14 @@ function VehiclePrestart() {
         const { data, error } = await supabase
           .from("profiles")
           .select("id, display_name, email, is_active")
+          .eq("is_active", true)
           .order("display_name", { ascending: true });
 
         if (error) throw error;
 
         const options = (data || [])
-          .filter((p) => p.is_active !== false)
-          .map((p) => ({
-            id: p.id,
-            name: employeeOptionName(p),
-            email: p.email,
-          }))
+          .filter(isCurrentEmployeeProfile)
+          .map(profileEmployeeOption)
           .filter((p) => p.name)
           .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 
@@ -410,7 +398,7 @@ function VehiclePrestart() {
           options.find((emp) => emp.id === myProfileId) ||
           options.find((emp) => emp.id === user?.id) ||
           options.find((emp) => emp.email === user?.email);
-        const defaultName = matchedUser?.name || derivedDisplayName || "";
+        const defaultName = matchedUser?.name || "";
 
         if (matchedUser?.id) {
           setEmployeeId((prev) => prev || matchedUser.id);
@@ -439,7 +427,7 @@ function VehiclePrestart() {
     return () => {
       isMounted = false;
     };
-  }, [derivedDisplayName, myProfileId, user?.email, user?.id]);
+  }, [myProfileId, user?.email, user?.id]);
 
   useEffect(() => {
     let isMounted = true;
@@ -669,7 +657,7 @@ function VehiclePrestart() {
       employeeOptions.find((emp) => emp.id === user?.id) ||
       employeeOptions.find((emp) => emp.email === user?.email);
     setEmployeeId(currentEmployee?.id || "");
-    setEmployeeName(currentEmployee?.name || derivedDisplayName || "");
+    setEmployeeName(currentEmployee?.name || "");
     setChecks(() => {
       const init = {};
       CHECK_ITEMS.forEach((c) => {

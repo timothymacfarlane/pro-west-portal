@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
+import { isContactsVisibleProfile } from "../lib/profileVisibility.js";
 
 function getInitials(name) {
   if (!name) return "?";
@@ -176,8 +177,10 @@ useEffect(() => {
             supabase
               .from("profiles")
               .select(
-                "id, display_name, job_title, mobile, email"
+                "id, display_name, job_title, mobile, email, is_active, show_in_contacts"
               )
+              .eq("is_active", true)
+              .eq("show_in_contacts", true)
               .order("display_name", { ascending: true })
           );
         }
@@ -207,15 +210,17 @@ useEffect(() => {
 
         if (showStaff) {
           const staffRes = results[idx++];
-          const mappedStaff = (staffRes.data || []).map((row) => ({
-            id: `staff:${row.id}`,
-            source: "staff",
-            source_id: row.id,
-            name: row.display_name || row.email || "Unnamed",
-            role: row.job_title || "",
-            mobile: row.mobile || "",
-            email: row.email || "",
-          }));
+          const mappedStaff = (staffRes.data || [])
+            .filter(isContactsVisibleProfile)
+            .map((row) => ({
+              id: `staff:${row.id}`,
+              source: "staff",
+              source_id: row.id,
+              name: row.display_name || row.email || "Unnamed",
+              role: row.job_title || "",
+              mobile: row.mobile || "",
+              email: row.email || "",
+            }));
           merged = merged.concat(mappedStaff);
         }
 

@@ -5,6 +5,10 @@ import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext.jsx";
 import { cleanDisplayAddress } from "../lib/displayFormatters.js";
+import {
+  isCurrentEmployeeProfile,
+  profileEmployeeOption,
+} from "../lib/profileVisibility.js";
 
 const yesNoOptions = ["Yes", "No"];
 const yesNaNoOptions = ["Yes", "NA", "No"]; // Yes | NA | No (NA in middle)
@@ -302,16 +306,7 @@ function drawRiskRow(doc, label, result, x, y, rowWidth) {
 
 function Take5() {
   const location = useLocation();
-  const { user, profile, displayName } = useAuth();
-  const derivedDisplayName = useMemo(
-  () =>
-    profile?.display_name ||
-    displayName ||
-    user?.user_metadata?.full_name ||
-    user?.email ||
-    "",
-  [profile?.display_name, displayName, user]
-);
+  const { user } = useAuth();
 
   const [step, setStep] = useState(1);
   const totalSteps = 5;
@@ -338,7 +333,7 @@ function Take5() {
   // Header info
   const [jobNumber, setJobNumber] = useState("");
   const [selectedJob, setSelectedJob] = useState(null);
-  const [employeeName, setEmployeeName] = useState(derivedDisplayName);
+  const [employeeName, setEmployeeName] = useState("");
   const [employeeOptions, setEmployeeOptions] = useState([]);
 
   const getLoggedInEmployeeName = useCallback(() => {
@@ -346,8 +341,8 @@ function Take5() {
     employeeOptions.find((emp) => emp.id === user?.id) ||
     employeeOptions.find((emp) => emp.email === user?.email);
 
-  return matchedUser?.name || derivedDisplayName || "";
-}, [employeeOptions, user?.id, user?.email, derivedDisplayName]);
+  return matchedUser?.name || "";
+}, [employeeOptions, user?.id, user?.email]);
 
   // ✅ Job number autosuggest (copied pattern from Jobs.jsx)
   const [jobNoQuery, setJobNoQuery] = useState("");
@@ -356,7 +351,7 @@ function Take5() {
   const debounceJobNoRef = useRef(null);
 
   // Signature
-  const [signatureName, setSignatureName] = useState(derivedDisplayName);
+  const [signatureName, setSignatureName] = useState("");
   const [signatureConfirmed, setSignatureConfirmed] = useState(false);
 
   // Step 1 – SWMS / JHA
@@ -473,8 +468,8 @@ const [jhaImagePreview, setJhaImagePreview] = useState("");
         setStep(parsed.step || 1);
         setJobNumber(parsed.jobNumber || "");
         setJobNoQuery(parsed.jobNumber || "");
-        setEmployeeName(parsed.employeeName || derivedDisplayName || "");
-        setSignatureName(parsed.signatureName || derivedDisplayName);
+        setEmployeeName(parsed.employeeName || "");
+        setSignatureName(parsed.signatureName || "");
 
         setSwms(parsed.swms || "");
 setJha(parsed.jha || "");
@@ -600,13 +595,14 @@ setJhaImagePreview("");
     controls,
   ]);
 
-  // Keep employee/signature name synced with auth display name
+  // Keep employee/signature name synced only when the logged-in user is eligible.
 useEffect(() => {
-  if (derivedDisplayName) {
-    setEmployeeName((prev) => prev || derivedDisplayName);
-    setSignatureName((prev) => prev || derivedDisplayName);
+  const loggedInEmployeeName = getLoggedInEmployeeName();
+  if (loggedInEmployeeName) {
+    setEmployeeName((prev) => prev || loggedInEmployeeName);
+    setSignatureName((prev) => prev || loggedInEmployeeName);
   }
-}, [derivedDisplayName]);
+}, [getLoggedInEmployeeName]);
 
 useEffect(() => {
   setSignatureName(employeeName || "");
@@ -619,17 +615,15 @@ useEffect(() => {
     try {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, display_name, email")
+        .select("id, display_name, email, is_active")
+        .eq("is_active", true)
         .order("display_name", { ascending: true });
 
       if (error) throw error;
 
       const options = (data || [])
-        .map((p) => ({
-          id: p.id,
-          name: (p.display_name || "").trim() || (p.email || "").trim(),
-          email: p.email,
-        }))
+        .filter(isCurrentEmployeeProfile)
+        .map(profileEmployeeOption)
         .filter((p) => p.name);
 
       if (!isMounted) return;
@@ -643,7 +637,7 @@ const matchedUser =
   options.find((emp) => emp.id === user?.id) ||
   options.find((emp) => emp.email === loggedInEmail);
 
-const defaultName = matchedUser?.name || derivedDisplayName || "";
+const defaultName = matchedUser?.name || "";
 
 if (defaultName) {
   setEmployeeName((prev) => {
@@ -668,7 +662,7 @@ if (defaultName) {
   return () => {
     isMounted = false;
   };
-}, [user?.id, user?.email, derivedDisplayName]);
+}, [user?.id, user?.email]);
 
 const getPerthDayRangeUtc = useCallback(() => {
   const now = new Date();
@@ -1166,7 +1160,7 @@ setJhaImagePreview("");
 
 
 
-  }, [derivedDisplayName, draftKey, getLoggedInEmployeeName]);
+  }, [draftKey, getLoggedInEmployeeName]);
 
   const canContinueFromStep = useCallback(
     (currentStep) => {

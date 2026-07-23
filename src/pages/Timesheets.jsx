@@ -966,7 +966,7 @@ markCurrentFieldsSaved();
                         className={inputClass(row.isoKey, "notes")}
                         value={row.notes}
                         onChange={(e) => handleFieldChange(row.isoKey, "notes", e.target.value)}
-                        placeholder="Job / comments"
+                        placeholder="Any comments"
                          disabled={!isEditable}
                       />
                     </td>
@@ -1109,7 +1109,7 @@ markCurrentFieldsSaved();
                         className={inputClass(row.isoKey, "notes")}
                         value={row.notes}
                         onChange={(e) => handleFieldChange(row.isoKey, "notes", e.target.value)}
-                        placeholder="Job / comments"
+                        placeholder="Any comments"
                          disabled={!isEditable}
                       />
                     </td>

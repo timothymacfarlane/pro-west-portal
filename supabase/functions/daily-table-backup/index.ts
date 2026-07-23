@@ -17,6 +17,7 @@ const TABLES = [
   "equipment_register",
   "equipment_service_history",
   "equipment_service_attachments",
+  "job_checklist_items",
   "job_reassign_log",
   "jobs_legacy_raw",
   "notifications",

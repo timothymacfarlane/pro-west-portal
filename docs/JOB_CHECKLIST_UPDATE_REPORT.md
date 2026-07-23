@@ -1,0 +1,188 @@
+# Job Checklist Definition Update Report
+
+## Category Totals
+
+- Amalgamation: 0
+- Boundary Identification: 10
+- Boundary Repeg: 12
+- Building Setout: 15
+- Feature and Contour Survey: 8
+- Repeg and Setout: 15
+- Subdivision - Built Strata: 18
+- Subdivision - Green Title: 25
+- Subdivision - Survey Strata: 26
+- Subdivision - Survey Strata Conversion: 21
+- Vacant Site Survey: 7
+- Configured total excluding Amalgamation: 157
+
+## Retained Keys
+
+- Boundary Identification | letter-of-engagement-received | old 1 -> new 1 | Letter of Engagement received; save it to the job folder under Documents > Received — Project Manager.
+- Boundary Identification | complete-sufficient-search | old 2 -> new 2 | Complete sufficient search — Project Manager / Field Surveyor.
+- Boundary Identification | alignment-field-survey-and-pickup | old 3 -> new 3 | Complete alignment field survey and pickup along the subject boundaries — Field Surveyor.
+- Boundary Identification | calculate-required-boundaries | old 4 -> new 4 | Calculate the required boundaries — Field Surveyor.
+- Boundary Identification | magnet-processing-boundary-improvements | old 5 -> new 5 | Complete Magnet processing and annotate the Magnet file with improvements within 1 m of the parcel boundary — Field Surveyor.
+- Boundary Identification | check-calculations | old 6 -> new 6 | Check the calculations — Project Manager.
+- Boundary Identification | complete-boundary-identification-plan | old 7 -> new 7 | Complete the Boundary Identification Survey plan with Regulation 25A Certificate — Drafting.
+- Boundary Identification | check-boundary-identification-plan | old 8 -> new 8 | Check the Boundary Identification Survey plan — Project Manager.
+- Boundary Identification | issue-boundary-identification-plan | old 9 -> new 9 | Issue the Boundary Identification Survey plan — Project Manager.
+- Boundary Identification | invoice-client-mark-complete | old 10 -> new 10 | Invoice the client and mark the job in the Portal as Complete — Accounts.
+- Boundary Repeg | save-job-order-email | old 1 -> new 1 | Save the job order email into the Job Orders folder in the Admin inbox and put a copy in the job folder — Admin.
+- Boundary Repeg | print-survey-search-records | old 2 -> new 2 | If SSA, print the Deposited Plan and Survey Sheet. If not SSA and a recent survey has been completed on the street, print the Field Book and Plan, Diagram or Deposited Plan. If an alignment survey is required, complete sufficient search — Admin / Project Manager / Field Surveyor.
+- Boundary Repeg | complete-alignment-field-survey | old 3 -> new 3 | If required, complete the alignment field survey — Field Surveyor.
+- Boundary Repeg | calculate-required-boundaries | old 4 -> new 4 | Calculate the required boundaries — Field Surveyor.
+- Boundary Repeg | create-point-plots-and-files | old 5 -> new 5 | Create and print point plots and a point listing and place them in the file. Save the GSI and DXF files to the job’s Calc directory — Field Surveyor.
+- Boundary Repeg | check-calculations | old 6 -> new 6 | Check the calculations — Project Manager.
+- Boundary Repeg | complete-field-survey-setout-markup | old 7 -> new 7 | Complete the field survey and setout markup — Field Surveyor.
+- Boundary Repeg | magnet-qa-boundary-improvements | old 8 -> new 8 | Complete Magnet QA and processing and annotate the Magnet file with improvements within 1 m of the parcel boundary — Field Surveyor.
+- Boundary Repeg | complete-repeg-plan | old 9 -> new 9 | Complete the Repeg plan with Regulation 25A Certificate — Drafting.
+- Boundary Repeg | check-repeg-plan | old 10 -> new 10 | Check the Repeg plan — Project Manager.
+- Boundary Repeg | issue-repeg-plan | old 11 -> new 11 | Issue the Repeg plan — Project Manager.
+- Boundary Repeg | invoice-client-mark-complete | old 12 -> new 12 | Invoice the client and mark the job in the Portal as Complete — Accounts.
+- Building Setout | save-job-order-email | old 1 -> new 1 | Save the job order email into the Job Orders folder in the Admin inbox and put a copy in the job folder — Admin.
+- Building Setout | print-site-and-floor-plans | old 2 -> new 2 | Print one site plan and two floor plans, plus an additional floor plan if zero-lot walls exist — Admin.
+- Building Setout | print-survey-search-records | old 3 -> new 3 | If SSA, print the Deposited Plan and Survey Sheet. If not SSA and a recent survey has been completed on the street, print the Field Book and Plan, Diagram or Deposited Plan. If an alignment survey is required, complete sufficient search — Admin / Project Manager / Field Surveyor.
+- Building Setout | complete-alignment-field-survey | old 4 -> new 4 | If required, complete the alignment field survey — Field Surveyor.
+- Building Setout | calculate-required-boundaries | old 5 -> new 5 | Calculate the required boundaries — Field Surveyor.
+- Building Setout | calculate-building-position | old 6 -> new 6 | Calculate the building position from the site plan, then use the floor plan to calculate setout points. Check boundary setbacks against the site plan — Field Surveyor.
+- Building Setout | rule-up-building-floor-plan | old 7 -> new 7 | Rule up the building floor plan: one office copy, one site copy and one zero-lot site copy where applicable — Field Surveyor.
+- Building Setout | create-point-plots-and-files | old 8 -> new 8 | Create and print point plots and a point listing and place them in the file. Save the GSI and DXF files to the job’s Calc directory — Field Surveyor.
+- Building Setout | check-calculations | old 9 -> new 9 | Check the calculations — Project Manager.
+- Building Setout | complete-field-survey-setout-markup | old 10 -> new 10 | Complete the field survey and setout markup — Field Surveyor.
+- Building Setout | complete-magnet-qa-processing | old 11 -> new 11 | Complete Magnet QA and processing — Field Surveyor.
+- Building Setout | complete-setout-plan | old 12 -> new 12 | Complete the Setout plan — Drafting.
+- Building Setout | check-setout-plan | old 13 -> new 13 | Check the Setout plan — Project Manager.
+- Building Setout | issue-setout-plan | old 14 -> new 14 | Issue the Setout plan — Project Manager.
+- Building Setout | invoice-client-mark-complete | old 15 -> new 15 | Invoice the client and mark the job in the Portal as Complete — Accounts.
+- Feature and Contour Survey | letter-of-engagement-received | old 1 -> new 1 | Letter of Engagement received; save it to the job folder under Documents > Received — Project Manager.
+- Feature and Contour Survey | complete-job-preparation | old 2 -> new 2 | Complete job preparation — Admin:
+- Feature and Contour Survey | complete-field-survey | old 3 -> new 3 | Complete the field survey — Field Surveyor.
+- Feature and Contour Survey | complete-magnet-processing | old 4 -> new 4 | Complete Magnet processing — Field Surveyor.
+- Feature and Contour Survey | complete-autocad-processing | old 5 -> new 5 | Complete AutoCAD processing — Drafting.
+- Feature and Contour Survey | complete-plan-check | old 6 -> new 6 | Complete the Feature and Contour Survey plan check — Project Manager.
+- Feature and Contour Survey | issue-plan-pdf-dwg-photos | old 7 -> new 7 | Issue the Feature and Contour Survey plan in PDF and DWG formats, together with site photographs, to the client — Project Manager.
+- Feature and Contour Survey | invoice-client-mark-complete | old 8 -> new 8 | Invoice the client and mark the job in the Portal as Complete — Accounts.
+- Repeg and Setout | save-job-order-email | old 1 -> new 1 | Save the job order email into the Job Orders folder in the Admin inbox and put a copy in the job folder — Admin.
+- Repeg and Setout | print-site-and-floor-plans | old 2 -> new 2 | Print one site plan and two floor plans, plus an additional floor plan if zero-lot walls exist — Admin.
+- Repeg and Setout | print-survey-search-records | old 3 -> new 3 | If SSA, print the Deposited Plan and Survey Sheet. If not SSA and a recent survey has been completed on the street, print the Field Book and Plan, Diagram or Deposited Plan. If an alignment survey is required, complete sufficient search — Admin / Project Manager / Field Surveyor.
+- Repeg and Setout | complete-alignment-field-survey | old 4 -> new 4 | If required, complete the alignment field survey — Field Surveyor.
+- Repeg and Setout | calculate-required-boundaries | old 5 -> new 5 | Calculate the required boundaries — Field Surveyor.
+- Repeg and Setout | calculate-building-position | old 6 -> new 6 | Calculate the building position from the site plan, then use the floor plan to calculate setout points. Check boundary setbacks against the site plan — Field Surveyor.
+- Repeg and Setout | rule-up-building-floor-plan | old 7 -> new 7 | Rule up the building floor plan: one office copy, one site copy and one zero-lot site copy where applicable — Field Surveyor.
+- Repeg and Setout | create-point-plots-and-files | old 8 -> new 8 | Create and print point plots and a point listing and place them in the file. Save the GSI and DXF files to the job’s Calc directory — Field Surveyor.
+- Repeg and Setout | check-calculations | old 9 -> new 9 | Check the calculations — Project Manager.
+- Repeg and Setout | complete-field-survey-setout-markup | old 10 -> new 10 | Complete the field survey and setout markup — Field Surveyor.
+- Repeg and Setout | magnet-qa-boundary-improvements | old 11 -> new 11 | Complete Magnet QA and processing and annotate the Magnet file with improvements within 1 m of the parcel boundary — Field Surveyor.
+- Repeg and Setout | complete-repeg-setout-plan | old 12 -> new 12 | Complete the Repeg and Setout plan with Regulation 25A Certificate — Drafting.
+- Repeg and Setout | check-repeg-setout-plan | old 13 -> new 13 | Check the Repeg and Setout plan — Project Manager.
+- Repeg and Setout | issue-repeg-setout-plan | old 14 -> new 14 | Issue the Repeg and Setout plan — Project Manager.
+- Repeg and Setout | invoice-client-mark-complete | old 15 -> new 15 | Invoice the client and mark the job in the Portal as Complete — Accounts.
+- Subdivision - Built Strata | letter-of-engagement-received | old 1 -> new 1 | Letter of Engagement received; save it to the job folder under Documents > Received — Project Manager.
+- Subdivision - Built Strata | organise-site-access | old 2 -> new 2 | Organise site access — Project Manager.
+- Subdivision - Built Strata | alignment-survey-strata-measure-up | old 3 -> new 3 | Complete the alignment survey and strata measure-up — Field Surveyor.
+- Subdivision - Built Strata | alignment-strata-boundary-calculations | old 4 -> new 4 | Complete alignment, strata and boundary calculations — Field Surveyor.
+- Subdivision - Built Strata | produce-draft-survey-strata-plan | old 5 -> new 5 | Produce the draft Survey Strata Plan — Drafting.
+- Subdivision - Built Strata | check-draft-strata-plan | old 6 -> new 6 | Check the draft Strata Plan — Licensed Surveyor / Project Manager.
+- Subdivision - Built Strata | order-unit-entitlement | old 7 -> new 7 | Order the Unit Entitlement evaluation — Project Manager.
+- Subdivision - Built Strata | send-plan-unit-entitlement-bylaws | old 8 -> new 8 | Send the Strata Plan and Unit Entitlement to the client. Confirm whether by-laws are applicable — Project Manager.
+- Subdivision - Built Strata | invoice-part-1 | old 9 -> new 9 | Invoice Part 1 — Accounts.
+- Subdivision - Built Strata | draw-field-book | old 10 -> new 10 | Draw the Field Book — Field Surveyor.
+- Subdivision - Built Strata | final-strata-plan-check | old 11 -> new 11 | Complete the final Strata Plan check, including cross-reference between the Field Book and Strata Plan — Licensed Surveyor / Project Manager.
+- Subdivision - Built Strata | receive-ba18 | old 12 -> new 12 | Receive BA18, Certificate of Building Compliance, from the builder — Project Manager.
+- Subdivision - Built Strata | lodge-ba13 | old 13 -> new 13 | Lodge BA13, Application for Building Approval — Project Manager.
+- Subdivision - Built Strata | receive-ba14 | old 14 -> new 14 | Receive BA14, Building Approval Certificate — Project Manager.
+- Subdivision - Built Strata | lodge-strata-plan-landgate | old 15 -> new 15 | Lodge the Strata Plan, CSV, Field Book, Unit Entitlement and BA14 through Landgate Online — Licensed Surveyor / Project Manager.
+- Subdivision - Built Strata | notify-client-lodged | old 16 -> new 16 | Notify the client that the plan has been lodged — Project Manager.
+- Subdivision - Built Strata | inform-client-iofd | old 17 -> new 17 | Notify the client when the plan is In Order for Dealings and ready for title applications through a third-party conveyancer — Project Manager.
+- Subdivision - Built Strata | invoice-part-2 | old 18 -> new 18 | Invoice the client Part 2 and mark the job in the Portal as Complete — Accounts.
+- Subdivision - Green Title | letter-of-engagement-received | old 1 -> new 1 | Letter of Engagement received; save it to the job folder under Documents > Received — Project Manager.
+- Subdivision - Green Title | complete-feature-survey | old 2 -> new 2 | Complete the feature survey — Field Surveyor.
+- Subdivision - Green Title | draft-proposed-subdivision-plan | old 3 -> new 4 | Draft the proposed subdivision plan — Drafting / Project Manager.
+- Subdivision - Green Title | invoice-part-1-before-wapc | old 4 -> new 5 | Invoice Part 1 before submitting the WAPC application — Accounts.
+- Subdivision - Green Title | submit-form-1a | old 5 -> new 6 | Submit Form 1A, WAPC Application — Project Manager / Admin.
+- Subdivision - Green Title | receive-wapc-conditions | old 6 -> new 7 | Receive the WAPC conditions, forward them to the client and provide advice — Project Manager / Admin.
+- Subdivision - Green Title | complete-alignment-fieldwork | old 7 -> new 10 | Complete alignment fieldwork — Field Surveyor.
+- Subdivision - Green Title | calculate-existing-proposed-boundaries | old 8 -> new 11 | Calculate the existing and proposed boundaries — Field Surveyor.
+- Subdivision - Green Title | complete-final-marking | old 10 -> new 14 | Complete final marking and referencing — Field Surveyor.
+- Subdivision - Green Title | draft-deposited-plan | old 11 -> new 15 | Draft the Deposited Plan — Drafting.
+- Subdivision - Green Title | check-deposited-plan | old 12 -> new 16 | Check the Deposited Plan — Project Manager.
+- Subdivision - Green Title | draw-field-book | old 14 -> new 17 | Draw the Field Book — Field Surveyor.
+- Subdivision - Green Title | complete-final-deposited-plan-check | old 16 -> new 18 | Complete the final Deposited Plan check, including cross-reference between the Field Book and Deposited Plan — Licensed Surveyor / Project Manager.
+- Subdivision - Green Title | lodge-deposited-plan | old 20 -> new 20 | Lodge the Deposited Plan, Field Book and CSD through Landgate Online — Licensed Surveyor / Project Manager.
+- Subdivision - Green Title | arrange-clearances | old 15 -> new 21 | Request and receive required clearances — Project Manager / Admin.
+- Subdivision - Green Title | invoice-part-2 | old 18 -> new 22 | Invoice Part 2 before submitting the WAPC Application for Endorsement — Accounts.
+- Subdivision - Green Title | submit-wapc-form-1c | old 19 -> new 23 | Submit WAPC Form 1C Application for Endorsement — Project Manager / Admin.
+- Subdivision - Green Title | notify-client-iofd-title-applications | old 21 -> new 24 | Notify the client when the plan is In Order for Dealings and ready for title applications through a third-party conveyancer — Project Manager / Admin.
+- Subdivision - Green Title | invoice-part-3 | old 22 -> new 25 | Invoice the client Part 3 and mark the job in the Portal as Complete — Accounts.
+- Subdivision - Survey Strata | letter-of-engagement-received | old 1 -> new 1 | Letter of Engagement received; save it to the job folder under Documents > Received — Project Manager.
+- Subdivision - Survey Strata | complete-feature-survey | old 2 -> new 2 | Complete the feature survey — Field Surveyor.
+- Subdivision - Survey Strata | draft-proposed-subdivision-plan | old 3 -> new 4 | Draft the proposed subdivision plan — Drafting / Project Manager.
+- Subdivision - Survey Strata | invoice-part-1-before-wapc | old 4 -> new 5 | Invoice Part 1 before submitting the WAPC application — Accounts.
+- Subdivision - Survey Strata | submit-form-1a | old 5 -> new 6 | Submit Form 1A, WAPC Application — Project Manager / Admin.
+- Subdivision - Survey Strata | receive-wapc-conditions | old 6 -> new 7 | Receive the WAPC conditions, forward them to the client and provide advice — Project Manager / Admin.
+- Subdivision - Survey Strata | complete-alignment-fieldwork | old 7 -> new 10 | Complete alignment fieldwork — Field Surveyor.
+- Subdivision - Survey Strata | calculate-existing-proposed-boundaries | old 8 -> new 11 | Calculate the existing and proposed boundaries — Field Surveyor.
+- Subdivision - Survey Strata | complete-final-marking | old 10 -> new 14 | Complete final marking and referencing — Field Surveyor.
+- Subdivision - Survey Strata | draft-survey-strata-plan | old 11 -> new 15 | Draft the Survey Strata Plan — Drafting.
+- Subdivision - Survey Strata | check-survey-strata-plan | old 12 -> new 16 | Check the Survey Strata Plan — Project Manager.
+- Subdivision - Survey Strata | draw-field-book | old 15 -> new 17 | Draw the Field Book — Field Surveyor.
+- Subdivision - Survey Strata | complete-final-survey-strata-plan-check | old 17 -> new 18 | Complete the final Survey Strata Plan check, including cross-reference between the Field Book and Deposited Plan — Licensed Surveyor / Project Manager.
+- Subdivision - Survey Strata | request-unit-entitlement | old 13 -> new 19 | Order the Unit Entitlement evaluation — Project Manager.
+- Subdivision - Survey Strata | lodge-survey-strata-plan | old 21 -> new 21 | Lodge the Survey Strata Plan, Field Book, Unit Entitlement and CSV through Landgate Online — Licensed Surveyor / Project Manager.
+- Subdivision - Survey Strata | arrange-clearances | old 16 -> new 22 | Request and receive required clearances — Project Manager / Admin.
+- Subdivision - Survey Strata | invoice-part-2 | old 19 -> new 23 | Invoice Part 2 before submitting the WAPC Application for Endorsement — Accounts.
+- Subdivision - Survey Strata | submit-wapc-form-1c | old 20 -> new 24 | Submit WAPC Form 1C Application for Endorsement — Project Manager / Admin.
+- Subdivision - Survey Strata | notify-client-iofd-title-applications | old 22 -> new 25 | Notify the client when the plan is In Order for Dealings and ready for title applications through a third-party conveyancer — Project Manager / Admin.
+- Subdivision - Survey Strata | invoice-part-3 | old 23 -> new 26 | Invoice the client Part 3 and mark the job in the Portal as Complete — Accounts.
+- Subdivision - Survey Strata Conversion | letter-of-engagement-received | old 1 -> new 1 | Letter of Engagement received; save it to the job folder under Documents > Received — Project Manager.
+- Subdivision - Survey Strata Conversion | organise-site-access | old 2 -> new 2 | Organise site access — Project Manager.
+- Subdivision - Survey Strata Conversion | discuss-boundary-conversion-process | old 3 -> new 3 | Discuss the likely boundary position and conversion process with all owners — Project Manager.
+- Subdivision - Survey Strata Conversion | alignment-survey-building-pickup | old 4 -> new 4 | Complete the alignment survey and building pickup with sufficient information to determine the boundary location — Field Surveyor.
+- Subdivision - Survey Strata Conversion | alignment-boundary-calculations | old 5 -> new 5 | Complete alignment and boundary calculations — Field Surveyor.
+- Subdivision - Survey Strata Conversion | produce-draft-survey-strata-plan | old 6 -> new 6 | Produce the draft Survey Strata Plan — Drafting.
+- Subdivision - Survey Strata Conversion | order-unit-entitlement | old 7 -> new 7 | Order the Unit Entitlement evaluation — Project Manager.
+- Subdivision - Survey Strata Conversion | send-draft-plan-unit-entitlement-forms | old 8 -> new 8 | Send the owners the draft Survey Strata Plan, Unit Entitlement and prefilled conversion forms. Have the owners sign and agree to the Survey Strata Plan — Project Manager.
+- Subdivision - Survey Strata Conversion | receive-signed-conversion-forms | old 9 -> new 9 | Receive the signed conversion forms and signed Survey Strata Plan. Save them to the Landgate folder — Project Manager.
+- Subdivision - Survey Strata Conversion | complete-osr-online-form | old 10 -> new 10 | Complete the required Office of State Revenue online form — Project Manager.
+- Subdivision - Survey Strata Conversion | receive-osr-online-form | old 11 -> new 11 | Receive the completed Office of State Revenue online form. Save it to the Landgate folder — Project Manager.
+- Subdivision - Survey Strata Conversion | organise-bank-consent | old 12 -> new 12 | Organise bank consent from banks holding mortgages shown on the Certificate of Title — Project Manager.
+- Subdivision - Survey Strata Conversion | receive-bank-consent | old 13 -> new 13 | Receive bank consent from all banks. Save it to the Landgate folder — Project Manager.
+- Subdivision - Survey Strata Conversion | mark-new-boundaries | old 14 -> new 14 | Mark the new boundaries — Field Surveyor.
+- Subdivision - Survey Strata Conversion | update-survey-strata-plan-boundary-marking | old 15 -> new 15 | Update the Survey Strata Plan with the correct boundary marking — Drafting.
+- Subdivision - Survey Strata Conversion | draw-field-book | old 16 -> new 16 | Draw the Field Book — Field Surveyor.
+- Subdivision - Survey Strata Conversion | check-plan-against-field-book | old 17 -> new 17 | Check the Survey Strata Plan and cross-check it against the Field Book — Field Surveyor.
+- Subdivision - Survey Strata Conversion | lodge-conversion-forms | old 18 -> new 18 | Lodge the conversion forms at Landgate in person and obtain the NOR number required to lodge the Survey Strata Plan — Admin.
+- Subdivision - Survey Strata Conversion | obtain-owner-lodgement-consent | old 19 -> new 19 | Obtain consent by email from the owners to lodge the Survey Strata Plan at Landgate — Project Manager.
+- Subdivision - Survey Strata Conversion | lodge-survey-strata-plan | old 20 -> new 20 | Lodge the Survey Strata Plan at Landgate — Project Manager.
+- Subdivision - Survey Strata Conversion | invoice-client-mark-complete | old 21 -> new 21 | Invoice the client and mark the job in the Portal as Complete — Accounts.
+- Vacant Site Survey | complete-job-preparation | old 1 -> new 1 | Complete job preparation — Admin:
+- Vacant Site Survey | complete-field-survey | old 2 -> new 2 | Complete the field survey — Field Surveyor.
+- Vacant Site Survey | complete-magnet-processing | old 3 -> new 3 | Complete Magnet processing — Field Surveyor.
+- Vacant Site Survey | complete-autocad-processing | old 4 -> new 4 | Complete AutoCAD processing — Drafting.
+- Vacant Site Survey | complete-plan-check | old 5 -> new 5 | Complete the Vacant Site Survey plan check — Project Manager.
+- Vacant Site Survey | issue-plan-pdf-dwg-photos | old 6 -> new 6 | Issue the Vacant Site Survey plan in PDF and DWG formats, together with site photographs, to the client — Project Manager.
+- Vacant Site Survey | invoice-client-mark-complete | old 7 -> new 7 | Invoice the client and mark the job in the Portal as Complete — Accounts.
+
+## New Keys
+
+- Subdivision - Green Title | complete-magnet-processing | item 3 | Complete Magnet processing — Field Surveyor. | Reason: new task in the authoritative checklist document.
+- Subdivision - Green Title | lodge-water-corp-agreement | item 8 | Lodge Water Corp Agreement — Project Manager / Admin. | Reason: new task in the authoritative checklist document.
+- Subdivision - Green Title | lodge-power-dome-application | item 9 | Lodge Power Dome Application — Project Manager / Admin. | Reason: new task in the authoritative checklist document.
+- Subdivision - Green Title | create-point-plots-and-files | item 12 | Create and print point plots and a point listing and place them in the file. Save the GSI and DXF files to the job’s Calc directory — Field Surveyor. | Reason: new task in the authoritative checklist document.
+- Subdivision - Green Title | check-calculations | item 13 | Check the calculations — Project Manager. | Reason: new task in the authoritative checklist document.
+- Subdivision - Green Title | send-client-copy-request-lodgement-confirmation | item 19 | Send client copy of plan and request confirmation to lodge — Project Manager / Admin. | Reason: new task in the authoritative checklist document.
+- Subdivision - Survey Strata | complete-magnet-processing | item 3 | Complete Magnet processing — Field Surveyor. | Reason: new task in the authoritative checklist document.
+- Subdivision - Survey Strata | lodge-water-corp-agreement | item 8 | Lodge Water Corp Agreement — Project Manager / Admin. | Reason: new task in the authoritative checklist document.
+- Subdivision - Survey Strata | lodge-power-dome-application | item 9 | Lodge Power Dome Application — Project Manager / Admin. | Reason: new task in the authoritative checklist document.
+- Subdivision - Survey Strata | create-point-plots-and-files | item 12 | Create and print point plots and a point listing and place them in the file. Save the GSI and DXF files to the job’s Calc directory — Field Surveyor. | Reason: new task in the authoritative checklist document.
+- Subdivision - Survey Strata | check-calculations | item 13 | Check the calculations — Project Manager. | Reason: new task in the authoritative checklist document.
+- Subdivision - Survey Strata | send-client-copy-request-lodgement-confirmation | item 20 | Send client copy of plan and request confirmation to lodge — Project Manager / Admin. | Reason: new task in the authoritative checklist document.
+
+## Removed Definition Keys
+
+- Subdivision - Green Title | forward-to-ryan-or-sarah | Forward the job to Ryan or Sarah.
+- Subdivision - Green Title | apply-for-service-agreements | Apply for service agreements.
+- Subdivision - Green Title | cross-reference-field-book-deposited-plan | Cross-reference the Field Book and Deposited Plan.
+- Subdivision - Survey Strata | forward-to-ryan-or-sarah | Forward the job to Ryan or Sarah.
+- Subdivision - Survey Strata | apply-for-service-agreements | Apply for service agreements.
+- Subdivision - Survey Strata | cross-reference-field-book-survey-strata-plan | Cross-reference the Field Book and Survey Strata Plan.

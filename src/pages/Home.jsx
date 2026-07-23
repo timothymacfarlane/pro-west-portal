@@ -15,7 +15,9 @@ function Home() {
           To access Pro West Portal: <strong>https://pro-west-portal.netlify.app/</strong>
         </p>
         <ul style={{ fontSize: "0.85rem", marginTop: "0.3rem", paddingLeft: "1.1rem" }}>
-          <strong>Current Version - v1.3.7</strong>
+          <strong>Current Version - v1.4.0</strong>
+          <br />
+          v1.4.0 - 13/07/2026 - Checklists added to jobs - testing phase only.
           <br />
           v1.3.7 - 17/07/2026 - Merged drainage layers on map page.
           <br />
@@ -24,9 +26,9 @@ function Home() {
           v1.3.5 - 15/07/2026 - Numerous small improvements.
           <br />
           v1.3.4 - 14/07/2026 - Numerous bug fixes.
+          {/* 
           <br />
           v1.3.3 - 12/07/2026 - Mobile device optimisation.
-            {/* 
           <br />
           v1.3.2 - 11/07/2026 - My Jobs Page re-configuration.
           <br />

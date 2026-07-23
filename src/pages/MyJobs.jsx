@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
+import JobChecklistModal from "../components/JobChecklistModal.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
@@ -12,6 +13,7 @@ import {
   getPriorityColor,
   toggleFilterValue,
 } from "../lib/jobOptions.js";
+import { getChecklistDefinition } from "../lib/jobChecklists.js";
 
 const PAGE_SIZE = 30;
 
@@ -74,6 +76,39 @@ function getStatusTextStyle(status) {
 function priorityLabel(priority) {
   const value = String(priority || "").trim();
   return value ? "Priority " + value : "";
+}
+
+function calculateChecklistProgress(job, checklistRows = []) {
+  const definition = getChecklistDefinition(job?.job_category || "") || [];
+
+  if (!definition.length) {
+    return {
+      configured: false,
+      completed: 0,
+      total: 0,
+      label: "—",
+      title: "No checklist is configured for this job category.",
+      complete: false,
+    };
+  }
+
+  const definitionKeys = new Set(definition.map((item) => item.key));
+  const completed = (checklistRows || []).filter(
+    (row) =>
+      row.job_category === job.job_category &&
+      definitionKeys.has(row.item_key) &&
+      row.is_completed === true
+  ).length;
+  const total = definition.length;
+
+  return {
+    configured: true,
+    completed,
+    total,
+    label: `${completed}/${total}`,
+    title: `Checklist progress: ${completed} of ${total} items completed`,
+    complete: completed === total && total > 0,
+  };
 }
 
 function Toast({ text, kind = "ok", onClose }) {
@@ -233,11 +268,16 @@ function MyJobs() {
   const [reassignOpen, setReassignOpen] = useState(false);
   const [reassignJob, setReassignJob] = useState(null);
   const [reassignBusy, setReassignBusy] = useState(false);
+  const [checklistJob, setChecklistJob] = useState(null);
+  const [checklistProgressByJobId, setChecklistProgressByJobId] = useState({});
+  const [checklistProgressLoading, setChecklistProgressLoading] = useState(false);
+  const [checklistProgressFailed, setChecklistProgressFailed] = useState(false);
 
   // toast
   const [toast, setToast] = useState({ text: "", kind: "ok" });
   const toastTimerRef = useRef(null);
   const fetchSeqRef = useRef(0);
+  const checklistProgressSeqRef = useRef(0);
   const skipNextFilterFetchRef = useRef(false);
 
   const selectedAssignee = useMemo(() => {
@@ -486,9 +526,104 @@ function MyJobs() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedAssignee, appliedSearch, jobCategoryFilter, statusFilter, priorityFilter]);
 
+  useEffect(() => {
+    const jobIds = rows.map((row) => row.id).filter(Boolean);
+
+    if (!user || jobIds.length === 0) {
+      setChecklistProgressByJobId({});
+      setChecklistProgressLoading(false);
+      setChecklistProgressFailed(false);
+      return;
+    }
+
+    const requestId = ++checklistProgressSeqRef.current;
+    const isLatest = () => requestId === checklistProgressSeqRef.current;
+
+    setChecklistProgressLoading(true);
+    setChecklistProgressFailed(false);
+
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("job_checklist_items")
+          .select("job_id, job_category, item_key, is_completed")
+          .in("job_id", jobIds);
+
+        if (error) throw error;
+        if (!isLatest()) return;
+
+        const rowsByJobId = new Map();
+        (data || []).forEach((item) => {
+          const existing = rowsByJobId.get(item.job_id) || [];
+          existing.push(item);
+          rowsByJobId.set(item.job_id, existing);
+        });
+
+        const nextProgress = {};
+        rows.forEach((job) => {
+          nextProgress[job.id] = calculateChecklistProgress(job, rowsByJobId.get(job.id) || []);
+        });
+
+        setChecklistProgressByJobId(nextProgress);
+      } catch (e) {
+        if (!isLatest()) return;
+        console.warn("Checklist progress failed:", e?.message || e);
+        setChecklistProgressFailed(true);
+        setChecklistProgressByJobId({});
+      } finally {
+        if (isLatest()) setChecklistProgressLoading(false);
+      }
+    })();
+  }, [rows, user]);
+
   function openReassign(job) {
     setReassignJob(job);
     setReassignOpen(true);
+  }
+
+  function openChecklist(job) {
+    if (!job?.id || checklistJob) return;
+    setChecklistJob(job);
+  }
+
+  function updateChecklistProgress(job, checklistRows) {
+    if (!job?.id) return;
+    setChecklistProgressByJobId((prev) => ({
+      ...prev,
+      [job.id]: calculateChecklistProgress(job, checklistRows),
+    }));
+  }
+
+  function getChecklistProgressDisplay(job) {
+    const definition = getChecklistDefinition(job?.job_category || "") || [];
+
+    if (!definition.length) {
+      return calculateChecklistProgress(job, []);
+    }
+
+    if (checklistProgressFailed && !checklistProgressByJobId[job.id]) {
+      return {
+        configured: true,
+        completed: 0,
+        total: definition.length,
+        label: "—",
+        title: "Checklist progress unavailable.",
+        complete: false,
+      };
+    }
+
+    if (checklistProgressLoading && !checklistProgressByJobId[job.id]) {
+      return {
+        configured: true,
+        completed: 0,
+        total: definition.length,
+        label: "…/…",
+        title: "Checklist progress loading.",
+        complete: false,
+      };
+    }
+
+    return checklistProgressByJobId[job.id] || calculateChecklistProgress(job, []);
   }
 
   async function doReassign(nextAssignee) {
@@ -780,6 +915,7 @@ function MyJobs() {
             const addressState = getJobAddressWarning(r);
             const clientPerson = [r.client_first_name, r.client_surname].filter(Boolean).join(" ").trim();
             const client = (r.client_company || clientPerson || r.client_name || "—").trim();
+            const checklistProgress = getChecklistProgressDisplay(r);
 
             return (
               <div
@@ -826,7 +962,40 @@ function MyJobs() {
                     </div>
                   </div>
 
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
+                    <span
+                      aria-label={checklistProgress.title}
+                      title={checklistProgress.title}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        minHeight: 30,
+                        minWidth: 44,
+                        padding: "0.22rem 0.52rem",
+                        borderRadius: 999,
+                        border: "1px solid rgba(255,255,255,0.10)",
+                        background: checklistProgress.complete ? "rgba(76,175,80,0.14)" : "rgba(255,255,255,0.04)",
+                        color: checklistProgress.configured ? "inherit" : "rgba(255,255,255,0.68)",
+                        fontSize: 12,
+                        fontWeight: 900,
+                        lineHeight: 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {checklistProgress.label}
+                    </span>
+
+                    <button
+                      className="btn-pill"
+                      type="button"
+                      onClick={() => openChecklist(r)}
+                      disabled={Boolean(checklistJob)}
+                      title="Open this job's checklist"
+                    >
+                      Checklist
+                    </button>
+
                     <button
                       className="btn-pill"
                       type="button"
@@ -890,6 +1059,15 @@ function MyJobs() {
         onClose={() => !reassignBusy && setReassignOpen(false)}
         onConfirm={doReassign}
         busy={reassignBusy}
+      />
+
+      <JobChecklistModal
+        open={Boolean(checklistJob)}
+        jobId={checklistJob?.id || null}
+        jobNumber={checklistJob?.job_number || null}
+        category={checklistJob?.job_category || ""}
+        onClose={() => setChecklistJob(null)}
+        onSaved={({ rows: checklistRows }) => updateChecklistProgress(checklistJob, checklistRows)}
       />
 
       <Toast

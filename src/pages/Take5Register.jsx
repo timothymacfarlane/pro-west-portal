@@ -4,6 +4,10 @@ import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext.jsx";
 import { cleanDisplayAddress } from "../lib/displayFormatters.js";
+import {
+  isCurrentEmployeeProfile,
+  profileEmployeeOption,
+} from "../lib/profileVisibility.js";
 
 function addressSummaryFromRow(r) {
   const a =
@@ -73,10 +77,10 @@ const surveyorDropdownOptions = useMemo(() => {
 
       if (error) throw error;
 
-      const list = (data || []).map((p) => ({
-        id: p.id,
-        name: (p.display_name || p.email || "Unnamed").trim(),
-      }));
+      const list = (data || [])
+        .filter(isCurrentEmployeeProfile)
+        .map(profileEmployeeOption)
+        .filter((p) => p.name);
 
       setStaff(list);
 

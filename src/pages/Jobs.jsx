@@ -13,6 +13,17 @@ import {
   getPriorityColor,
   toggleFilterValue,
 } from "../lib/jobOptions.js";
+import {
+  JOB_CHECKLIST_DEFINITIONS,
+  getChecklistDefinition,
+} from "../lib/jobChecklists.js";
+import JobChecklistModal, {
+  PortalConfirmModal,
+  checklistDraftHasActivity,
+  checklistDraftHasUnsavedComments,
+  checklistRowsToDraft,
+  saveDraftChecklistsForJob,
+} from "../components/JobChecklistModal.jsx";
 import { useNavigate, useLocation } from "react-router-dom";
 
 import proj4 from "proj4";
@@ -215,6 +226,7 @@ function safeText(v, fallback = "—") {
   if (typeof v === "number") return String(v);
   return fallback; // don't try to render objects
 }
+
 function jobClientDisplay(r) {
   const company = norm(r?.client_company);
   if (company) return company;
@@ -590,6 +602,9 @@ useEffect(() => {
     setClientSearch("");
     setClientSuggestions([]);
     setClientSearching(false);
+    setChecklistOpen(false);
+    setCategoryConfirm(null);
+    setClosingConfirm(false);
     if (clientDebounceRef.current) clearTimeout(clientDebounceRef.current);
     return;
   }
@@ -603,6 +618,8 @@ useEffect(() => {
 
   // If opening "new", reset to defaults
   if (mode === "new") {
+    setChecklistDrafts({});
+    setCategoryActivityCache({});
     setJobCategory("");
     setJobTypeLegacy("");
     setJobDateLegacy("");
@@ -643,6 +660,8 @@ setNotes("");
   }
 
   // Otherwise populate from the job we just fetched
+  setChecklistDrafts({});
+  setCategoryActivityCache({});
   setJobCategory(i.job_category ?? "");
   setJobTypeLegacy(i.job_type_legacy ?? "");
   setJobDateLegacy(i.job_date_legacy ?? "");
@@ -751,6 +770,11 @@ const [status, setStatus] = useState(initial?.status ?? "In progress");
 const [assignedTo, setAssignedTo] = useState(initial?.assigned_to ?? "");
 const [priority, setPriority] = useState(initial?.priority != null ? String(initial.priority) : "");
 const [notes, setNotes] = useState(initial?.notes ?? "");
+const [checklistOpen, setChecklistOpen] = useState(false);
+const [checklistDrafts, setChecklistDrafts] = useState({});
+const [categoryConfirm, setCategoryConfirm] = useState(null);
+const [closingConfirm, setClosingConfirm] = useState(false);
+const [categoryActivityCache, setCategoryActivityCache] = useState({});
 
   const [fullAddress, setFullAddress] = useState(initial?.full_address ?? "");
   const [placeId, setPlaceId] = useState(initial?.place_id ?? "");
@@ -773,10 +797,75 @@ const [notes, setNotes] = useState(initial?.notes ?? "");
   const clientSearchWrapRef = useRef(null);
 
   const canEdit = isAdmin && (mode === "new" || mode === "edit");
+  const canOpenChecklist = Boolean(jobCategory);
 
-function handleJobCategoryChange(nextCategory) {
+const updateChecklistDraft = useMemo(
+  () => (category, draft) => {
+    setChecklistDrafts((prev) => ({ ...prev, [category]: draft }));
+    setCategoryActivityCache((prev) => ({
+      ...prev,
+      [category]: checklistDraftHasActivity(draft) || prev[category] || false,
+    }));
+  },
+  []
+);
+
+function applyJobCategoryChange(nextCategory) {
   setJobCategory(nextCategory);
   setJobTypeLegacy(nextCategory || "");
+}
+
+async function categoryHasExistingChecklistActivity(category) {
+  if (!category) return false;
+
+  if (checklistDraftHasActivity(checklistDrafts[category]) || checklistDraftHasUnsavedComments(checklistDrafts[category])) {
+    return true;
+  }
+
+  if (categoryActivityCache[category]) return true;
+  if (!initial?.id) return false;
+
+  try {
+    const { data, error: activityError } = await supabase
+      .from("job_checklist_items")
+      .select("id")
+      .eq("job_id", initial.id)
+      .eq("job_category", category)
+      .limit(1);
+
+    if (activityError) throw activityError;
+    const hasActivity = Boolean(data?.length);
+    setCategoryActivityCache((prev) => ({ ...prev, [category]: hasActivity }));
+    return hasActivity;
+  } catch (e) {
+    setError(e?.message || "Could not check checklist activity for this category.");
+    return true;
+  }
+}
+
+async function handleJobCategoryChange(nextCategory) {
+  const previousCategory = jobCategory;
+  if (nextCategory === previousCategory) return;
+
+  if (await categoryHasExistingChecklistActivity(previousCategory)) {
+    setCategoryConfirm({
+      previousCategory,
+      nextCategory,
+      title: "Changing the job category will display a different checklist.",
+      message: `The checklist for “${previousCategory}” will be retained and can be accessed again by changing the category back. Continue changing the job category?`,
+    });
+    return;
+  }
+
+  applyJobCategoryChange(nextCategory);
+}
+
+function requestModalClose() {
+  if (mode === "new" && Object.values(checklistDrafts).some(checklistDraftHasUnsavedComments)) {
+    setClosingConfirm(true);
+    return;
+  }
+  onClose();
 }
 
 const filteredLocalAuthorities = useMemo(() => {
@@ -1680,6 +1769,8 @@ if (jobId) {
 
   createdMerged = { ...created, ...payload };
 
+  await saveDraftChecklistsForJob(jobId, checklistDrafts);
+
   // ✅ Notify after we have the jobId
   await notifyJobAssignment({
     jobId,
@@ -1764,6 +1855,60 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
   }}
 />
 
+<JobChecklistModal
+  open={checklistOpen}
+  jobId={initial?.id || null}
+  jobNumber={initial?.job_number || null}
+  category={jobCategory}
+  draft={checklistDrafts[jobCategory]}
+  onDraftChange={updateChecklistDraft}
+  onClose={() => setChecklistOpen(false)}
+  onSaved={({ category, rows }) => {
+    const draft = checklistRowsToDraft(category, rows);
+    updateChecklistDraft(category, draft);
+    if (initial?.id) onSaved?.(initial);
+  }}
+/>
+
+<PortalConfirmModal
+  open={Boolean(categoryConfirm)}
+  title={categoryConfirm?.title || ""}
+  message={categoryConfirm?.message || ""}
+  confirmLabel="Change Category"
+  onCancel={() => setCategoryConfirm(null)}
+  onConfirm={() => {
+    if (categoryConfirm?.nextCategory != null) {
+      applyJobCategoryChange(categoryConfirm.nextCategory);
+    }
+    setCategoryConfirm(null);
+  }}
+/>
+
+<PortalConfirmModal
+  open={closingConfirm}
+  title="You have unsaved checklist comments."
+  message="Save the checklist before leaving, or discard the unsaved changes."
+  confirmLabel="Discard Changes"
+  secondaryLabel="Save & Close"
+  danger
+  onCancel={() => setClosingConfirm(false)}
+  onSecondary={() => {
+    setChecklistDrafts((prev) => {
+      const next = {};
+      Object.entries(prev).forEach(([category, draft]) => {
+        next[category] = checklistRowsToDraft(category, draft.rows || [], { markSaved: true });
+      });
+      return next;
+    });
+    setClosingConfirm(false);
+    onClose();
+  }}
+  onConfirm={() => {
+    setClosingConfirm(false);
+    onClose();
+  }}
+/>
+
 <div
   ref={modalCardRef}
   className="card jobmodal-card"
@@ -1799,9 +1944,32 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
 
           </div>
 
-          <div className="jobmodal-header-actions" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div
+            className={`jobmodal-header-actions ${mode === "edit" ? "jobmodal-header-actions-edit" : ""}`}
+            style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
+          >
+  <span className="checklist-button-wrap jobmodal-header-checklist-action" title={!canOpenChecklist ? "Select a job category to open its checklist." : ""}>
+    <button
+      className="btn-pill"
+      type="button"
+      onClick={() => {
+        if (!canOpenChecklist) return;
+        setChecklistOpen(true);
+      }}
+      disabled={!canOpenChecklist}
+      aria-describedby={!canOpenChecklist ? "checklist-disabled-help" : undefined}
+    >
+      Checklist
+    </button>
+    {!canOpenChecklist && (
+      <span id="checklist-disabled-help" className="checklist-disabled-help">
+        Select a job category to open its checklist.
+      </span>
+    )}
+  </span>
+
   <button
-    className="btn-pill"
+    className="btn-pill jobmodal-header-maps-action"
     type="button"
     onClick={() => modalMapsHref && navigate(modalMapsHref)}
     disabled={!modalMapsHref}
@@ -1809,7 +1977,7 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
     View in Maps
   </button>
 
-  <button className="btn-pill" onClick={onClose} type="button">
+  <button className="btn-pill jobmodal-header-close-action" onClick={requestModalClose} type="button">
     Close
   </button>
 </div>
@@ -2463,6 +2631,61 @@ onChange={(e) => {
   box-sizing: border-box;
 }
 
+.jobmodal-header-actions-edit {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  gap: 5px !important;
+  align-items: center !important;
+}
+
+.jobmodal-header-actions-edit .jobmodal-header-checklist-action {
+  order: 1;
+  flex: 1 1 0%;
+  min-width: 0;
+}
+
+.jobmodal-header-actions-edit .jobmodal-header-checklist-action > button,
+.jobmodal-header-actions-edit .jobmodal-header-close-action,
+.jobmodal-header-actions-edit .jobmodal-header-maps-action {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: 0.44rem;
+  padding-right: 0.44rem;
+  font-size: 0.76rem;
+  line-height: 1;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.jobmodal-header-actions-edit .jobmodal-header-close-action {
+  order: 2;
+  flex: 0.8 1 0%;
+}
+
+.jobmodal-header-actions-edit .jobmodal-header-maps-action {
+  order: 3;
+  flex: 1.25 1 0%;
+}
+
+@media (max-width: 380px) {
+  .jobmodal-header-actions-edit {
+    gap: 4px !important;
+  }
+
+  .jobmodal-header-actions-edit .jobmodal-header-checklist-action > button,
+  .jobmodal-header-actions-edit .jobmodal-header-close-action,
+  .jobmodal-header-actions-edit .jobmodal-header-maps-action {
+    min-height: 36px;
+    padding-left: 0.34rem;
+    padding-right: 0.34rem;
+    font-size: 0.74rem;
+  }
+}
+
     .jobmodal-grid {
       grid-template-columns: 1fr !important;
       gap: 10px !important;
@@ -2613,7 +2836,7 @@ onChange={(e) => {
 
   <button
     className="btn-pill"
-    onClick={onClose}
+    onClick={requestModalClose}
     type="button"
     disabled={saving}
   >
@@ -2642,7 +2865,7 @@ onChange={(e) => {
 )}
 
   {!canEdit && (
-    <button className="btn-pill primary" onClick={onClose} type="button">
+    <button className="btn-pill primary" onClick={requestModalClose} type="button">
       Close
     </button>
   )}
@@ -2749,6 +2972,7 @@ const JOB_COLUMNS = [
   { key: "full_address", label: "Address" },
   { key: "lot_number", label: "Lot / Plan" },
   { key: "local_authority", label: "LGA" },
+  { key: "checklist_progress", label: "Progress", sortable: false },
   { key: "job_category", label: "Job Category" },
   { key: "job_type_legacy", label: "Job type" },
   { key: "job_date_legacy", label: "Job date" },
@@ -2814,6 +3038,52 @@ const topScrollInnerRef = useRef(null);
    // sorting
   const [sortKey, setSortKey] = useState("job_number");
   const [sortAsc, setSortAsc] = useState(false);
+
+function getChecklistProgressDisplay(row) {
+  const category = row?.job_category || "";
+  const definition = getChecklistDefinition(category);
+  if (!definition?.length) return "—";
+  return `${Number(row?.checklist_completed_count || 0)} / ${definition.length}`;
+}
+
+async function attachChecklistProgress(rows) {
+  const pageRows = Array.isArray(rows) ? rows : [];
+  const jobIds = pageRows.map((row) => row.id).filter(Boolean);
+  if (!jobIds.length) return pageRows;
+
+  const configuredCategories = new Set(
+    Object.entries(JOB_CHECKLIST_DEFINITIONS)
+      .filter(([, items]) => items.length > 0)
+      .map(([category]) => category)
+  );
+  const relevantCategories = [
+    ...new Set(pageRows.map((row) => row.job_category).filter((category) => configuredCategories.has(category))),
+  ];
+
+  if (!relevantCategories.length) {
+    return pageRows.map((row) => ({ ...row, checklist_completed_count: 0 }));
+  }
+
+  const { data, error: progressError } = await supabase
+    .from("job_checklist_items")
+    .select("job_id, job_category, item_key")
+    .in("job_id", jobIds)
+    .in("job_category", relevantCategories)
+    .eq("is_completed", true);
+
+  if (progressError) throw progressError;
+
+  const counts = new Map();
+  (data || []).forEach((row) => {
+    const key = `${row.job_id}::${row.job_category}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+
+  return pageRows.map((row) => ({
+    ...row,
+    checklist_completed_count: counts.get(`${row.id}::${row.job_category}`) || 0,
+  }));
+}
 
 
 async function fetchJobByNumber(jobNumber) {
@@ -2976,7 +3246,8 @@ q = q.range(from, to);
     const { data, error, count } = await q;
     if (error) throw error;
 
-    setListRows(Array.isArray(data) ? data : []);
+    const rowsWithProgress = await attachChecklistProgress(data || []);
+    setListRows(rowsWithProgress);
     setFilteredCount(Number(count || 0));
   }
 
@@ -3918,6 +4189,7 @@ onClick={() => {
                     <th
   key={c.key}
   onClick={() => {
+    if (c.sortable === false) return;
     if (sortKey === c.key) setSortAsc((v) => !v);
     else {
       setSortKey(c.key);
@@ -3925,7 +4197,7 @@ onClick={() => {
     }
   }}
   className={`jobs-reg-th ${active ? "is-active" : ""}`}
-  title="Sort"
+  title={c.sortable === false ? "" : "Sort"}
 >
    <span className="jobs-reg-th-label">
     {c.label}
@@ -4000,6 +4272,9 @@ onClick={() => {
 </td>
 <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
   {r.local_authority || "—"}
+</td>
+<td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap", textAlign: "center", fontWeight: 800 }}>
+  {getChecklistProgressDisplay(r)}
 </td>
 <td style={{ padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>
   {r.job_category || "—"}
