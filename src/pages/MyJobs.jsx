@@ -13,7 +13,10 @@ import {
   getPriorityColor,
   toggleFilterValue,
 } from "../lib/jobOptions.js";
-import { getChecklistDefinition } from "../lib/jobChecklists.js";
+import {
+  calculateChecklistProgress as calculateChecklistProgressForCategory,
+  getChecklistDefinition,
+} from "../lib/jobChecklists.js";
 
 const PAGE_SIZE = 30;
 
@@ -79,36 +82,7 @@ function priorityLabel(priority) {
 }
 
 function calculateChecklistProgress(job, checklistRows = []) {
-  const definition = getChecklistDefinition(job?.job_category || "") || [];
-
-  if (!definition.length) {
-    return {
-      configured: false,
-      completed: 0,
-      total: 0,
-      label: "—",
-      title: "No checklist is configured for this job category.",
-      complete: false,
-    };
-  }
-
-  const definitionKeys = new Set(definition.map((item) => item.key));
-  const completed = (checklistRows || []).filter(
-    (row) =>
-      row.job_category === job.job_category &&
-      definitionKeys.has(row.item_key) &&
-      row.is_completed === true
-  ).length;
-  const total = definition.length;
-
-  return {
-    configured: true,
-    completed,
-    total,
-    label: `${completed}/${total}`,
-    title: `Checklist progress: ${completed} of ${total} items completed`,
-    complete: completed === total && total > 0,
-  };
+  return calculateChecklistProgressForCategory(job?.job_category || "", checklistRows);
 }
 
 function Toast({ text, kind = "ok", onClose }) {

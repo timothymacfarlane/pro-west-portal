@@ -800,6 +800,120 @@
   color: var(--pw-primary-dark);
 }
 
+.maps-draggable-panel {
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+}
+
+.maps-draggable-panel.is-dragging {
+  transition: none !important;
+}
+
+body.maps-panel-dragging-active,
+body.maps-panel-dragging-active * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.maps-draggable-panel-header {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.maps-draggable-panel.is-dragging .maps-draggable-panel-header,
+.maps-infowindow-drag-handle:active {
+  cursor: grabbing;
+}
+
+.maps-panel-drag-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  color: rgba(0, 0, 0, 0.62);
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  font-size: 13px;
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.maps-infowindow-drag-handle {
+  gap: 7px;
+  pointer-events: auto;
+}
+
+.map-popup-overlay {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 7px 1px rgba(0, 0, 0, 0.3);
+  color: #111;
+  font-family: Inter, system-ui, sans-serif;
+  padding: 12px;
+  pointer-events: auto;
+  position: absolute;
+  transition: none !important;
+  will-change: transform;
+}
+
+.map-popup-overlay::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-right: 1px solid rgba(0, 0, 0, 0.18);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.18);
+  transform: translateX(-50%) rotate(45deg);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.map-popup-content {
+  max-height: min(360px, calc(100dvh - 180px));
+  overflow: auto;
+  padding-right: 18px;
+}
+
+.map-popup-close {
+  align-items: center;
+  background: #fff;
+  border: 0;
+  border-radius: 999px;
+  color: #555;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 18px;
+  font-weight: 900;
+  height: 24px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 24px;
+  z-index: 2;
+}
+
+.map-popup-close:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #111;
+}
+
+.maps-infowindow-drag-grip {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
 .row-between {
   display: flex;
   justify-content: space-between;
@@ -5374,6 +5488,7 @@ body,
 
     line-height: 1;   /* 👈 prevents vertical stretch */
   }
+
 }
 
 .maps-header-menu-btn {

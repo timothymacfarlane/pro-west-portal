@@ -262,9 +262,6 @@ const debouncedQuery = useDebounced(query, 250);
 useEffect(() => {
   const handleKey = (e) => {
     if (e.key === "Escape") {
-      closeViewer();
-      setVersionsOpen(false);
-      setUploadOpen(false);
       if (!deleting) setDeleteConfirm(null);
     }
   };
@@ -1331,7 +1328,6 @@ const performDeleteDocument = async (doc) => {
     role="dialog"
     aria-modal="true"
     className="documents-modal-backdrop documents-viewer-backdrop"
-    onClick={closeViewer}
    style={{
   position: "fixed",
   inset: 0,
@@ -1513,7 +1509,6 @@ maxHeight: "100%",
           role="dialog"
           aria-modal="true"
           className="documents-modal-backdrop documents-versions-backdrop"
-          onClick={() => setVersionsOpen(false)}
           style={{
             position: "fixed",
             inset: 0,
@@ -1736,7 +1731,6 @@ maxHeight: "100%",
           role="dialog"
           aria-modal="true"
           className="documents-modal-backdrop documents-upload-backdrop"
-          onClick={() => setUploadOpen(false)}
           style={{
             position: "fixed",
             inset: 0,

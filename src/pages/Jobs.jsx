@@ -14,8 +14,7 @@ import {
   toggleFilterValue,
 } from "../lib/jobOptions.js";
 import {
-  JOB_CHECKLIST_DEFINITIONS,
-  getChecklistDefinition,
+  calculateChecklistProgress as calculateChecklistProgressForCategory,
 } from "../lib/jobChecklists.js";
 import JobChecklistModal, {
   PortalConfirmModal,
@@ -595,6 +594,20 @@ function clientSearchLabelFromJob(i) {
   return company || person || legacy || "";
 }
 
+function ChecklistProgressBadge({ progress }) {
+  if (!progress) return null;
+
+  return (
+    <span
+      className={`jobmodal-checklist-progress${progress.complete ? " is-complete" : ""}${!progress.configured ? " is-empty" : ""}`}
+      aria-label={progress.title}
+      title={progress.title}
+    >
+      {progress.label}
+    </span>
+  );
+}
+
   // ✅ Re-sync modal fields whenever the selected job changes (fixes blank fields on open)
 useEffect(() => {
   // ✅ when closing, wipe the client search UI so it doesn't persist
@@ -772,6 +785,9 @@ const [priority, setPriority] = useState(initial?.priority != null ? String(init
 const [notes, setNotes] = useState(initial?.notes ?? "");
 const [checklistOpen, setChecklistOpen] = useState(false);
 const [checklistDrafts, setChecklistDrafts] = useState({});
+const [editChecklistProgress, setEditChecklistProgress] = useState(null);
+const [editChecklistProgressLoading, setEditChecklistProgressLoading] = useState(false);
+const [editChecklistProgressFailed, setEditChecklistProgressFailed] = useState(false);
 const [categoryConfirm, setCategoryConfirm] = useState(null);
 const [closingConfirm, setClosingConfirm] = useState(false);
 const [categoryActivityCache, setCategoryActivityCache] = useState({});
@@ -798,6 +814,27 @@ const [categoryActivityCache, setCategoryActivityCache] = useState({});
 
   const canEdit = isAdmin && (mode === "new" || mode === "edit");
   const canOpenChecklist = Boolean(jobCategory);
+  const baseChecklistProgress = calculateChecklistProgressForCategory(jobCategory, []);
+  const modalChecklistProgress =
+    mode === "new"
+      ? calculateChecklistProgressForCategory(jobCategory, checklistDrafts[jobCategory]?.rows || [])
+      : !jobCategory || !baseChecklistProgress.configured
+        ? baseChecklistProgress
+        : editChecklistProgressLoading && !editChecklistProgress
+          ? {
+              ...baseChecklistProgress,
+              label: "…/…",
+              title: "Checklist progress loading.",
+              complete: false,
+            }
+          : editChecklistProgressFailed && !editChecklistProgress
+            ? {
+                ...baseChecklistProgress,
+                label: "—",
+                title: "Checklist progress unavailable.",
+                complete: false,
+              }
+            : editChecklistProgress || baseChecklistProgress;
 
 const updateChecklistDraft = useMemo(
   () => (category, draft) => {
@@ -809,6 +846,54 @@ const updateChecklistDraft = useMemo(
   },
   []
 );
+
+useEffect(() => {
+  if (!open || mode === "new" || !initial?.id) {
+    setEditChecklistProgress(null);
+    setEditChecklistProgressLoading(false);
+    setEditChecklistProgressFailed(false);
+    return;
+  }
+
+  const emptyProgress = calculateChecklistProgressForCategory(jobCategory, []);
+  if (!jobCategory || !emptyProgress.configured) {
+    setEditChecklistProgress(emptyProgress);
+    setEditChecklistProgressLoading(false);
+    setEditChecklistProgressFailed(false);
+    return;
+  }
+
+  let cancelled = false;
+  setEditChecklistProgress(null);
+  setEditChecklistProgressLoading(true);
+  setEditChecklistProgressFailed(false);
+
+  (async () => {
+    try {
+      const { data, error: progressError } = await supabase
+        .from("job_checklist_items")
+        .select("job_id, job_category, item_key, is_completed")
+        .eq("job_id", initial.id)
+        .eq("job_category", jobCategory);
+
+      if (progressError) throw progressError;
+      if (cancelled) return;
+
+      setEditChecklistProgress(calculateChecklistProgressForCategory(jobCategory, data || []));
+    } catch (e) {
+      if (cancelled) return;
+      console.warn("Checklist progress failed:", e?.message || e);
+      setEditChecklistProgress(null);
+      setEditChecklistProgressFailed(true);
+    } finally {
+      if (!cancelled) setEditChecklistProgressLoading(false);
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [open, mode, initial?.id, jobCategory]);
 
 function applyJobCategoryChange(nextCategory) {
   setJobCategory(nextCategory);
@@ -1866,7 +1951,12 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
   onSaved={({ category, rows }) => {
     const draft = checklistRowsToDraft(category, rows);
     updateChecklistDraft(category, draft);
-    if (initial?.id) onSaved?.(initial);
+    if (initial?.id) {
+      setEditChecklistProgress(calculateChecklistProgressForCategory(category, rows));
+      setEditChecklistProgressFailed(false);
+      setEditChecklistProgressLoading(false);
+      onSaved?.(initial);
+    }
   }}
 />
 
@@ -1948,6 +2038,10 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
             className={`jobmodal-header-actions ${mode === "edit" ? "jobmodal-header-actions-edit" : ""}`}
             style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
           >
+  {(mode === "new" || mode === "edit") && (
+    <ChecklistProgressBadge progress={modalChecklistProgress} />
+  )}
+
   <span className="checklist-button-wrap jobmodal-header-checklist-action" title={!canOpenChecklist ? "Select a job category to open its checklist." : ""}>
     <button
       className="btn-pill"
@@ -1968,6 +2062,10 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
     )}
   </span>
 
+  <button className="btn-pill jobmodal-header-close-action" onClick={requestModalClose} type="button">
+    Close
+  </button>
+
   <button
     className="btn-pill jobmodal-header-maps-action"
     type="button"
@@ -1975,10 +2073,6 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
     disabled={!modalMapsHref}
   >
     View in Maps
-  </button>
-
-  <button className="btn-pill jobmodal-header-close-action" onClick={requestModalClose} type="button">
-    Close
   </button>
 </div>
         </div>
@@ -2536,6 +2630,31 @@ onChange={(e) => {
   white-space: normal;
 }
 
+.jobmodal-checklist-progress {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  min-width: 44px;
+  padding: 0.22rem 0.52rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.jobmodal-checklist-progress.is-complete {
+  background: rgba(76,175,80,0.14);
+}
+
+.jobmodal-checklist-progress.is-empty {
+  color: rgba(255,255,255,0.68);
+}
+
   .jobmodal-card {
     overscroll-behavior: contain;
     background: var(--pw-card, #fff);
@@ -2631,11 +2750,27 @@ onChange={(e) => {
   box-sizing: border-box;
 }
 
+.jobmodal-header-actions .checklist-button-wrap {
+  min-width: 0;
+}
+
+.jobmodal-header-actions .jobmodal-header-checklist-action > button {
+  white-space: nowrap;
+}
+
 .jobmodal-header-actions-edit {
   display: flex !important;
   flex-wrap: nowrap !important;
   gap: 5px !important;
   align-items: center !important;
+}
+
+.jobmodal-header-actions-edit .jobmodal-checklist-progress {
+  order: 0;
+  flex: 0 0 auto;
+  min-width: 38px;
+  padding-left: 0.38rem;
+  padding-right: 0.38rem;
 }
 
 .jobmodal-header-actions-edit .jobmodal-header-checklist-action {
@@ -2666,6 +2801,15 @@ onChange={(e) => {
   flex: 0.8 1 0%;
 }
 
+.jobmodal-header-actions:not(.jobmodal-header-actions-edit) .jobmodal-checklist-progress {
+  justify-self: end;
+}
+
+.jobmodal-header-actions:not(.jobmodal-header-actions-edit) .jobmodal-header-checklist-action,
+.jobmodal-header-actions:not(.jobmodal-header-actions-edit) .jobmodal-header-checklist-action > button {
+  width: 100%;
+}
+
 .jobmodal-header-actions-edit .jobmodal-header-maps-action {
   order: 3;
   flex: 1.25 1 0%;
@@ -2674,6 +2818,13 @@ onChange={(e) => {
 @media (max-width: 380px) {
   .jobmodal-header-actions-edit {
     gap: 4px !important;
+  }
+
+  .jobmodal-header-actions-edit .jobmodal-checklist-progress {
+    min-width: 34px;
+    padding-left: 0.26rem;
+    padding-right: 0.26rem;
+    font-size: 0.72rem;
   }
 
   .jobmodal-header-actions-edit .jobmodal-header-checklist-action > button,
@@ -3040,10 +3191,9 @@ const topScrollInnerRef = useRef(null);
   const [sortAsc, setSortAsc] = useState(false);
 
 function getChecklistProgressDisplay(row) {
-  const category = row?.job_category || "";
-  const definition = getChecklistDefinition(category);
-  if (!definition?.length) return "—";
-  return `${Number(row?.checklist_completed_count || 0)} / ${definition.length}`;
+  const progress = calculateChecklistProgressForCategory(row?.job_category || "", row?.checklist_rows || []);
+  if (!progress.configured) return "—";
+  return `${progress.completed} / ${progress.total}`;
 }
 
 async function attachChecklistProgress(rows) {
@@ -3051,37 +3201,24 @@ async function attachChecklistProgress(rows) {
   const jobIds = pageRows.map((row) => row.id).filter(Boolean);
   if (!jobIds.length) return pageRows;
 
-  const configuredCategories = new Set(
-    Object.entries(JOB_CHECKLIST_DEFINITIONS)
-      .filter(([, items]) => items.length > 0)
-      .map(([category]) => category)
-  );
-  const relevantCategories = [
-    ...new Set(pageRows.map((row) => row.job_category).filter((category) => configuredCategories.has(category))),
-  ];
-
-  if (!relevantCategories.length) {
-    return pageRows.map((row) => ({ ...row, checklist_completed_count: 0 }));
-  }
-
   const { data, error: progressError } = await supabase
     .from("job_checklist_items")
-    .select("job_id, job_category, item_key")
+    .select("job_id, job_category, item_key, is_completed")
     .in("job_id", jobIds)
-    .in("job_category", relevantCategories)
     .eq("is_completed", true);
 
   if (progressError) throw progressError;
 
-  const counts = new Map();
+  const rowsByJobId = new Map();
   (data || []).forEach((row) => {
-    const key = `${row.job_id}::${row.job_category}`;
-    counts.set(key, (counts.get(key) || 0) + 1);
+    const existing = rowsByJobId.get(row.job_id) || [];
+    existing.push(row);
+    rowsByJobId.set(row.job_id, existing);
   });
 
   return pageRows.map((row) => ({
     ...row,
-    checklist_completed_count: counts.get(`${row.id}::${row.job_category}`) || 0,
+    checklist_rows: rowsByJobId.get(row.id) || [],
   }));
 }
 

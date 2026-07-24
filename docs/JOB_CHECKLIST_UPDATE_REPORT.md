@@ -81,7 +81,7 @@
 - Subdivision - Built Strata | organise-site-access | old 2 -> new 2 | Organise site access — Project Manager.
 - Subdivision - Built Strata | alignment-survey-strata-measure-up | old 3 -> new 3 | Complete the alignment survey and strata measure-up — Field Surveyor.
 - Subdivision - Built Strata | alignment-strata-boundary-calculations | old 4 -> new 4 | Complete alignment, strata and boundary calculations — Field Surveyor.
-- Subdivision - Built Strata | produce-draft-survey-strata-plan | old 5 -> new 5 | Produce the draft Survey Strata Plan — Drafting.
+- Subdivision - Built Strata | produce-draft-strata-plan | old 5 -> new 5 | Produce the draft Strata Plan — Drafting.
 - Subdivision - Built Strata | check-draft-strata-plan | old 6 -> new 6 | Check the draft Strata Plan — Licensed Surveyor / Project Manager.
 - Subdivision - Built Strata | order-unit-entitlement | old 7 -> new 7 | Order the Unit Entitlement evaluation — Project Manager.
 - Subdivision - Built Strata | send-plan-unit-entitlement-bylaws | old 8 -> new 8 | Send the Strata Plan and Unit Entitlement to the client. Confirm whether by-laws are applicable — Project Manager.

@@ -1714,81 +1714,678 @@ function isSmallScreen() {
   );
 }
 
-
 /* ================================
    ✅ Draggable InfoWindows (field-friendly)
    - Applies to the most recently opened InfoWindow.
    - Drag handle: the top row of the popup content.
    ================================ */
-function makeLatestInfoWindowDraggable() {
+function getMarkerPopupLiftPx(marker) {
   try {
-    const nodes = Array.from(document.querySelectorAll('.gm-style-iw-c, .gm-style-iw'));
-    if (!nodes.length) return;
+    const icon = marker?.getIcon?.();
+    if (!icon) return 0;
 
-    const iwc = nodes[nodes.length - 1];
-    if (!iwc || iwc.dataset.pwDraggable === "1") return;
-    iwc.dataset.pwDraggable = "1";
+    const scaledHeight = Number(icon?.scaledSize?.height);
+    if (Number.isFinite(scaledHeight) && scaledHeight > 0) {
+      return Math.ceil(scaledHeight / 2);
+    }
 
-    const handle =
-      iwc.querySelector('[data-pw-drag-handle="1"]') ||
-      iwc.querySelector("div") ||
-      iwc;
+    const sizeHeight = Number(icon?.size?.height);
+    if (Number.isFinite(sizeHeight) && sizeHeight > 0) {
+      return Math.ceil(sizeHeight / 2);
+    }
 
-    handle.style.cursor = "grab";
-    handle.style.userSelect = "none";
-    handle.style.touchAction = "none";
-
-    let startX = 0;
-    let startY = 0;
-    let baseX = 0;
-    let baseY = 0;
-    let dragging = false;
-
-    const readBase = () => {
-      const tx = Number(iwc.dataset.pwTx || "0");
-      const ty = Number(iwc.dataset.pwTy || "0");
-      baseX = Number.isFinite(tx) ? tx : 0;
-      baseY = Number.isFinite(ty) ? ty : 0;
-    };
-
-    const onDown = (ev) => {
-      const e = ev;
-      dragging = true;
-      handle.style.cursor = "grabbing";
-      startX = e.clientX;
-      startY = e.clientY;
-      readBase();
-      ev.preventDefault?.();
-      ev.stopPropagation?.();
-    };
-
-    const onMove = (ev) => {
-      if (!dragging) return;
-      const e = ev;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      const nx = baseX + dx;
-      const ny = baseY + dy;
-      iwc.style.transform = `translate(${nx}px, ${ny}px)`;
-      iwc.dataset.pwTx = String(nx);
-      iwc.dataset.pwTy = String(ny);
-      ev.preventDefault?.();
-      ev.stopPropagation?.();
-    };
-
-    const onUp = () => {
-      if (!dragging) return;
-      dragging = false;
-      handle.style.cursor = "grab";
-    };
-
-    handle.addEventListener("pointerdown", onDown, { passive: false });
-window.addEventListener("pointermove", onMove, { passive: false });
-window.addEventListener("pointerup", onUp, { passive: true });
-window.addEventListener("pointercancel", onUp, { passive: true });
+    const scale = Number(icon?.scale);
+    if (Number.isFinite(scale) && scale > 0) {
+      const stroke = Number(icon?.strokeWeight);
+      return Math.ceil(scale + (Number.isFinite(stroke) ? stroke : 0));
+    }
   } catch {
     // ignore
   }
+
+  return 0;
+}
+
+function getAboveFeaturePopupPixelOffset(marker = null) {
+  const googleMaps = window.google?.maps;
+  if (!googleMaps?.Size) return undefined;
+  const gap = isSmallScreen() ? 10 : 12;
+  const lift = getMarkerPopupLiftPx(marker);
+  return new googleMaps.Size(0, -Math.round(gap + lift));
+}
+
+function applyAboveFeaturePopupOffset(infoWindow, marker = null) {
+  try {
+    const pixelOffset = getAboveFeaturePopupPixelOffset(marker);
+    if (pixelOffset) infoWindow?.setOptions?.({ pixelOffset });
+  } catch {
+    // ignore
+  }
+}
+
+function createDraggableMapPopupOverlay(options = {}) {
+  const googleMaps = window.google?.maps;
+  if (!googleMaps?.OverlayView) return null;
+
+  class DraggableMapPopupOverlay extends googleMaps.OverlayView {
+    constructor(opts = {}) {
+      super();
+      this.options = { ...opts };
+      this.content = "";
+      this.position = null;
+      this.anchor = null;
+      this.div = null;
+      this.contentEl = null;
+      this.closeBtn = null;
+      this.handle = null;
+      this.pixelOffset = opts.pixelOffset || new googleMaps.Size(0, -12);
+      this.dragKey = "";
+      this.dragOffset = { x: 0, y: 0 };
+      this.pointerState = null;
+      this.frame = null;
+      this.listenerController = null;
+      this.pendingDomReady = false;
+      this.visible = false;
+      this.zIndex = 120;
+      this.measuredSize = { width: 0, height: 0 };
+    }
+
+    setContent(content) {
+      this.content = content || "";
+      if (this.contentEl) {
+        if (typeof this.content === "string") {
+          this.contentEl.innerHTML = this.content;
+        } else {
+          this.contentEl.replaceChildren(this.content);
+        }
+        this.measurePopup();
+        this.bindDragHandle();
+        this.queueDrawAndDomReady();
+      }
+    }
+
+    setOptions(opts = {}) {
+      this.options = { ...this.options, ...opts };
+      if (opts.pixelOffset) this.pixelOffset = opts.pixelOffset;
+      this.applyOptions();
+      this.draw();
+    }
+
+    setPosition(position) {
+      this.anchor = null;
+      this.position = this.normalizeLatLng(position);
+      this.draw();
+    }
+
+    open(openOptions = {}) {
+      const isMapInstance = typeof openOptions?.getDiv === "function";
+      const map = isMapInstance ? openOptions : openOptions?.map;
+      const anchor = isMapInstance ? null : openOptions?.anchor;
+      this.anchor = anchor || null;
+      if (anchor?.getPosition) this.position = anchor.getPosition();
+      if (!this.position) return;
+      window.__pwLatestMapPopupOverlay = this;
+      this.visible = false;
+      if (this.div) this.div.style.visibility = "hidden";
+      this.setMap(map || this.getMap());
+      this.queueDrawAndDomReady();
+    }
+
+    close(triggerCloseClick = false) {
+      this.cleanupDrag();
+      this.setMap(null);
+      this.visible = false;
+      if (triggerCloseClick) googleMaps.event.trigger(this, "closeclick");
+    }
+
+    onAdd() {
+      this.div = document.createElement("div");
+      this.div.className = "map-popup-overlay";
+      this.div.style.position = "absolute";
+      this.div.style.visibility = "hidden";
+      this.div.style.zIndex = String(this.zIndex);
+
+      this.closeBtn = document.createElement("button");
+      this.closeBtn.type = "button";
+      this.closeBtn.className = "map-popup-close";
+      this.closeBtn.setAttribute("aria-label", "Close popup");
+      this.closeBtn.textContent = "×";
+      this.closeBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.close(true);
+      });
+
+      this.contentEl = document.createElement("div");
+      this.contentEl.className = "map-popup-content";
+      this.setContent(this.content);
+
+      this.div.append(this.closeBtn, this.contentEl);
+      this.applyOptions();
+      googleMaps.OverlayView.preventMapHitsAndGesturesFrom?.(this.div);
+      this.getPanes()?.floatPane?.appendChild(this.div);
+      this.measurePopup();
+      this.bindDragHandle();
+    }
+
+    draw() {
+      if (!this.div || !this.position) return;
+      const projection = this.getProjection();
+      if (!projection) return;
+
+      const point = projection.fromLatLngToDivPixel(this.normalizeLatLng(this.position));
+      if (!point) return;
+
+      const { width, height } = this.measurePopup();
+      if (!width || !height) {
+        this.div.style.visibility = "hidden";
+        requestAnimationFrame(() => this.draw());
+        return;
+      }
+      const offsetX = Number(this.pixelOffset?.width || 0);
+      const offsetY = Number(this.pixelOffset?.height || -12);
+      let left = point.x - width / 2 + offsetX;
+      let top = point.y - height + offsetY;
+
+      const map = this.getMap();
+      const bounds = map?.getBounds?.();
+      if (bounds) {
+        const margin = 8;
+        const ne = bounds.getNorthEast();
+        const sw = bounds.getSouthWest();
+        const nwPoint = projection.fromLatLngToDivPixel(new googleMaps.LatLng(ne.lat(), sw.lng()));
+        const sePoint = projection.fromLatLngToDivPixel(new googleMaps.LatLng(sw.lat(), ne.lng()));
+        const minLeft = Math.min(nwPoint.x, sePoint.x) + margin;
+        const maxLeft = Math.max(minLeft, Math.max(nwPoint.x, sePoint.x) - width - margin);
+        const minTop = Math.min(nwPoint.y, sePoint.y) + margin;
+        const maxTop = Math.max(minTop, Math.max(nwPoint.y, sePoint.y) - height - margin);
+        const finalLeft = left + this.dragOffset.x;
+        const finalTop = top + this.dragOffset.y;
+        const clampedLeft = Math.min(Math.max(finalLeft, minLeft), maxLeft);
+        const clampedTop = Math.min(Math.max(finalTop, minTop), maxTop);
+        this.dragOffset.x += clampedLeft - finalLeft;
+        this.dragOffset.y += clampedTop - finalTop;
+      }
+
+      this.div.style.left = `${Math.round(left)}px`;
+      this.div.style.top = `${Math.round(top)}px`;
+      this.applyDragTransform();
+
+      if (!this.visible) {
+        requestAnimationFrame(() => {
+          if (!this.div) return;
+          this.div.style.visibility = "visible";
+          this.visible = true;
+        });
+      }
+    }
+
+    onRemove() {
+      this.cleanupDrag();
+      this.div?.remove();
+      this.div = null;
+      this.contentEl = null;
+      this.closeBtn = null;
+      this.handle = null;
+    }
+
+    setDragOptions({ dragKey = "", resetOffset = false } = {}) {
+      if (resetOffset || (dragKey && this.dragKey !== dragKey)) {
+        this.dragOffset = { x: 0, y: 0 };
+      }
+      if (dragKey) this.dragKey = dragKey;
+      this.applyDragTransform();
+      this.bindDragHandle(true);
+      this.queueDrawAndDomReady();
+    }
+
+    normalizeLatLng(value) {
+      if (!value || !googleMaps?.LatLng) return null;
+      if (value instanceof googleMaps.LatLng) return value;
+      const lat = typeof value.lat === "function" ? value.lat() : Number(value.lat);
+      const lng = typeof value.lng === "function" ? value.lng() : Number(value.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      return new googleMaps.LatLng(lat, lng);
+    }
+
+    applyOptions() {
+      if (!this.div) return;
+      const maxWidth = this.options.maxWidth;
+      this.div.style.maxWidth = maxWidth ? `${maxWidth}px` : "";
+    }
+
+    measurePopup() {
+      if (!this.div) return this.measuredSize;
+      const rect = this.div.getBoundingClientRect();
+      const width = Math.ceil(rect.width || this.div.offsetWidth || 0);
+      const height = Math.ceil(rect.height || this.div.offsetHeight || 0);
+      if (width && height) {
+        this.measuredSize = { width, height };
+      }
+      return this.measuredSize;
+    }
+
+    queueDrawAndDomReady() {
+      this.draw();
+      if (this.pendingDomReady) return;
+      this.pendingDomReady = true;
+      requestAnimationFrame(() => {
+        this.pendingDomReady = false;
+        this.draw();
+        window.__pwLatestMapPopupOverlay = this;
+        googleMaps.event.trigger(this, "domready");
+      });
+    }
+
+    applyDragTransform() {
+      if (!this.div) return;
+      this.div.style.transform = `translate3d(${Math.round(this.dragOffset.x)}px, ${Math.round(this.dragOffset.y)}px, 0)`;
+    }
+
+    bindDragHandle(force = false) {
+      if (!this.div || !this.contentEl) return;
+      const nextHandle =
+        this.contentEl.querySelector('[data-pw-drag-handle="1"]') ||
+        this.contentEl.firstElementChild ||
+        this.contentEl;
+      if (!nextHandle) return;
+      if (!force && this.handle === nextHandle && nextHandle.dataset.pwOverlayDragBound === "1") return;
+
+      this.cleanupDrag();
+      this.handle = nextHandle;
+
+      if (!this.handle.querySelector?.(".maps-panel-drag-grip")) {
+        const grip = document.createElement("span");
+        grip.className = "maps-panel-drag-grip maps-infowindow-drag-grip";
+        grip.textContent = "⋮⋮";
+        grip.setAttribute("aria-label", "Drag popup");
+        grip.setAttribute("title", "Drag popup");
+        grip.setAttribute("role", "img");
+        this.handle.insertBefore(grip, this.handle.firstChild);
+      }
+
+      this.handle.classList?.add("maps-infowindow-drag-handle");
+      this.handle.dataset.pwOverlayDragBound = "1";
+      this.listenerController = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const listenerOptions = this.listenerController
+        ? { passive: false, signal: this.listenerController.signal }
+        : { passive: false };
+      this.handle.addEventListener("pointerdown", this.onPointerDown, listenerOptions);
+      this.handle.addEventListener("pointermove", this.onPointerMove, listenerOptions);
+      this.handle.addEventListener("pointerup", this.onPointerUp, listenerOptions);
+      this.handle.addEventListener("pointercancel", this.onPointerUp, listenerOptions);
+    }
+
+    cleanupDrag() {
+      if (this.frame) cancelAnimationFrame(this.frame);
+      this.frame = null;
+      this.pointerState = null;
+      document.body?.classList?.remove("maps-panel-dragging-active");
+      try {
+        this.listenerController?.abort?.();
+      } catch {
+        // ignore
+      }
+      this.listenerController = null;
+      if (this.handle) {
+        this.handle.dataset.pwOverlayDragBound = "";
+        this.handle.style.cursor = "grab";
+      }
+    }
+
+    onPointerDown = (event) => {
+      if (event.button != null && event.button !== 0) return;
+      if (event.target?.closest?.("button,a,input,select,textarea,label,[role='button']")) return;
+      if (!this.div || !this.handle) return;
+
+      const mapRect = this.getMap()?.getDiv?.().getBoundingClientRect?.();
+      const popupRect = this.div.getBoundingClientRect();
+      const margin = 8;
+      this.pointerState = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        baseX: this.dragOffset.x,
+        baseY: this.dragOffset.y,
+        pendingX: this.dragOffset.x,
+        pendingY: this.dragOffset.y,
+        active: false,
+        limits: mapRect
+          ? {
+              minX: this.dragOffset.x + mapRect.left + margin - popupRect.left,
+              maxX: this.dragOffset.x + mapRect.right - margin - popupRect.right,
+              minY: this.dragOffset.y + mapRect.top + margin - popupRect.top,
+              maxY: this.dragOffset.y + mapRect.bottom - margin - popupRect.bottom,
+            }
+          : null,
+      };
+
+      this.zIndex = (Number(window.__pwMapsPopupZ || 120) || 120) + 1;
+      window.__pwMapsPopupZ = this.zIndex;
+      this.div.style.zIndex = String(this.zIndex);
+      try {
+        this.handle.setPointerCapture?.(event.pointerId);
+      } catch {
+        // ignore
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    onPointerMove = (event) => {
+      const state = this.pointerState;
+      if (!state || state.pointerId !== event.pointerId) return;
+      const dx = event.clientX - state.startX;
+      const dy = event.clientY - state.startY;
+
+      if (!state.active && Math.hypot(dx, dy) < MAP_PANEL_DRAG_THRESHOLD_PX) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      if (!state.active) {
+        state.active = true;
+        this.handle.style.cursor = "grabbing";
+        document.body?.classList?.add("maps-panel-dragging-active");
+      }
+
+      let nextX = state.baseX + dx;
+      let nextY = state.baseY + dy;
+      if (state.limits) {
+        nextX = Math.min(Math.max(nextX, state.limits.minX), state.limits.maxX);
+        nextY = Math.min(Math.max(nextY, state.limits.minY), state.limits.maxY);
+      }
+      state.pendingX = nextX;
+      state.pendingY = nextY;
+      if (!this.frame) {
+        this.frame = requestAnimationFrame(() => {
+          this.frame = null;
+          if (!this.pointerState) return;
+          this.dragOffset = {
+            x: this.pointerState.pendingX,
+            y: this.pointerState.pendingY,
+          };
+          this.applyDragTransform();
+        });
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    onPointerUp = (event) => {
+      const state = this.pointerState;
+      if (!state || state.pointerId !== event.pointerId) return;
+      if (this.frame) cancelAnimationFrame(this.frame);
+      this.frame = null;
+      this.dragOffset = { x: state.pendingX, y: state.pendingY };
+      this.applyDragTransform();
+      this.pointerState = null;
+      this.handle.style.cursor = "grab";
+      document.body?.classList?.remove("maps-panel-dragging-active");
+      try {
+        this.handle.releasePointerCapture?.(event.pointerId);
+      } catch {
+        // ignore
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+  }
+
+  return new DraggableMapPopupOverlay(options);
+}
+
+function makeLatestInfoWindowDraggable(options = {}) {
+  const overlay = window.__pwLatestMapPopupOverlay;
+  if (overlay?.setDragOptions) overlay.setDragOptions(options);
+}
+
+const MAP_PANEL_DRAG_THRESHOLD_PX = 4;
+
+function getPanelDragLimits(panelRect, boundsRect) {
+  const margin = 8;
+  const width = panelRect?.width || 260;
+  const height = panelRect?.height || 120;
+
+  return {
+    minLeft: margin,
+    maxLeft: Math.max(margin, boundsRect.width - Math.min(width, boundsRect.width - margin * 2) - margin),
+    minTop: margin,
+    maxTop: Math.max(margin, boundsRect.height - Math.min(height, boundsRect.height - margin * 2) - margin),
+  };
+}
+
+function clampPanelPosition(left, top, panelRect, boundsRect) {
+  const limits = getPanelDragLimits(panelRect, boundsRect);
+
+  return {
+    left: Math.min(Math.max(left, limits.minLeft), limits.maxLeft),
+    top: Math.min(Math.max(top, limits.minTop), limits.maxTop),
+  };
+}
+
+function MapPanelDragGrip({ label = "Drag panel" }) {
+  return (
+    <span
+      className="maps-panel-drag-grip"
+      aria-label={label}
+      title={label}
+      role="img"
+    >
+      ⋮⋮
+    </span>
+  );
+}
+
+function DraggableMapPanel({
+  panelId,
+  open = true,
+  containerRef,
+  zIndex = 10,
+  onActivate,
+  externalRef,
+  className = "",
+  style = {},
+  children,
+}) {
+  const panelRef = useRef(null);
+  const dragRef = useRef(null);
+  const frameRef = useRef(null);
+  const [position, setPosition] = useState(null);
+
+  useEffect(
+    () => () => {
+      if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+      dragRef.current = null;
+      document.body?.classList?.remove("maps-panel-dragging-active");
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!open) {
+      setPosition(null);
+      dragRef.current = null;
+      if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+      return;
+    }
+
+    const panel = panelRef.current;
+    const container = containerRef?.current;
+    if (!panel || !container || !position) return;
+
+    const clampCurrent = () => {
+      const panelRect = panel.getBoundingClientRect();
+      const boundsRect = container.getBoundingClientRect();
+      setPosition((current) => {
+        if (!current) return current;
+        const next = clampPanelPosition(current.left, current.top, panelRect, boundsRect);
+        return next.left === current.left && next.top === current.top ? current : next;
+      });
+    };
+
+    clampCurrent();
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(clampCurrent) : null;
+    resizeObserver?.observe(panel);
+    resizeObserver?.observe(container);
+
+    window.addEventListener("resize", clampCurrent);
+    window.addEventListener("orientationchange", clampCurrent);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", clampCurrent);
+      window.removeEventListener("orientationchange", clampCurrent);
+    };
+  }, [open, position, containerRef]);
+
+  if (!open) return null;
+
+  const beginDrag = (event) => {
+    const panel = panelRef.current;
+    const container = containerRef?.current;
+    const handle = event.target?.closest?.("[data-map-panel-drag-handle='true']");
+    if (!panel || !container || !handle || !panel.contains(handle)) return;
+
+    if (event.target?.closest?.("button,a,input,select,textarea,label,[role='button']")) {
+      return;
+    }
+
+    const panelRect = panel.getBoundingClientRect();
+    const boundsRect = container.getBoundingClientRect();
+    const currentLeft = position?.left ?? panelRect.left - boundsRect.left;
+    const currentTop = position?.top ?? panelRect.top - boundsRect.top;
+    const clamped = clampPanelPosition(currentLeft, currentTop, panelRect, boundsRect);
+    const limits = getPanelDragLimits(panelRect, boundsRect);
+
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      baseLeft: clamped.left,
+      baseTop: clamped.top,
+      latestLeft: clamped.left,
+      latestTop: clamped.top,
+      limits,
+      active: false,
+      pendingDx: 0,
+      pendingDy: 0,
+    };
+
+    try {
+      panel.setPointerCapture?.(event.pointerId);
+    } catch {
+      // ignore
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const moveDrag = (event) => {
+    const drag = dragRef.current;
+    const panel = panelRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !panel) return;
+
+    const rawDx = event.clientX - drag.startX;
+    const rawDy = event.clientY - drag.startY;
+    if (!drag.active && Math.hypot(rawDx, rawDy) < MAP_PANEL_DRAG_THRESHOLD_PX) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    if (!drag.active) {
+      drag.active = true;
+      onActivate?.(panelId);
+      panel.classList.add("is-dragging");
+      document.body?.classList?.add("maps-panel-dragging-active");
+    }
+
+    const nextLeft = Math.min(Math.max(drag.baseLeft + rawDx, drag.limits.minLeft), drag.limits.maxLeft);
+    const nextTop = Math.min(Math.max(drag.baseTop + rawDy, drag.limits.minTop), drag.limits.maxTop);
+
+    drag.latestLeft = nextLeft;
+    drag.latestTop = nextTop;
+    drag.pendingDx = nextLeft - drag.baseLeft;
+    drag.pendingDy = nextTop - drag.baseTop;
+
+    if (!frameRef.current) {
+      frameRef.current = requestAnimationFrame(() => {
+        frameRef.current = null;
+        const latestDrag = dragRef.current;
+        const latestPanel = panelRef.current;
+        if (!latestDrag || !latestPanel) return;
+        latestPanel.style.transform = `translate3d(${latestDrag.pendingDx}px, ${latestDrag.pendingDy}px, 0)`;
+      });
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const endDrag = (event) => {
+    const drag = dragRef.current;
+    const panel = panelRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !panel) return;
+
+    dragRef.current = null;
+    if (frameRef.current) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    panel.style.transform = "";
+    panel.classList.remove("is-dragging");
+    document.body?.classList?.remove("maps-panel-dragging-active");
+    try {
+      panel.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // ignore
+    }
+
+    if (drag.active) {
+      setPosition({ left: drag.latestLeft, top: drag.latestTop });
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const positionStyle = position
+    ? {
+        position: "absolute",
+        left: position.left,
+        top: position.top,
+        right: "auto",
+        bottom: "auto",
+      }
+    : null;
+
+  return (
+    <div
+      ref={(node) => {
+        panelRef.current = node;
+        if (externalRef) externalRef.current = node;
+      }}
+      className={`maps-draggable-panel ${className}`}
+      data-map-panel-id={panelId}
+      onPointerDownCapture={(event) => {
+        onActivate?.(panelId);
+        beginDrag(event);
+      }}
+      onPointerMove={moveDrag}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      style={{
+        ...style,
+        ...positionStyle,
+        zIndex,
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 /* ================================
@@ -2395,6 +2992,9 @@ function Maps() {
   );
 
   const toolsControlDivRef = useRef(null);
+  const mapWrapRef = useRef(null);
+  const panelZCounterRef = useRef(80);
+  const [mapPanelZ, setMapPanelZ] = useState({});
   const idleDebounceRef = useRef(null);
   const viewRef = useRef({ bounds: null, zoom: null });
   const mapRuntimeListenersRef = useRef([]);
@@ -2500,6 +3100,7 @@ const [infoMode, setInfoMode] = useState(false);
   const measurePolyRef = useRef(null);
   const measureLiveIWRef = useRef(null);
   const measureFinalIWRef = useRef(null);
+  const measureDragKeyRef = useRef(0);
   const lastMeasureSummaryRef = useRef(null);
   const lastMeasureLatLngRef = useRef(null);
   const lastMeasureSavedRef = useRef(false);
@@ -2522,15 +3123,11 @@ const [infoMode, setInfoMode] = useState(false);
   const [exportSummary, setExportSummary] = useState(null);
   const [exportCountSummary, setExportCountSummary] = useState(null);
   const [exportLargeConfirmArmed, setExportLargeConfirmArmed] = useState(false);
-  const [exportDialogPosition, setExportDialogPosition] = useState(null);
-  const [exportDialogDragging, setExportDialogDragging] = useState(false);
 
   const exportListenersRef = useRef([]);
   const exportFenceRef = useRef(null);      // rectangle or polygon overlay
   const exportPathRef = useRef([]);         // polygon path points
   const exportGeometryRef = useRef(null);   // cached geometry for ArcGIS query
-  const exportDialogRef = useRef(null);
-  const exportDialogDragRef = useRef(null);
 
   // ✅ Map Notes (synced via Supabase, cached locally for fast startup/offline)
   const MAP_NOTES_CACHE_KEY = "pw_maps_notes_cache_v1";
@@ -2652,6 +3249,11 @@ const mapsDrawerOpen = !mobilePanelCollapsed;
 const openMapsDrawer = () => setMobilePanelCollapsed(false);
 const closeMapsDrawer = () => setMobilePanelCollapsed(true);
 const toggleMapsDrawer = () => setMobilePanelCollapsed((prev) => !prev);
+const bringMapPanelToFront = (panelId) => {
+  if (!panelId) return;
+  panelZCounterRef.current += 1;
+  setMapPanelZ((prev) => ({ ...prev, [panelId]: panelZCounterRef.current }));
+};
 
   useEffect(() => {
     const onResize = () => {
@@ -2666,19 +3268,6 @@ const toggleMapsDrawer = () => setMobilePanelCollapsed((prev) => !prev);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-
-  useEffect(() => {
-    if (!exportDialogOpen || isMobile || !exportDialogPosition) return;
-
-    const onResize = () => {
-      setExportDialogPosition((pos) =>
-        pos ? clampExportDialogPosition(pos.left, pos.top) : pos
-      );
-    };
-
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [exportDialogOpen, exportDialogPosition, isMobile]);
 
   useEffect(() => {
     // Default to collapsed on mobile so the map is usable immediately in the field
@@ -2966,6 +3555,7 @@ useEffect(() => {
         const note = (mapNotesRef.current || []).find((n) => n.id === id);
     if (!note) return;
 
+    const resetNoteDragOffset = activeNoteInfoIdRef.current !== id;
     activeNoteInfoIdRef.current = id;
 
     // Show measurement overlay (if this note has one) and hide others
@@ -3101,6 +3691,7 @@ ${safeBy ? `<div style="margin-top:4px; font-size:11px; color:#444; font-weight:
 
     noteInfoWindowRef.current.setContent(html);
 
+    applyAboveFeaturePopupOffset(noteInfoWindowRef.current, marker || null);
     if (marker) {
       noteInfoWindowRef.current.open({ anchor: marker, map });
     } else {
@@ -3115,7 +3706,14 @@ ${safeBy ? `<div style="margin-top:4px; font-size:11px; color:#444; font-weight:
     }
 
     window.google.maps.event.addListenerOnce(noteInfoWindowRef.current, "domready", () => {
-      setTimeout(makeLatestInfoWindowDraggable, 0);
+      setTimeout(
+        () =>
+          makeLatestInfoWindowDraggable({
+            dragKey: `note:${id}`,
+            resetOffset: resetNoteDragOffset,
+          }),
+        0
+      );
       const delBtn = document.getElementById(`note-del-${id}`);
       if (delBtn) delBtn.onclick = () => deleteNoteById(id);
 
@@ -3287,11 +3885,19 @@ if (updated) {
     `;
 
     pointInfoWindowRef.current.setContent(html);
+    applyAboveFeaturePopupOffset(pointInfoWindowRef.current);
     pointInfoWindowRef.current.setPosition(position);
     pointInfoWindowRef.current.open({ map });
 
     window.google.maps.event.addListenerOnce(pointInfoWindowRef.current, "domready", () => {
-      setTimeout(makeLatestInfoWindowDraggable, 0);
+      setTimeout(
+        () =>
+          makeLatestInfoWindowDraggable({
+            dragKey: `temporary-point:${lat.toFixed(7)},${lng.toFixed(7)}`,
+            resetOffset: true,
+          }),
+        0
+      );
       const goToBtn = document.getElementById("point-goto");
       if (goToBtn) {
         goToBtn.onclick = () => {
@@ -3346,11 +3952,19 @@ if (updated) {
     `;
 
     noteComposerIWRef.current.setContent(html);
+    applyAboveFeaturePopupOffset(noteComposerIWRef.current);
     noteComposerIWRef.current.setPosition({ lat, lng });
     noteComposerIWRef.current.open({ map });
 
     window.google.maps.event.addListenerOnce(noteComposerIWRef.current, "domready", () => {
-      setTimeout(makeLatestInfoWindowDraggable, 0);
+      setTimeout(
+        () =>
+          makeLatestInfoWindowDraggable({
+            dragKey: `note-composer:${Number(lat).toFixed(7)},${Number(lng).toFixed(7)}`,
+            resetOffset: true,
+          }),
+        0
+      );
       const ta = document.getElementById("note-textarea");
       const saveBtn = document.getElementById("note-save");
       const cancelBtn = document.getElementById("note-cancel");
@@ -3645,7 +4259,7 @@ const notePayload = {
     map.setTilt(0);
   }
 });
-infoWindowRef.current = new window.google.maps.InfoWindow({
+infoWindowRef.current = createDraggableMapPopupOverlay({
   maxWidth: isSmallScreen() ? 260 : 340,
   disableAutoPan: true,
 });
@@ -3658,13 +4272,22 @@ const infoCloseListener = window.google.maps.event.addListener(infoWindowRef.cur
     hoverInfoWindowRef.current = new window.google.maps.InfoWindow({
       disableAutoPan: true,
     });
-    noteInfoWindowRef.current = new window.google.maps.InfoWindow();
+    noteInfoWindowRef.current = createDraggableMapPopupOverlay();
     const noteCloseListener = window.google.maps.event.addListener(noteInfoWindowRef.current, "closeclick", () => {
       activeNoteInfoIdRef.current = null;
     });
-    noteComposerIWRef.current = new window.google.maps.InfoWindow({ maxWidth: 320 });
-    addressInfoWindowRef.current = new window.google.maps.InfoWindow({ maxWidth: 320 });
-    pointInfoWindowRef.current = new window.google.maps.InfoWindow({ maxWidth: 280 });
+    noteComposerIWRef.current = createDraggableMapPopupOverlay({ maxWidth: 320 });
+    addressInfoWindowRef.current = createDraggableMapPopupOverlay({ maxWidth: 320 });
+    const addressCloseListener = window.google.maps.event.addListener(addressInfoWindowRef.current, "closeclick", () => {
+      try {
+        addressMarkerRef.current?.setMap?.(null);
+        addressMarkerRef.current = null;
+        setSelectedAddress(null);
+      } catch {
+        // ignore
+      }
+    });
+    pointInfoWindowRef.current = createDraggableMapPopupOverlay({ maxWidth: 280 });
 
     // ✅ Render saved notes immediately
     try {
@@ -3733,6 +4356,7 @@ mapRuntimeListenersRef.current = [
   tiltListener,
   infoCloseListener,
   noteCloseListener,
+  addressCloseListener,
   mapClickListener,
   mapDblClickListener,
   idleListener,
@@ -4031,10 +4655,18 @@ if (!isWA) {
   `;
 
   addressInfoWindowRef.current?.setContent(html);
+  applyAboveFeaturePopupOffset(addressInfoWindowRef.current, marker);
   addressInfoWindowRef.current?.open({ anchor: marker, map });
 
   window.google.maps.event.addListenerOnce(addressInfoWindowRef.current, "domready", () => {
-    setTimeout(makeLatestInfoWindowDraggable, 0);
+    setTimeout(
+      () =>
+        makeLatestInfoWindowDraggable({
+          dragKey: `address:${Number(position.lat).toFixed(7)},${Number(position.lng).toFixed(7)}`,
+          resetOffset: true,
+        }),
+      0
+    );
   });
 };
 
@@ -4340,6 +4972,7 @@ function openMapInfoPopupAtLatLng(latLng) {
   let latestDistrictInfo = [];
   let latestRoadsNetworkInfo = [];
   const identifySeq = ++contourIdentifySeqRef.current;
+  let popupRenderedOnce = false;
 
   const renderInfoPopup = () => {
     infoWindowRef.current?.setContent(
@@ -4352,11 +4985,21 @@ function openMapInfoPopupAtLatLng(latLng) {
         latestRoadsNetworkInfo
       )
     );
+    applyAboveFeaturePopupOffset(infoWindowRef.current);
     infoWindowRef.current?.setPosition(latLng);
     infoWindowRef.current?.open({ map });
 
     window.google?.maps?.event?.addListenerOnce?.(infoWindowRef.current, "domready", () => {
-      setTimeout(makeLatestInfoWindowDraggable, 0);
+      const resetOffset = !popupRenderedOnce;
+      setTimeout(
+        () =>
+          makeLatestInfoWindowDraggable({
+            dragKey: `map-info:${Number(typeof latLng.lat === "function" ? latLng.lat() : latLng.lat).toFixed(7)},${Number(typeof latLng.lng === "function" ? latLng.lng() : latLng.lng).toFixed(7)}`,
+            resetOffset,
+          }),
+        0
+      );
+      popupRenderedOnce = true;
     });
   };
 
@@ -4624,7 +5267,7 @@ function maybeLoadPopupPcg2020({ layer, name, props, lat, lng, markerId }) {
 
     infoWindowRef.current?.setContent(html);
     window.google?.maps?.event?.addListenerOnce?.(infoWindowRef.current, "domready", () => {
-      setTimeout(makeLatestInfoWindowDraggable, 0);
+      setTimeout(() => makeLatestInfoWindowDraggable({ dragKey: markerKey, resetOffset: false }), 0);
     });
   });
 }
@@ -4644,11 +5287,12 @@ function openMainInfoWindow({ html, marker, markerId, layerId }) {
   activeMainInfoLayerRef.current = layerId;
 
   infoWindowRef.current.setContent(html);
+  applyAboveFeaturePopupOffset(infoWindowRef.current, marker);
   infoWindowRef.current.open({ anchor: marker, map });
 
   window.google.maps.event.addListenerOnce(infoWindowRef.current, "domready", () => {
     setTimeout(() => {
-      makeLatestInfoWindowDraggable();
+      makeLatestInfoWindowDraggable({ dragKey: `${layerId}::${markerId}`, resetOffset: true });
     }, 0);
   });
 }
@@ -4717,10 +5361,18 @@ const safeLA =
     `;
 
     infoWindowRef.current.setContent(html);
+    applyAboveFeaturePopupOffset(infoWindowRef.current, marker);
     infoWindowRef.current.open({ anchor: marker, map });
 
     window.google.maps.event.addListenerOnce(infoWindowRef.current, "domready", () => {
-      setTimeout(makeLatestInfoWindowDraggable, 0);
+      setTimeout(
+        () =>
+          makeLatestInfoWindowDraggable({
+            dragKey: `job:${job.id || job.job_number}`,
+            resetOffset: true,
+          }),
+        0
+      );
       const btn = document.getElementById("open-job-register");
       if (btn) btn.onclick = () => navigate(`/jobs?job=${encodeURIComponent(job.job_number)}&from=maps&edit=1`);
 });
@@ -5431,7 +6083,7 @@ const handleMyLocation = () => {
     }
 
     if (!measureLiveIWRef.current) {
-      measureLiveIWRef.current = new window.google.maps.InfoWindow();
+      measureLiveIWRef.current = createDraggableMapPopupOverlay();
     }
     const hint = isSmallScreen() ? "Tap ✔ Finish to complete" : "Right-click to finish";
     // Store last measurement summary so we can save it as a map note
@@ -5450,10 +6102,16 @@ const handleMyLocation = () => {
     lastMeasureSummaryRef.current = { mode: measureModeRef.current, htmlLabel: label, plainText };
     lastMeasureLatLngRef.current = lastLatLng;
     measureLiveIWRef.current.setContent(
-      `<div style="font-weight:900; font-size:13px;">${label}<br/><span style="font-weight:700; color:#666;">${hint}</span></div>`
+      `<div data-pw-drag-handle="1" style="font-weight:900; font-size:13px;">
+        ${label}<br/><span style="font-weight:700; color:#666;">${hint}</span>
+      </div>`
     );
+    applyAboveFeaturePopupOffset(measureLiveIWRef.current);
     measureLiveIWRef.current.setPosition(lastLatLng);
     measureLiveIWRef.current.open(map);
+    window.google.maps.event.addListenerOnce(measureLiveIWRef.current, "domready", () => {
+      setTimeout(() => makeLatestInfoWindowDraggable({ dragKey: `measure:${measureDragKeyRef.current}` }), 0);
+    });
   };
 
     const finishMeasure = () => {
@@ -5513,7 +6171,7 @@ const handleMyLocation = () => {
       );
 
       window.google.maps.event.addListenerOnce(measureFinalIWRef.current, "domready", () => {
-        setTimeout(makeLatestInfoWindowDraggable, 0);
+        setTimeout(() => makeLatestInfoWindowDraggable({ dragKey: `measure:${measureDragKeyRef.current}` }), 0);
         const btn = document.getElementById(btnId);
         if (!btn) return;
 
@@ -5544,6 +6202,7 @@ const handleMyLocation = () => {
    const startDistanceMeasure = () => {
     clearExportInteraction();
     clearMeasure();
+    measureDragKeyRef.current += 1;
     const map = mapRef.current;
     if (!map || !window.google) return;
 
@@ -5574,6 +6233,7 @@ const handleMyLocation = () => {
     const startAreaMeasure = () => {
     clearExportInteraction();
     clearMeasure();
+    measureDragKeyRef.current += 1;
     const map = mapRef.current;
     if (!map || !window.google) return;
 
@@ -6183,66 +6843,6 @@ function sanitizeDxfText(text = "") {
 
   function getLayerExportSourceDatumFamily(layer) {
     return layer?.data?.exportSourceDatum || "GDA94";
-  }
-
-  function isDesktopPointerDevice() {
-    if (isMobile || typeof window === "undefined") return false;
-    return window.matchMedia?.("(pointer: fine)")?.matches !== false;
-  }
-
-  function clampExportDialogPosition(left, top, rect = null) {
-    if (typeof window === "undefined") return { left, top };
-    const dialogRect = rect || exportDialogRef.current?.getBoundingClientRect();
-    const width = dialogRect?.width || 560;
-    const height = dialogRect?.height || 400;
-    const margin = 12;
-    const maxLeft = Math.max(margin, window.innerWidth - width - margin);
-    const maxTop = Math.max(margin, window.innerHeight - height - margin);
-
-    return {
-      left: Math.min(Math.max(left, margin), maxLeft),
-      top: Math.min(Math.max(top, margin), maxTop),
-    };
-  }
-
-  function handleExportDialogHeaderPointerDown(e) {
-    if (!isDesktopPointerDevice() || e.button !== 0) return;
-    if (e.target?.closest?.("button, input, select, textarea, label, a")) return;
-
-    const dialog = exportDialogRef.current;
-    if (!dialog) return;
-
-    const rect = dialog.getBoundingClientRect();
-    const currentPosition = exportDialogPosition || { left: rect.left, top: rect.top };
-
-    exportDialogDragRef.current = {
-      pointerId: e.pointerId,
-      offsetX: e.clientX - currentPosition.left,
-      offsetY: e.clientY - currentPosition.top,
-    };
-
-    setExportDialogPosition(clampExportDialogPosition(currentPosition.left, currentPosition.top, rect));
-    setExportDialogDragging(true);
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-    e.preventDefault();
-  }
-
-  function handleExportDialogHeaderPointerMove(e) {
-    const drag = exportDialogDragRef.current;
-    if (!drag || drag.pointerId !== e.pointerId || !isDesktopPointerDevice()) return;
-
-    setExportDialogPosition(
-      clampExportDialogPosition(e.clientX - drag.offsetX, e.clientY - drag.offsetY)
-    );
-  }
-
-  function endExportDialogDrag(e) {
-    const drag = exportDialogDragRef.current;
-    if (drag && e?.pointerId === drag.pointerId) {
-      e.currentTarget.releasePointerCapture?.(e.pointerId);
-    }
-    exportDialogDragRef.current = null;
-    setExportDialogDragging(false);
   }
 
   const EXPORT_GDA94_GEOGRAPHIC = "EXPORT:GDA94_GEOGRAPHIC";
@@ -7082,9 +7682,6 @@ if (pointSets.length) {
     setExportCountSummary(null);
     setExportLargeConfirmArmed(false);
     setExportWarning("");
-    setExportDialogPosition(null);
-    exportDialogDragRef.current = null;
-    setExportDialogDragging(false);
     setExportDialogOpen(true);
   }
 
@@ -9728,6 +10325,7 @@ return (
       </div>
 
       <div
+        ref={mapWrapRef}
         className="maps-mapwrap"
         style={{
           position: "relative",
@@ -9806,7 +10404,12 @@ return (
 )}
 
       {exportPanelOpen && (
-  <div
+  <DraggableMapPanel
+    panelId="export-panel"
+    open={exportPanelOpen}
+    containerRef={mapWrapRef}
+    zIndex={mapPanelZ["export-panel"] || 70}
+    onActivate={bringMapPanelToFront}
     style={{
       position: "absolute",
       top: isMobile ? 74 : 84,
@@ -9832,6 +10435,8 @@ return (
     }}
   >
            <div
+  data-map-panel-drag-handle="true"
+  className="maps-draggable-panel-header"
   style={{
     display: "flex",
     alignItems: "center",
@@ -9848,7 +10453,10 @@ return (
     paddingBottom: 8,
   }}
 >
-              <div style={{ fontWeight: 950, fontSize: 13 }}>Export visible layers</div>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                <MapPanelDragGrip label="Drag export panel" />
+                <div style={{ fontWeight: 950, fontSize: 13 }}>Export visible layers</div>
+              </div>
               <button
                 type="button"
                 className="btn-pill"
@@ -9927,7 +10535,7 @@ return (
                 Visible exportable layers: {visibleExportableLayers.map((l) => l.name).join(", ")}
               </div>
             )}
-          </div>
+          </DraggableMapPanel>
         )}
 
         {exportDialogOpen && (
@@ -9935,7 +10543,7 @@ return (
               style={{
                 position: "absolute",
                 inset: 0,
-              zIndex: 15,
+              zIndex: 80,
               background: "rgba(0,0,0,0.22)",
               display: "flex",
               justifyContent: "center",
@@ -9943,8 +10551,11 @@ return (
               padding: isMobile ? "72px 12px 12px" : "88px 16px 16px",
             }}
           >
-            <div
-              ref={exportDialogRef}
+            <DraggableMapPanel
+              panelId="export-dialog"
+              open={exportDialogOpen}
+              containerRef={mapWrapRef}
+              zIndex={mapPanelZ["export-dialog"] || 90}
               style={{
                 width: "min(560px, 100%)",
                 background: "#fff",
@@ -9956,33 +10567,23 @@ return (
                 display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
-                ...(exportDialogPosition && !isMobile
-                  ? {
-                      position: "fixed",
-                      left: exportDialogPosition.left,
-                      top: exportDialogPosition.top,
-                      zIndex: 16,
-                    }
-                  : null),
               }}
             >
               <div
-                onPointerDown={handleExportDialogHeaderPointerDown}
-                onPointerMove={handleExportDialogHeaderPointerMove}
-                onPointerUp={endExportDialogDrag}
-                onPointerCancel={endExportDialogDrag}
+                data-map-panel-drag-handle="true"
+                className="maps-draggable-panel-header"
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
                   gap: 10,
                   marginBottom: 12,
-                  cursor: isMobile ? "default" : exportDialogDragging ? "grabbing" : "grab",
-                  userSelect: exportDialogDragging ? "none" : undefined,
-                  touchAction: "none",
                 }}
               >
-                <div style={{ fontWeight: 950, fontSize: 15 }}>Export options</div>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                  <MapPanelDragGrip label="Drag export options dialog" />
+                  <div style={{ fontWeight: 950, fontSize: 15 }}>Export options</div>
+                </div>
                 <button
                   type="button"
                   className="btn-pill"
@@ -10198,7 +10799,7 @@ return (
                   {exportBusy ? "Preparing…" : exportLargeConfirmArmed ? "Export Anyway" : "Export"}
                 </button>
               </div>
-            </div>
+            </DraggableMapPanel>
           </div>
         )}
 

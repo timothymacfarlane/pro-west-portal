@@ -214,7 +214,7 @@ Checklist heading: Strata Subdivision Checklist
 4. Complete alignment, strata and boundary calculations — Field Surveyor.
    item_key: alignment-strata-boundary-calculations
 
-5. Produce the draft Survey Strata Plan — Drafting.
+5. Produce the draft Strata Plan — Drafting.
    item_key: produce-draft-survey-strata-plan
 
 6. Check the draft Strata Plan — Licensed Surveyor / Project Manager.

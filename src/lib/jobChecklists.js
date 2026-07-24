@@ -203,7 +203,7 @@ export const JOB_CHECKLIST_DEFINITIONS = {
       key: "alignment-strata-boundary-calculations",
       text: "Complete alignment, strata and boundary calculations — Field Surveyor.",
     },
-    { key: "produce-draft-survey-strata-plan", text: "Produce the draft Survey Strata Plan — Drafting." },
+    { key: "produce-draft-survey-strata-plan", text: "Produce the draft Strata Plan — Drafting." },
     { key: "check-draft-strata-plan", text: "Check the draft Strata Plan — Licensed Surveyor / Project Manager." },
     { key: "order-unit-entitlement", text: "Order the Unit Entitlement evaluation — Project Manager." },
     {
@@ -428,6 +428,39 @@ export function getChecklistDefinition(jobCategory) {
 
 export function getChecklistHeading(jobCategory) {
   return JOB_CHECKLIST_CATEGORY_HEADINGS[jobCategory] || `${jobCategory || "Job"} Checklist`;
+}
+
+export function calculateChecklistProgress(jobCategory, checklistRows = []) {
+  const definition = getChecklistDefinition(jobCategory) || [];
+
+  if (!definition.length) {
+    return {
+      configured: false,
+      completed: 0,
+      total: 0,
+      label: "—",
+      title: "No checklist is configured for this job category.",
+      complete: false,
+    };
+  }
+
+  const definitionKeys = new Set(definition.map((item) => item.key));
+  const completed = (checklistRows || []).filter(
+    (row) =>
+      (!row.job_category || row.job_category === jobCategory) &&
+      definitionKeys.has(row.item_key) &&
+      row.is_completed === true
+  ).length;
+  const total = definition.length;
+
+  return {
+    configured: true,
+    completed,
+    total,
+    label: `${completed}/${total}`,
+    title: `Checklist progress: ${completed} of ${total} items completed`,
+    complete: completed === total && total > 0,
+  };
 }
 
 export function hasChecklistActivity(items = []) {
