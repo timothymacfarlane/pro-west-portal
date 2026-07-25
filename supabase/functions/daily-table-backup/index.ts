@@ -10,6 +10,7 @@ const TABLES = [
   "job_planning_unscheduled",
   "profiles",
   "documents",
+  "map_imports",
   "map_notes",
   "schedule_people",
   "document_favourites",

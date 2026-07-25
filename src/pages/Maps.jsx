@@ -20,6 +20,380 @@ import { cleanDisplayAddress } from "../lib/displayFormatters.js";
 import { getJobAddressWarning } from "../lib/jobAddress.js";
 
 registerProjectionDefs();
+
+const MAP_IMPORTS_BUCKET = "map-imports";
+const IMPORT_MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
+const IMPORT_LARGE_FEATURE_WARNING_THRESHOLD = 10000;
+const IMPORT_LARGE_VERTEX_WARNING_THRESHOLD = 100000;
+const IMPORT_LINE_STYLE = {
+  strokeColor: "#00a3a3",
+  strokeOpacity: 0.9,
+  strokeWeight: 2,
+  clickable: true,
+};
+const IMPORT_POINT_ICON = {
+  path: "M 0 -5 L 4 0 L 0 5 L -4 0 Z",
+  fillColor: "#00a3a3",
+  fillOpacity: 1,
+  strokeColor: "#ffffff",
+  strokeWeight: 1,
+  scale: 1.6,
+};
+const CSV_HEADER_ALIASES = {
+  pointId: [
+    "feature_id",
+    "point id",
+    "pointid",
+    "point_id",
+    "point number",
+    "pointnumber",
+    "point_number",
+    "name",
+    "id",
+  ],
+  easting: ["easting", "east", "x", "mga easting", "mga_easting"],
+  northing: ["northing", "north", "y", "mga northing", "mga_northing"],
+  elevation: ["elevation", "elev", "rl", "z", "height"],
+  description: ["description", "desc", "code", "layer_name", "comment", "notes"],
+  latitude: ["latitude", "lat"],
+  longitude: ["longitude", "lon", "lng", "long"],
+};
+
+function normalizeCsvHeader(header = "") {
+  return String(header || "")
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function getAliasedHeader(headers = [], aliasGroup = []) {
+  const normalized = new Map(headers.map((header) => [normalizeCsvHeader(header), header]));
+  for (const alias of aliasGroup) {
+    const found = normalized.get(normalizeCsvHeader(alias));
+    if (found) return found;
+  }
+  return "";
+}
+
+function parseCsvText(text = "") {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = text[i + 1];
+
+    if (inQuotes) {
+      if (ch === '"' && next === '"') {
+        value += '"';
+        i += 1;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        value += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      row.push(value);
+      value = "";
+    } else if (ch === "\n") {
+      row.push(value);
+      rows.push(row);
+      row = [];
+      value = "";
+    } else if (ch !== "\r") {
+      value += ch;
+    }
+  }
+
+  row.push(value);
+  rows.push(row);
+
+  const nonBlankRows = rows.filter((items) => items.some((item) => String(item || "").trim()));
+  if (!nonBlankRows.length) return { headers: [], records: [] };
+
+  const headers = nonBlankRows[0].map((header) => String(header || "").trim());
+  const records = nonBlankRows.slice(1).map((items) =>
+    headers.reduce((record, header, index) => {
+      record[header || `column_${index + 1}`] = String(items[index] ?? "").trim();
+      return record;
+    }, {})
+  );
+
+  return { headers, records };
+}
+
+function inferImportFileType(file, text = "") {
+  const name = String(file?.name || "").toLowerCase();
+  const trimmed = String(text || "").trimStart();
+  if (name.endsWith(".csv") && /,|\n/.test(trimmed)) return "csv";
+  if (name.endsWith(".dxf") && /\bSECTION\b/i.test(trimmed) && /\bENTITIES\b/i.test(trimmed)) return "dxf";
+  if (/\bSECTION\b/i.test(trimmed) && /\bENTITIES\b/i.test(trimmed)) return "dxf";
+  if (/,/.test(trimmed.split(/\r?\n/, 1)[0] || "")) return "csv";
+  return "";
+}
+
+function defaultDatasetName(filename = "") {
+  return String(filename || "Imported dataset")
+    .replace(/\.[^.]+$/, "")
+    .trim() || "Imported dataset";
+}
+
+function safeStorageFilename(filename = "import.dat") {
+  const cleaned = String(filename || "import.dat")
+    .normalize("NFKD")
+    .replace(/[^\w.\- ]+/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return (cleaned || "import.dat").slice(0, 120);
+}
+
+function toNumber(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const num = Number(text.replace(/,/g, ""));
+  return Number.isFinite(num) ? num : null;
+}
+
+function isValidLngLat(lng, lat) {
+  return Number.isFinite(lng) && Number.isFinite(lat) && lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90;
+}
+
+function isProjectionOption(code) {
+  return PROJECTION_OPTIONS.some((opt) => opt.code === code);
+}
+
+function isGeographicImportProjection(code = "") {
+  return ["EPSG:7844", "EPSG:4283", "EPSG:4203", "EPSG:4326"].includes(code);
+}
+
+function transformImportCoordinate(x, y, sourceProjection) {
+  if (!isProjectionOption(sourceProjection)) {
+    throw new Error("Invalid selected projection.");
+  }
+
+  const xx = Number(x);
+  const yy = Number(y);
+  if (!Number.isFinite(xx) || !Number.isFinite(yy)) return null;
+
+  if (isGeographicImportProjection(sourceProjection)) {
+    const lng = xx;
+    const lat = yy;
+    return isValidLngLat(lng, lat) ? { lng, lat } : null;
+  }
+
+  const result = projectToLonLat(xx, yy, sourceProjection);
+  return result && isValidLngLat(result.lng, result.lat) ? result : null;
+}
+
+function computeGeojsonBounds(featureCollection) {
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+
+  const visitCoord = (coord) => {
+    const lng = Number(coord?.[0]);
+    const lat = Number(coord?.[1]);
+    if (!isValidLngLat(lng, lat)) return;
+    minLng = Math.min(minLng, lng);
+    minLat = Math.min(minLat, lat);
+    maxLng = Math.max(maxLng, lng);
+    maxLat = Math.max(maxLat, lat);
+  };
+
+  const walk = (coords) => {
+    if (!Array.isArray(coords)) return;
+    if (typeof coords[0] === "number") {
+      visitCoord(coords);
+      return;
+    }
+    coords.forEach(walk);
+  };
+
+  (featureCollection?.features || []).forEach((feature) => walk(feature?.geometry?.coordinates));
+
+  if (![minLng, minLat, maxLng, maxLat].every(Number.isFinite)) return null;
+  return { west: minLng, south: minLat, east: maxLng, north: maxLat };
+}
+
+function countGeojsonVertices(featureCollection) {
+  let count = 0;
+  const walk = (coords) => {
+    if (!Array.isArray(coords)) return;
+    if (typeof coords[0] === "number") {
+      count += 1;
+      return;
+    }
+    coords.forEach(walk);
+  };
+  (featureCollection?.features || []).forEach((feature) => walk(feature?.geometry?.coordinates));
+  return count;
+}
+
+function dxfPairs(text = "") {
+  const lines = String(text || "").replace(/\r/g, "").split("\n");
+  const pairs = [];
+  for (let i = 0; i < lines.length - 1; i += 2) {
+    pairs.push({ code: String(lines[i] || "").trim(), value: String(lines[i + 1] || "").trim() });
+  }
+  return pairs;
+}
+
+function normalizeDxfAngle(deg) {
+  const raw = Number(deg);
+  if (!Number.isFinite(raw)) return 0;
+  return ((raw % 360) + 360) % 360;
+}
+
+function sampleDxfArc(cx, cy, radius, startDeg, endDeg, maxSegments = 96) {
+  const start = normalizeDxfAngle(startDeg);
+  let end = normalizeDxfAngle(endDeg);
+  if (end <= start) end += 360;
+  const sweep = end - start;
+  const segments = Math.max(8, Math.min(maxSegments, Math.ceil(sweep / 6)));
+  const points = [];
+  for (let i = 0; i <= segments; i += 1) {
+    const angle = ((start + (sweep * i) / segments) * Math.PI) / 180;
+    points.push([cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius]);
+  }
+  return points;
+}
+
+function sampleDxfCircle(cx, cy, radius, maxSegments = 144) {
+  const segments = Math.max(32, Math.min(maxSegments, Math.ceil((Math.PI * 2 * Math.abs(radius)) / 2)));
+  const points = [];
+  for (let i = 0; i <= segments; i += 1) {
+    const angle = (Math.PI * 2 * i) / segments;
+    points.push([cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius]);
+  }
+  return points;
+}
+
+function parseDxfEntities(text = "") {
+  const pairs = dxfPairs(text);
+  const entities = [];
+  const unsupported = {};
+  let inEntities = false;
+
+  for (let i = 0; i < pairs.length; i += 1) {
+    const pair = pairs[i];
+    if (pair.code === "2" && pair.value.toUpperCase() === "ENTITIES") {
+      inEntities = true;
+      continue;
+    }
+    if (inEntities && pair.code === "0" && pair.value.toUpperCase() === "ENDSEC") break;
+    if (!inEntities || pair.code !== "0") continue;
+
+    const type = pair.value.toUpperCase();
+    if (!type || type === "SECTION") continue;
+
+    const body = [];
+    let j = i + 1;
+    for (; j < pairs.length; j += 1) {
+      if (pairs[j].code === "0") break;
+      body.push(pairs[j]);
+    }
+    i = j - 1;
+
+    const get = (code) => body.find((p) => p.code === code)?.value;
+    const getAll = (code) => body.filter((p) => p.code === code).map((p) => p.value);
+    const layer = get("8") || "DXF";
+
+    if (type === "LINE") {
+      const x1 = toNumber(get("10"));
+      const y1 = toNumber(get("20"));
+      const z1 = toNumber(get("30"));
+      const x2 = toNumber(get("11"));
+      const y2 = toNumber(get("21"));
+      const z2 = toNumber(get("31"));
+      if ([x1, y1, x2, y2].every((v) => v != null)) {
+        entities.push({ type, layer, coords: [[x1, y1, z1], [x2, y2, z2]] });
+      }
+      continue;
+    }
+
+    if (type === "LWPOLYLINE") {
+      const xs = getAll("10").map(toNumber);
+      const ys = getAll("20").map(toNumber);
+      const zs = getAll("38").map(toNumber);
+      const coords = xs.map((x, index) => [x, ys[index], zs[index]]).filter(([x, y]) => x != null && y != null);
+      const closed = (Number(get("70")) & 1) === 1;
+      if (closed && coords.length > 2) coords.push(coords[0]);
+      if (coords.length >= 2) entities.push({ type, layer, coords });
+      continue;
+    }
+
+    if (type === "POLYLINE") {
+      const coords = [];
+      const closed = (Number(get("70")) & 1) === 1;
+      for (let k = j; k < pairs.length; k += 1) {
+        if (pairs[k].code === "0" && pairs[k].value.toUpperCase() === "SEQEND") {
+          i = k;
+          break;
+        }
+        if (pairs[k].code !== "0" || pairs[k].value.toUpperCase() !== "VERTEX") continue;
+        const vertexBody = [];
+        k += 1;
+        for (; k < pairs.length; k += 1) {
+          if (pairs[k].code === "0") {
+            k -= 1;
+            break;
+          }
+          vertexBody.push(pairs[k]);
+        }
+        const vx = toNumber(vertexBody.find((p) => p.code === "10")?.value);
+        const vy = toNumber(vertexBody.find((p) => p.code === "20")?.value);
+        const vz = toNumber(vertexBody.find((p) => p.code === "30")?.value);
+        if (vx != null && vy != null) coords.push([vx, vy, vz]);
+      }
+      if (closed && coords.length > 2) coords.push(coords[0]);
+      if (coords.length >= 2) entities.push({ type, layer, coords });
+      continue;
+    }
+
+    if (type === "ARC" || type === "CIRCLE") {
+      const cx = toNumber(get("10"));
+      const cy = toNumber(get("20"));
+      const radius = toNumber(get("40"));
+      if ([cx, cy, radius].every((v) => v != null) && radius > 0) {
+        const coords =
+          type === "ARC"
+            ? sampleDxfArc(cx, cy, radius, get("50"), get("51"))
+            : sampleDxfCircle(cx, cy, radius);
+        entities.push({ type, layer, coords });
+      }
+      continue;
+    }
+
+    if (type === "SPLINE") {
+      const xs = getAll("10").map(toNumber);
+      const ys = getAll("20").map(toNumber);
+      const coords = xs.map((x, index) => [x, ys[index], null]).filter(([x, y]) => x != null && y != null);
+      if (coords.length >= 2) entities.push({ type, layer, coords });
+      continue;
+    }
+
+    unsupported[type] = (unsupported[type] || 0) + 1;
+  }
+
+  return { entities, unsupported };
+}
+
+function unsupportedSummaryText(summary = {}) {
+  return Object.entries(summary)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([type, count]) => `${type}: ${count}`)
+    .join(", ");
+}
 /**
  * Safe Point constructor:
  * If google maps is already loaded, use google.maps.Point.
@@ -2188,6 +2562,7 @@ function DraggableMapPanel({
   className = "",
   style = {},
   children,
+  ...rest
 }) {
   const panelRef = useRef(null);
   const dragRef = useRef(null);
@@ -2370,7 +2745,10 @@ function DraggableMapPanel({
       }}
       className={`maps-draggable-panel ${className}`}
       data-map-panel-id={panelId}
+      {...rest}
       onPointerDownCapture={(event) => {
+        rest.onPointerDownCapture?.(event);
+        if (event.defaultPrevented) return;
         onActivate?.(panelId);
         beginDrag(event);
       }}
@@ -3129,6 +3507,25 @@ const [infoMode, setInfoMode] = useState(false);
   const exportPathRef = useRef([]);         // polygon path points
   const exportGeometryRef = useRef(null);   // cached geometry for ArcGIS query
 
+  // Import
+  const [importPanelOpen, setImportPanelOpen] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [importDatasetName, setImportDatasetName] = useState("");
+  const [importDetectedType, setImportDetectedType] = useState("");
+  const [importProjection, setImportProjection] = useState(DEFAULT_PROJECTION_CODE);
+  const [importSaveMode, setImportSaveMode] = useState("temporary");
+  const [importAttachToCurrentJob, setImportAttachToCurrentJob] = useState(false);
+  const [importPreview, setImportPreview] = useState(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importStatus, setImportStatus] = useState("");
+  const [importError, setImportError] = useState("");
+  const [mapImports, setMapImports] = useState([]);
+  const mapImportsRef = useRef([]);
+  const importGeometryCacheRef = useRef(new Map());
+  const importRenderStoreRef = useRef(new Map());
+  const importPopupRef = useRef(null);
+  const importLoadSeqRef = useRef(0);
+
   // ✅ Map Notes (synced via Supabase, cached locally for fast startup/offline)
   const MAP_NOTES_CACHE_KEY = "pw_maps_notes_cache_v1";
 
@@ -3336,6 +3733,94 @@ const bringMapPanelToFront = (panelId) => {
     [pauseMapActivity]
   );
 
+  const getProfileDisplayName = (profile) =>
+    String(profile?.display_name || profile?.email || "").trim();
+
+  const isRawUuidLike = (value) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      String(value || "").trim()
+    );
+
+  const cleanCreatorDisplayLabel = (value) => {
+    const text = String(value || "").trim();
+    return text && !isRawUuidLike(text) ? text : "";
+  };
+
+  async function resolveCreatorProfiles(rows = []) {
+    const creatorIds = [
+      ...new Set(
+        (rows || [])
+          .map((row) => String(row?.created_by || "").trim())
+          .filter(Boolean)
+      ),
+    ];
+    const creatorEmails = [
+      ...new Set(
+        (rows || [])
+          .map((row) => String(row?.created_by_name || row?.created_by_email || "").trim().toLowerCase())
+          .filter((value) => value && value.includes("@"))
+      ),
+    ];
+
+    const byId = new Map();
+    const byEmail = new Map();
+
+    try {
+      if (creatorIds.length) {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("id, display_name, email")
+          .in("id", creatorIds);
+        if (error) throw error;
+
+        (data || []).forEach((profile) => {
+          const displayName = getProfileDisplayName(profile);
+          if (profile?.id && displayName) byId.set(String(profile.id), displayName);
+          const email = String(profile?.email || "").trim().toLowerCase();
+          if (email && displayName) byEmail.set(email, displayName);
+        });
+      }
+
+      const missingEmails = creatorEmails.filter((email) => !byEmail.has(email));
+      if (missingEmails.length) {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("id, display_name, email")
+          .in("email", missingEmails);
+        if (error) throw error;
+
+        (data || []).forEach((profile) => {
+          const displayName = getProfileDisplayName(profile);
+          const email = String(profile?.email || "").trim().toLowerCase();
+          if (email && displayName) byEmail.set(email, displayName);
+          if (profile?.id && displayName) byId.set(String(profile.id), displayName);
+        });
+      }
+    } catch (error) {
+      console.warn("Creator profile lookup failed:", error);
+    }
+
+    return { byId, byEmail };
+  }
+
+  function getResolvedCreatorDisplay(row, profiles) {
+    const creatorId = String(row?.created_by || "").trim();
+    if (creatorId && profiles?.byId?.has(creatorId)) return profiles.byId.get(creatorId);
+
+    const storedName = cleanCreatorDisplayLabel(row?.created_by_name);
+    const storedEmail = storedName.includes("@") ? storedName.toLowerCase() : "";
+    if (storedEmail && profiles?.byEmail?.has(storedEmail)) return profiles.byEmail.get(storedEmail);
+    if (storedName && !storedName.includes("@")) return storedName;
+    if (storedEmail) return storedName;
+
+    return "Unknown user";
+  }
+
+  const getNoteCreatorLabel = (note) =>
+    cleanCreatorDisplayLabel(note?.created_by_display_name) ||
+    cleanCreatorDisplayLabel(note?.created_by_name) ||
+    "Unknown user";
+
   const fetchNotesFromSupabase = async () => {
     try {
       setNotesSyncError("");
@@ -3347,9 +3832,16 @@ const bringMapPanelToFront = (panelId) => {
 
       if (error) throw error;
 
-      setMapNotes(data || []);
+      const rows = data || [];
+      const creatorProfiles = await resolveCreatorProfiles(rows);
+      const resolvedNotes = rows.map((note) => ({
+        ...note,
+        created_by_display_name: getResolvedCreatorDisplay(note, creatorProfiles),
+      }));
+
+      setMapNotes(resolvedNotes);
             try {
-        localStorage.setItem(MAP_NOTES_CACHE_KEY, JSON.stringify(data || []));
+        localStorage.setItem(MAP_NOTES_CACHE_KEY, JSON.stringify(resolvedNotes));
       } catch {}
     } catch (e) {
       console.error("Fetch notes failed:", e);
@@ -3405,9 +3897,10 @@ useEffect(() => {
 
   const handleShowAllNotesChange = useCallback((checked) => {
     setShowAllNotes(checked);
+    const state = safeReadState() || {};
     safeWriteState({
       showAllNotes: checked,
-      notesVisibility: { showAllNotes: checked },
+      notesVisibility: { ...(state.notesVisibility || {}), showAllNotes: checked },
     });
   }, []);
 
@@ -3438,6 +3931,7 @@ useEffect(() => {
   const formatNoteTime = (iso) => {
     try {
       const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "";
       return d.toLocaleString("en-AU", {
         hour: "2-digit",
         minute: "2-digit",
@@ -3629,7 +4123,7 @@ useEffect(() => {
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
     const safeTime = formatNoteTime(note.created_at);
-    const safeBy = String(note.created_by_name || "")
+    const safeBy = getNoteCreatorLabel(note)
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 const mga = wgs84ToMga2020(note.lat, note.lng);
@@ -4030,8 +4524,15 @@ const notePayload = {
             if (error) throw error;
 
             // Update local state immediately (realtime will keep others in sync)
+            const resolvedNote = {
+              ...data,
+              created_by_display_name:
+                cleanCreatorDisplayLabel(currentUserName) ||
+                cleanCreatorDisplayLabel(authUserEmail) ||
+                "Unknown user",
+            };
             setMapNotes((prev) => {
-              const next = [data, ...(prev || []).filter((n) => n.id !== data.id)];
+              const next = [resolvedNote, ...(prev || []).filter((n) => n.id !== data.id)];
               return next;
             });
 
@@ -4132,7 +4633,7 @@ const notePayload = {
     };
   }, []);
 
-  
+
   // Selected portal job (used for keeping job number in the search box + attaching notes)
   const selectedPortalJob = useMemo(() => {
     if (!portalSelectedJobId) return null;
@@ -4145,6 +4646,860 @@ const notePayload = {
     portalSelectedJobIdRef.current = portalSelectedJobId || null;
     selectedPortalJobNumberRef.current = String(selectedPortalJobNumber || "");
   }, [portalSelectedJobId, selectedPortalJobNumber]);
+
+  useEffect(() => {
+    mapImportsRef.current = mapImports;
+  }, [mapImports]);
+
+  const normalizeImportVisibilityMap = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+    return Object.entries(value).reduce((acc, [key, visible]) => {
+      if (!key || typeof visible !== "boolean") return acc;
+      acc[String(key)] = visible;
+      return acc;
+    }, {});
+  };
+
+  const getImportVisibilityCache = () => {
+    try {
+      const state = safeReadState() || {};
+      const importedDatasets = state.notesVisibility?.importedDatasets;
+      return normalizeImportVisibilityMap(importedDatasets);
+    } catch {
+      return {};
+    }
+  };
+
+  const writeImportVisibilityCache = (next) => {
+    try {
+      const state = safeReadState() || {};
+      const importedDatasets = normalizeImportVisibilityMap(next);
+      safeWriteState({
+        notesVisibility: {
+          ...(state.notesVisibility || {}),
+          importedDatasets,
+        },
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  const hasImportVisibilityValue = (visibility, importId) =>
+    !!importId && Object.prototype.hasOwnProperty.call(visibility || {}, String(importId));
+
+  const getImportCreatorLabel = (dataset) => {
+    const profileName = cleanCreatorDisplayLabel(dataset?.created_by_display_name);
+    if (profileName) return profileName;
+
+    const savedName = cleanCreatorDisplayLabel(dataset?.created_by_name);
+    if (savedName) return savedName;
+
+    if (
+      currentUserId &&
+      dataset?.created_by &&
+      String(dataset.created_by) === String(currentUserId) &&
+      currentUserName
+    ) {
+      return cleanCreatorDisplayLabel(currentUserName) || "Unknown user";
+    }
+
+    return "Unknown user";
+  };
+
+  const buildImportJobSummary = (job = selectedPortalJob) => {
+    if (!job) return "";
+    const address = getJobAddressWarning(job).displayAddress;
+    const parts = [
+      job.job_number ? `Job ${job.job_number}` : "",
+      job.client_name || "",
+      address && address !== "—" ? address : "",
+    ].filter(Boolean);
+    return parts.join(" · ");
+  };
+
+  const isImportDatasetRelevantToSelectedJob = useCallback(
+    (dataset) => {
+      const importJobId = dataset?.job_id ?? dataset?.jobId ?? null;
+      const importJobNumber = dataset?.job_number ?? dataset?.jobNumber ?? "";
+
+      if (!importJobId && !importJobNumber) return true;
+      if (showAllNotes) return true;
+
+      if (importJobId && portalSelectedJobId) {
+        return String(importJobId) === String(portalSelectedJobId);
+      }
+
+      if (!importJobId && importJobNumber && selectedPortalJobNumber) {
+        return String(importJobNumber) === String(selectedPortalJobNumber);
+      }
+
+      return false;
+    },
+    [portalSelectedJobId, selectedPortalJobNumber, showAllNotes]
+  );
+
+  const visibleImportDatasets = useMemo(
+    () => (mapImports || []).filter(isImportDatasetRelevantToSelectedJob),
+    [mapImports, isImportDatasetRelevantToSelectedJob]
+  );
+
+  const importProjectionLabel = getProjectionLabel(importProjection);
+
+  async function transformImportCoordinatesBatch(coords, sourceProjection) {
+    if (!Array.isArray(coords) || coords.length === 0) return [];
+    if (!isProjectionOption(sourceProjection)) throw new Error("Invalid selected projection.");
+
+    return coords.map((coord, index) => {
+      const result = transformImportCoordinate(coord.x, coord.y, sourceProjection);
+      if (!result) {
+        throw new Error(`Coordinate transformation failed at item ${index + 1}.`);
+      }
+      return result;
+    });
+  }
+
+  async function buildCsvImportPreview(file, text, sourceProjection, datasetName) {
+    const { headers, records } = parseCsvText(text);
+    if (!headers.length) throw new Error("CSV file is empty.");
+
+    const eastingHeader = getAliasedHeader(headers, CSV_HEADER_ALIASES.easting);
+    const northingHeader = getAliasedHeader(headers, CSV_HEADER_ALIASES.northing);
+    const latHeader = getAliasedHeader(headers, CSV_HEADER_ALIASES.latitude);
+    const lngHeader = getAliasedHeader(headers, CSV_HEADER_ALIASES.longitude);
+    const pointIdHeader = getAliasedHeader(headers, CSV_HEADER_ALIASES.pointId);
+    const elevationHeader = getAliasedHeader(headers, CSV_HEADER_ALIASES.elevation);
+    const descriptionHeader = getAliasedHeader(headers, CSV_HEADER_ALIASES.description);
+    const hasProjected = !!eastingHeader && !!northingHeader;
+    const hasGeographic = !!latHeader && !!lngHeader;
+    if (!hasProjected && !hasGeographic) {
+      throw new Error("CSV needs Easting/Northing or Latitude/Longitude columns.");
+    }
+
+    const accepted = [];
+    const rejectedRows = [];
+    const transformInputs = [];
+
+    records.forEach((record, index) => {
+      const rowNumber = index + 2;
+      const x = hasProjected ? toNumber(record[eastingHeader]) : toNumber(record[lngHeader]);
+      const y = hasProjected ? toNumber(record[northingHeader]) : toNumber(record[latHeader]);
+      if (x == null || y == null) {
+        rejectedRows.push({ rowNumber, reason: "Missing or invalid coordinates" });
+        return;
+      }
+      const attributes = { ...record };
+      accepted.push({
+        rowNumber,
+        source: { x, y, z: elevationHeader ? toNumber(record[elevationHeader]) : null },
+        attributes,
+        pointId: pointIdHeader ? String(record[pointIdHeader] || "").trim() : "",
+        description: descriptionHeader ? String(record[descriptionHeader] || "").trim() : "",
+      });
+      transformInputs.push({ x, y });
+    });
+
+    if (!accepted.length) throw new Error("No valid CSV points were found.");
+    const transformed = await transformImportCoordinatesBatch(transformInputs, sourceProjection);
+
+    const features = accepted.map((row, index) => ({
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [
+          transformed[index].lng,
+          transformed[index].lat,
+          row.source.z ?? undefined,
+        ].filter((value) => value !== undefined),
+      },
+      properties: {
+        dataset_name: datasetName,
+        import_file_type: "CSV",
+        point_id: row.pointId,
+        description: row.description,
+        source_x: row.source.x,
+        source_y: row.source.y,
+        source_z: row.source.z,
+        source_projection: sourceProjection,
+        row_number: row.rowNumber,
+        ...row.attributes,
+      },
+    }));
+
+    const featureCollection = { type: "FeatureCollection", features };
+    return {
+      file,
+      originalText: text,
+      datasetName,
+      fileType: "csv",
+      sourceProjection: sourceProjection,
+      sourceProjectionLabel: getProjectionLabel(sourceProjection),
+      featureCollection,
+      featureCount: features.length,
+      vertexCount: features.length,
+      acceptedCount: features.length,
+      rejectedCount: rejectedRows.length,
+      rejectedRows,
+      unsupportedSummary: {},
+      bounds: computeGeojsonBounds(featureCollection),
+      warnings: [],
+    };
+  }
+
+  async function buildDxfImportPreview(file, text, sourceProjection, datasetName) {
+    const parsed = parseDxfEntities(text);
+    if (!parsed.entities.length) {
+      throw new Error("No supported DXF line geometry was found.");
+    }
+
+    const transformInputs = parsed.entities.flatMap((entity) =>
+      entity.coords.map((coord) => ({ x: coord[0], y: coord[1] }))
+    );
+    const transformed = await transformImportCoordinatesBatch(transformInputs, sourceProjection);
+    let cursor = 0;
+
+    const features = parsed.entities
+      .map((entity, index) => {
+        const coords = entity.coords.map((sourceCoord) => {
+          const next = transformed[cursor];
+          cursor += 1;
+          const z = Number(sourceCoord?.[2]);
+          return Number.isFinite(z) ? [next.lng, next.lat, z] : [next.lng, next.lat];
+        });
+        if (coords.length < 2) return null;
+        return {
+          type: "Feature",
+          geometry: { type: "LineString", coordinates: coords },
+          properties: {
+            dataset_name: datasetName,
+            import_file_type: "DXF",
+            source_projection: sourceProjection,
+            dxf_entity: entity.type,
+            dxf_layer: entity.layer,
+            source_vertex_count: entity.coords.length,
+            feature_id: `dxf_${index + 1}`,
+          },
+        };
+      })
+      .filter(Boolean);
+
+    const featureCollection = { type: "FeatureCollection", features };
+    const vertexCount = countGeojsonVertices(featureCollection);
+    return {
+      file,
+      originalText: text,
+      datasetName,
+      fileType: "dxf",
+      sourceProjection: sourceProjection,
+      sourceProjectionLabel: getProjectionLabel(sourceProjection),
+      featureCollection,
+      featureCount: features.length,
+      vertexCount,
+      acceptedCount: features.length,
+      rejectedCount: 0,
+      rejectedRows: [],
+      unsupportedSummary: parsed.unsupported,
+      bounds: computeGeojsonBounds(featureCollection),
+      warnings: [],
+    };
+  }
+
+  function withImportWarnings(preview) {
+    const warnings = [];
+    if ((preview.featureCount || 0) > IMPORT_LARGE_FEATURE_WARNING_THRESHOLD) {
+      warnings.push(`Large import warning: ${preview.featureCount.toLocaleString()} features.`);
+    }
+    if ((preview.vertexCount || 0) > IMPORT_LARGE_VERTEX_WARNING_THRESHOLD) {
+      warnings.push(`Large import warning: ${preview.vertexCount.toLocaleString()} rendered vertices.`);
+    }
+    if (!preview.bounds) warnings.push("Geographic bounds could not be calculated.");
+    return { ...preview, warnings };
+  }
+
+  async function prepareImportPreviewFromFile(file, sourceProjection, datasetName) {
+    if (!file) throw new Error("Choose a file to import.");
+    if (file.size > IMPORT_MAX_FILE_SIZE_BYTES) {
+      throw new Error("File is larger than the 20 MB import limit.");
+    }
+    const text = await file.text();
+    if (!String(text || "").trim()) throw new Error("File is empty.");
+    const fileType = inferImportFileType(file, text);
+    if (!fileType) throw new Error("Unsupported or unrecognised import file. Use a valid DXF or CSV file.");
+    const preview =
+      fileType === "csv"
+        ? await buildCsvImportPreview(file, text, sourceProjection, datasetName)
+        : await buildDxfImportPreview(file, text, sourceProjection, datasetName);
+    return withImportWarnings(preview);
+  }
+
+  const handleImportFileChange = async (event) => {
+    const file = event.target.files?.[0] || null;
+    setImportFile(file);
+    setImportPreview(null);
+    setImportError("");
+    setImportStatus("");
+    if (!file) {
+      setImportDetectedType("");
+      return;
+    }
+    if (file.size > IMPORT_MAX_FILE_SIZE_BYTES) {
+      setImportDetectedType("");
+      setImportError("File is larger than the 20 MB import limit.");
+      return;
+    }
+    setImportDatasetName((current) => current || defaultDatasetName(file.name));
+    try {
+      const text = await file.text();
+      const detected = inferImportFileType(file, text);
+      if (!detected) throw new Error("Unsupported or unrecognised import file. Use a valid DXF or CSV file.");
+      setImportDetectedType(detected.toUpperCase());
+    } catch (error) {
+      setImportDetectedType("");
+      setImportError(error?.message || "Could not inspect the selected file.");
+    }
+  };
+
+  const handlePreviewImport = async () => {
+    setImportBusy(true);
+    setImportError("");
+    setImportStatus("Parsing and transforming…");
+    try {
+      const preview = await prepareImportPreviewFromFile(
+        importFile,
+        importProjection,
+        importDatasetName || defaultDatasetName(importFile?.name)
+      );
+      setImportPreview(preview);
+      setImportDetectedType(preview.fileType.toUpperCase());
+      setImportStatus("Preview ready.");
+    } catch (error) {
+      setImportPreview(null);
+      setImportError(error?.message || "Import preview failed.");
+      setImportStatus("");
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  function boundsToGoogleBounds(bounds) {
+    const googleMaps = window.google?.maps;
+    if (!googleMaps?.LatLngBounds || !bounds) return null;
+    const googleBounds = new googleMaps.LatLngBounds();
+    googleBounds.extend({ lat: bounds.south, lng: bounds.west });
+    googleBounds.extend({ lat: bounds.north, lng: bounds.east });
+    return googleBounds;
+  }
+
+  function zoomToImportDataset(dataset) {
+    const map = mapRef.current;
+    if (!map) return;
+    const bounds = boundsToGoogleBounds(dataset?.bounds);
+    if (bounds && !bounds.isEmpty()) map.fitBounds(bounds);
+  }
+
+  function addMapImportDataset(dataset, { zoom = false } = {}) {
+    if (!dataset.temporary) {
+      const visibility = getImportVisibilityCache();
+      writeImportVisibilityCache({ ...visibility, [String(dataset.id)]: true });
+    }
+    setMapImports((prev) => {
+      const next = [dataset, ...(prev || []).filter((item) => item.id !== dataset.id)];
+      mapImportsRef.current = next;
+      return next;
+    });
+    if (zoom) setTimeout(() => zoomToImportDataset(dataset), 0);
+  }
+
+  async function saveImportPreview(preview) {
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData?.user?.id || currentUserId;
+    if (!userId) throw new Error("You must be signed in to save imports.");
+
+    const importId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const originalName = safeStorageFilename(preview.file?.name || `import.${preview.fileType}`);
+    const originalPath = `${importId}/original/${originalName}`;
+    const processedPath = `${importId}/processed/data.geojson`;
+    const processedGeojson = JSON.stringify(preview.featureCollection);
+    const uploadedPaths = [];
+
+    const uploadOrCleanup = async (path, body, options) => {
+      const { error } = await supabase.storage.from(MAP_IMPORTS_BUCKET).upload(path, body, options);
+      if (error) throw error;
+      uploadedPaths.push(path);
+    };
+
+    try {
+      setImportStatus("Uploading original file…");
+      await uploadOrCleanup(originalPath, preview.file, {
+        contentType: preview.fileType === "csv" ? "text/csv" : "application/dxf",
+        upsert: false,
+      });
+
+      setImportStatus("Uploading processed map data…");
+      await uploadOrCleanup(processedPath, new Blob([processedGeojson], { type: "application/geo+json" }), {
+        contentType: "application/geo+json",
+        upsert: false,
+      });
+
+      const attachJob = importAttachToCurrentJob && selectedPortalJob;
+      const payload = {
+        id: importId,
+        name: preview.datasetName,
+        file_type: preview.fileType,
+        job_id: attachJob ? selectedPortalJob.id : null,
+        job_number: attachJob ? String(selectedPortalJob.job_number || "") : null,
+        source_projection_key: preview.sourceProjection,
+        source_projection_parameters: {
+          label: preview.sourceProjectionLabel,
+          importDirection: "source coordinates to EPSG:4326",
+        },
+        feature_count: preview.featureCount,
+        vertex_count: preview.vertexCount,
+        bounds: preview.bounds,
+        original_filename: preview.file?.name || originalName,
+        original_storage_path: originalPath,
+        processed_storage_path: processedPath,
+        processed_format: "geojson",
+        created_by: userId,
+      };
+
+      setImportStatus("Saving import metadata…");
+      const { data, error } = await supabase.from("map_imports").insert(payload).select("*").single();
+      if (error) throw error;
+
+      importGeometryCacheRef.current.set(importId, preview.featureCollection);
+      return normalizeImportDataset(data, true);
+    } catch (error) {
+      if (uploadedPaths.length) {
+        try {
+          await supabase.storage.from(MAP_IMPORTS_BUCKET).remove(uploadedPaths);
+        } catch {
+          // best-effort cleanup
+        }
+      }
+      throw error;
+    }
+  }
+
+  function normalizeImportDataset(row, visibleOverride = null) {
+    const visibility = getImportVisibilityCache();
+    const importId = String(row?.id || "");
+    const hasPersistedVisibility = hasImportVisibilityValue(visibility, importId);
+    const visible =
+      visibleOverride == null
+        ? hasPersistedVisibility
+          ? visibility[importId]
+          : false
+        : !!visibleOverride;
+    return {
+      ...row,
+      visible,
+      temporary: !!row.temporary,
+      file_type: String(row.file_type || "").toLowerCase(),
+      feature_count: Number(row.feature_count || 0),
+      vertex_count: Number(row.vertex_count || 0),
+    };
+  }
+
+  const handleConfirmImport = async () => {
+    setImportBusy(true);
+    setImportError("");
+    try {
+      const preview =
+        importPreview ||
+        (await prepareImportPreviewFromFile(
+          importFile,
+          importProjection,
+          importDatasetName || defaultDatasetName(importFile?.name)
+        ));
+
+      let dataset;
+      if (importSaveMode === "save") {
+        dataset = await saveImportPreview(preview);
+      } else {
+        const importId =
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? `tmp-${crypto.randomUUID()}`
+            : `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        dataset = normalizeImportDataset(
+          {
+            id: importId,
+            name: preview.datasetName,
+            file_type: preview.fileType,
+            job_id: null,
+            job_number: null,
+            source_projection_key: preview.sourceProjection,
+            source_projection_parameters: { label: preview.sourceProjectionLabel },
+            feature_count: preview.featureCount,
+            vertex_count: preview.vertexCount,
+            bounds: preview.bounds,
+            original_filename: preview.file?.name || "",
+            original_storage_path: "",
+            processed_storage_path: "",
+            processed_format: "geojson",
+            created_by: currentUserId || null,
+            created_by_name: currentUserName || null,
+            created_at: new Date().toISOString(),
+            temporary: true,
+          },
+          true
+        );
+        importGeometryCacheRef.current.set(importId, preview.featureCollection);
+      }
+
+      addMapImportDataset(dataset, { zoom: true });
+      setImportStatus(importSaveMode === "save" ? "Import saved and displayed." : "Temporary import displayed.");
+      setImportPanelOpen(false);
+      setImportPreview(null);
+      setImportFile(null);
+      setImportDetectedType("");
+      setImportDatasetName("");
+    } catch (error) {
+      setImportError(error?.message || "Import failed.");
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  function toggleImportDatasetVisibility(id) {
+    const importId = String(id || "");
+    const current = mapImportsRef.current || [];
+    const target = current.find((dataset) => String(dataset.id) === importId);
+    if (!target) return;
+
+    const visible = !target.visible;
+    const nextImports = current.map((dataset) =>
+      String(dataset.id) === importId ? { ...dataset, visible } : dataset
+    );
+
+    mapImportsRef.current = nextImports;
+    setMapImports(nextImports);
+
+    if (!target.temporary) {
+      const visibility = getImportVisibilityCache();
+      writeImportVisibilityCache({ ...visibility, [importId]: visible });
+    }
+  }
+
+  async function loadImportGeometry(dataset) {
+    if (!dataset) return null;
+    const cached = importGeometryCacheRef.current.get(dataset.id);
+    if (cached) return cached;
+    if (dataset.temporary) return null;
+    const { data, error } = await supabase.storage
+      .from(MAP_IMPORTS_BUCKET)
+      .download(dataset.processed_storage_path);
+    if (error) throw error;
+    const text = await data.text();
+    const geojson = JSON.parse(text);
+    importGeometryCacheRef.current.set(dataset.id, geojson);
+    return geojson;
+  }
+
+  function clearRenderedImportDataset(id) {
+    const store = importRenderStoreRef.current.get(id);
+    if (!store) return;
+    try {
+      store.dataLayer?.setMap?.(null);
+      (store.markers || []).forEach((marker) => marker.setMap(null));
+      (store.listeners || []).forEach((listener) => window.google?.maps?.event?.removeListener?.(listener));
+    } catch {
+      // ignore
+    }
+    importRenderStoreRef.current.delete(id);
+  }
+
+  function openImportedFeaturePopup(dataset, featureProps, position) {
+    const map = mapRef.current;
+    if (!map || !position) return;
+    if (!importPopupRef.current) importPopupRef.current = createDraggableMapPopupOverlay({ maxWidth: 340 });
+
+    const fileType = String(dataset.file_type || "").toUpperCase();
+    const isCsv = fileType === "CSV";
+    const rows = [];
+    const addRow = (label, value) => {
+      const text = String(value ?? "").trim();
+      if (!text) return;
+      rows.push(`<div><span style="font-weight:900;">${escapeHtml(label)}:</span> ${escapeHtml(text)}</div>`);
+    };
+
+    addRow("Dataset", dataset.name);
+    addRow("Type", fileType);
+    addRow("Association", dataset.job_number ? `Job ${dataset.job_number}` : "General");
+    if (isCsv) {
+      addRow("Point ID", featureProps.point_id || featureProps.feature_id || featureProps.Name || featureProps.name);
+      addRow("Description", featureProps.description || featureProps.Description || featureProps.Code || featureProps.code);
+      addRow("Easting", featureProps.source_x);
+      addRow("Northing", featureProps.source_y);
+      addRow("Elevation/RL", featureProps.source_z || featureProps.Elevation || featureProps.RL || featureProps.rl);
+    } else {
+      addRow("Entity", featureProps.dxf_entity);
+      addRow("DXF layer", featureProps.dxf_layer);
+      addRow("Vertices", featureProps.source_vertex_count);
+    }
+
+    const extraRows = Object.entries(featureProps || {})
+      .filter(([key, value]) =>
+        value != null &&
+        value !== "" &&
+        ![
+          "dataset_name",
+          "import_file_type",
+          "point_id",
+          "description",
+          "source_x",
+          "source_y",
+          "source_z",
+          "source_projection",
+          "dxf_entity",
+          "dxf_layer",
+          "source_vertex_count",
+        ].includes(key)
+      )
+      .slice(0, 8)
+      .map(([key, value]) => `<div><span style="font-weight:900;">${escapeHtml(key)}:</span> ${escapeHtml(value)}</div>`);
+
+    importPopupRef.current.setContent(`
+      <div style="font-family: Inter, system-ui, sans-serif; font-size: 13px; min-width: 240px;">
+        <div data-pw-drag-handle="1" style="font-weight:950; font-size:14px; margin-bottom:8px; color:#111;">
+          ${escapeHtml(dataset.name)}
+        </div>
+        <div style="display:grid; gap:4px; color:#222;">
+          ${rows.join("")}
+          ${extraRows.join("")}
+        </div>
+      </div>
+    `);
+    importPopupRef.current.setPosition(position);
+    importPopupRef.current.open(map);
+    window.google.maps.event.addListenerOnce(importPopupRef.current, "domready", () => {
+      setTimeout(() => makeLatestInfoWindowDraggable({ dragKey: `import:${dataset.id}` }), 0);
+    });
+  }
+
+  function renderImportDataset(dataset, featureCollection) {
+    const map = mapRef.current;
+    const googleMaps = window.google?.maps;
+    if (!map || !googleMaps || !featureCollection) return;
+    clearRenderedImportDataset(dataset.id);
+
+    const store = { dataLayer: null, markers: [], listeners: [] };
+    const lineFeatures = {
+      type: "FeatureCollection",
+      features: (featureCollection.features || []).filter((feature) => feature?.geometry?.type !== "Point"),
+    };
+    const pointFeatures = (featureCollection.features || []).filter((feature) => feature?.geometry?.type === "Point");
+
+    if (lineFeatures.features.length) {
+      const dataLayer = new googleMaps.Data({ map });
+      dataLayer.setStyle(IMPORT_LINE_STYLE);
+      dataLayer.addGeoJson(lineFeatures);
+      store.listeners.push(
+        dataLayer.addListener("click", (event) => {
+          const props = {};
+          event.feature.forEachProperty((value, key) => {
+            props[key] = value;
+          });
+          const latLng = event.latLng;
+          openImportedFeaturePopup(dataset, props, latLng);
+        })
+      );
+      store.dataLayer = dataLayer;
+    }
+
+    pointFeatures.forEach((feature) => {
+      const coord = feature.geometry?.coordinates || [];
+      const lng = Number(coord[0]);
+      const lat = Number(coord[1]);
+      if (!isValidLngLat(lng, lat)) return;
+      const marker = new googleMaps.Marker({
+        map,
+        position: { lat, lng },
+        title: dataset.name,
+        icon: IMPORT_POINT_ICON,
+        optimized: true,
+      });
+      store.listeners.push(
+        marker.addListener("click", () => {
+          openImportedFeaturePopup(dataset, feature.properties || {}, { lat, lng });
+        })
+      );
+      store.markers.push(marker);
+    });
+
+    importRenderStoreRef.current.set(dataset.id, store);
+  }
+
+  useEffect(() => {
+    if (!isAppVisible) return;
+    let cancelled = false;
+    const seq = importLoadSeqRef.current + 1;
+    importLoadSeqRef.current = seq;
+
+    const run = async () => {
+      const wanted = new Set(visibleImportDatasets.filter((dataset) => dataset.visible).map((dataset) => dataset.id));
+      Array.from(importRenderStoreRef.current.keys()).forEach((id) => {
+        if (!wanted.has(id)) clearRenderedImportDataset(id);
+      });
+
+      for (const dataset of visibleImportDatasets) {
+        if (!dataset.visible) continue;
+        if (importRenderStoreRef.current.has(dataset.id)) continue;
+        try {
+          const geojson = await loadImportGeometry(dataset);
+          if (cancelled || importLoadSeqRef.current !== seq) return;
+          if (!visibleImportDatasets.some((item) => item.id === dataset.id && item.visible)) return;
+          renderImportDataset(dataset, geojson);
+        } catch (error) {
+          console.warn("Imported dataset load failed:", error);
+        }
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [visibleImportDatasets, isAppVisible, googleMapsReady]);
+
+  useEffect(() => {
+    if (!isAppVisible) return undefined;
+    let cancelled = false;
+    const loadSavedImports = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("map_imports")
+          .select("id, name, file_type, job_id, job_number, source_projection_key, source_projection_parameters, feature_count, vertex_count, bounds, original_filename, original_storage_path, processed_storage_path, processed_format, created_by, created_at, updated_at")
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+        const rows = data || [];
+        const creatorProfiles = await resolveCreatorProfiles(rows);
+        if (cancelled) return;
+        setMapImports((prev) => {
+          const temporary = (prev || []).filter((dataset) => dataset.temporary);
+          const saved = rows.map((row) =>
+            normalizeImportDataset({
+              ...row,
+              created_by_display_name: getResolvedCreatorDisplay(row, creatorProfiles),
+            })
+          );
+          const next = [...temporary, ...saved];
+          mapImportsRef.current = next;
+          return next;
+        });
+      } catch (error) {
+        console.warn("Saved map imports failed to load:", error);
+      }
+    };
+    loadSavedImports();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAppVisible]);
+
+  async function renameImportDataset(dataset) {
+    const nextName = window.prompt("Dataset name", dataset.name);
+    if (!nextName || !nextName.trim()) return;
+    const name = nextName.trim();
+    if (dataset.temporary) {
+      setMapImports((prev) => {
+        const next = (prev || []).map((item) => (item.id === dataset.id ? { ...item, name } : item));
+        mapImportsRef.current = next;
+        return next;
+      });
+      return;
+    }
+    const { data, error } = await supabase
+      .from("map_imports")
+      .update({ name })
+      .eq("id", dataset.id)
+      .select("*")
+      .single();
+    if (error) {
+      alert(`Rename failed: ${error.message}`);
+      return;
+    }
+    setMapImports((prev) => {
+      const next = (prev || []).map((item) =>
+        item.id === dataset.id ? normalizeImportDataset(data, item.visible) : item
+      );
+      mapImportsRef.current = next;
+      return next;
+    });
+  }
+
+  async function removeImportDataset(dataset) {
+    const action = dataset.temporary ? "Remove" : "Delete";
+    if (!window.confirm(`${action} imported dataset "${dataset.name}"?`)) return;
+    clearRenderedImportDataset(dataset.id);
+    importGeometryCacheRef.current.delete(dataset.id);
+    if (!dataset.temporary) {
+      const visibility = getImportVisibilityCache();
+      const importId = String(dataset.id || "");
+      if (hasImportVisibilityValue(visibility, importId)) {
+        delete visibility[importId];
+        writeImportVisibilityCache(visibility);
+      }
+    }
+
+    if (dataset.temporary) {
+      setMapImports((prev) => {
+        const next = (prev || []).filter((item) => item.id !== dataset.id);
+        mapImportsRef.current = next;
+        return next;
+      });
+      return;
+    }
+
+    const paths = [dataset.original_storage_path, dataset.processed_storage_path].filter(Boolean);
+    const { error: storageError } = paths.length
+      ? await supabase.storage.from(MAP_IMPORTS_BUCKET).remove(paths)
+      : { error: null };
+    if (storageError) {
+      alert(`Storage cleanup failed: ${storageError.message}`);
+      return;
+    }
+
+    const { error } = await supabase.from("map_imports").delete().eq("id", dataset.id);
+    if (error) {
+      alert(`Delete failed: ${error.message}`);
+      return;
+    }
+    setMapImports((prev) => {
+      const next = (prev || []).filter((item) => item.id !== dataset.id);
+      mapImportsRef.current = next;
+      return next;
+    });
+  }
+
+  async function downloadOriginalImport(dataset) {
+    if (dataset.temporary) return;
+    try {
+      const { data, error } = await supabase.storage
+        .from(MAP_IMPORTS_BUCKET)
+        .download(dataset.original_storage_path);
+      if (error) throw error;
+      downloadBlob(data, dataset.original_filename || `${dataset.name}.${dataset.file_type}`);
+    } catch (error) {
+      alert(`Original-file download failed: ${error?.message || "unknown error"}`);
+    }
+  }
+
+  useEffect(
+    () => () => {
+      Array.from(importRenderStoreRef.current.keys()).forEach(clearRenderedImportDataset);
+      try {
+        importPopupRef.current?.close?.();
+      } catch {
+        // ignore
+      }
+    },
+    []
+  );
 
   // Notes filter: show notes for current selected job unless "Show All Notes" is ticked
   const visibleNotes = useMemo(() => {
@@ -6005,7 +7360,13 @@ const handleMyLocation = () => {
         // ignore overlay errors
       }
 
-      setMapNotes((prev) => [data, ...(prev || [])]);
+      setMapNotes((prev) => [
+        {
+          ...data,
+          created_by_display_name: cleanCreatorDisplayLabel(authUserName) || "Unknown user",
+        },
+        ...(prev || []),
+      ]);
 
       setTimeout(() => {
         try {
@@ -6335,6 +7696,23 @@ const handleMyLocation = () => {
     }
 
     beginExportPanel();
+  }
+
+  function openImportPanel() {
+    clearMeasure();
+    clearExportInteraction();
+    setNoteAddMode(false);
+    setImportError("");
+    setImportStatus("");
+    setImportPanelOpen(true);
+    setImportAttachToCurrentJob(!!selectedPortalJob);
+  }
+
+  function closeImportPanel() {
+    if (importBusy) return;
+    setImportPanelOpen(false);
+    setImportError("");
+    setImportStatus("");
   }
 
   function startRectangleExportFence() {
@@ -6909,12 +8287,17 @@ function sanitizeDxfText(text = "") {
   }
 
   function getEffectiveSourceDatumFamily(sourceDatumFamily) {
-    return sourceDatumFamily === "WGS84" ? "WGS84" : "GDA94";
+    if (sourceDatumFamily === "WGS84") return "WGS84";
+    if (sourceDatumFamily === "GDA2020") return "GDA2020";
+    if (sourceDatumFamily === "AGD84") return "AGD84";
+    return "GDA94";
   }
 
   function getSourceProjection(sourceDatumFamily, targetDatumFamily) {
     const effectiveSourceDatum = getEffectiveSourceDatumFamily(sourceDatumFamily);
     if (effectiveSourceDatum === "WGS84") return "EPSG:4326";
+    if (effectiveSourceDatum === "GDA2020") return "EPSG:7844";
+    if (effectiveSourceDatum === "AGD84") return EXPORT_AGD84_GEOGRAPHIC;
     if (targetDatumFamily === "GDA2020") return EXPORT_GDA94_TO_GDA2020_GEOGRAPHIC;
     return EXPORT_GDA94_GEOGRAPHIC;
   }
@@ -7523,11 +8906,105 @@ if (pointSets.length) {
     return out;
   }
 
+  function getFenceTester(fence) {
+    if (!fence) return () => false;
+    if (fence.geometryType === "esriGeometryEnvelope") {
+      const [west, south, east, north] = String(fence.geometry || "")
+        .split(",")
+        .map(Number);
+      if (![west, south, east, north].every(Number.isFinite)) return () => false;
+      return (coord) => {
+        const lng = Number(coord?.[0]);
+        const lat = Number(coord?.[1]);
+        return lng >= west && lng <= east && lat >= south && lat <= north;
+      };
+    }
+
+    if (fence.geometryType === "esriGeometryPolygon") {
+      try {
+        const parsed = JSON.parse(fence.geometry || "{}");
+        const ring = parsed?.rings?.[0] || [];
+        return (coord) => {
+          const lng = Number(coord?.[0]);
+          const lat = Number(coord?.[1]);
+          if (!Number.isFinite(lng) || !Number.isFinite(lat) || ring.length < 3) return false;
+          let inside = false;
+          for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+            const xi = Number(ring[i]?.[0]);
+            const yi = Number(ring[i]?.[1]);
+            const xj = Number(ring[j]?.[0]);
+            const yj = Number(ring[j]?.[1]);
+            const intersect =
+              yi > lat !== yj > lat &&
+              lng < ((xj - xi) * (lat - yi)) / ((yj - yi) || 1e-12) + xi;
+            if (intersect) inside = !inside;
+          }
+          return inside;
+        };
+      } catch {
+        return () => false;
+      }
+    }
+
+    return () => false;
+  }
+
+  function importedFeatureIntersectsFence(feature, fenceTester) {
+    const geometry = feature?.geometry;
+    if (!geometry) return false;
+    const testAny = (coords) => {
+      if (!Array.isArray(coords)) return false;
+      if (typeof coords[0] === "number") return fenceTester(coords);
+      return coords.some(testAny);
+    };
+    return testAny(geometry.coordinates);
+  }
+
+  function getVisibleImportedExportCollections(format) {
+    const fenceTester = getFenceTester(exportGeometryRef.current);
+    return (mapImportsRef.current || [])
+      .filter((dataset) => dataset.visible && isImportDatasetRelevantToSelectedJob(dataset))
+      .map((dataset) => {
+        const featureCollection = importGeometryCacheRef.current.get(dataset.id);
+        if (!featureCollection) return null;
+        const features = (featureCollection.features || []).filter((feature) => {
+          const type = feature?.geometry?.type;
+          if (format === "csv" && type !== "Point") return false;
+          if (format === "dxf" && !["LineString", "MultiLineString", "Point", "MultiPoint"].includes(type)) return false;
+          return importedFeatureIntersectsFence(feature, fenceTester);
+        });
+        if (!features.length) return null;
+        return {
+          layer: {
+            id: `import:${dataset.id}`,
+            name: dataset.name,
+            type: dataset.file_type === "csv" ? "point" : "line",
+            data: {
+              outputLayerName: `Import_${dataset.name}`,
+              csvLayerName: dataset.name,
+              exportFormats: dataset.file_type === "csv" ? ["csv", "dxf"] : ["dxf"],
+              exportAttributeFields: [],
+              exportFieldOrder: [],
+            },
+          },
+          sourceDatumFamily: getProjectionDatumFamily(dataset.source_projection_key),
+          featureCollection: { type: "FeatureCollection", features },
+        };
+      })
+      .filter(Boolean);
+  }
+
   async function executeExport() {
     if (!exportGeometryRef.current) {
       setExportWarning("Draw a fence first.");
       return;
     }
+
+    await Promise.all(
+      (mapImportsRef.current || [])
+        .filter((dataset) => dataset.visible && isImportDatasetRelevantToSelectedJob(dataset))
+        .map((dataset) => loadImportGeometry(dataset).catch(() => null))
+    );
 
     const selectedLayers =
       exportFormat === "csv"
@@ -7539,8 +9016,9 @@ if (pointSets.length) {
         : visibleExportableLayers.filter((layer) =>
             (layer.data?.exportFormats || []).includes("dxf")
           );
+    const importedCollections = getVisibleImportedExportCollections(exportFormat);
 
-    if (!selectedLayers.length) {
+    if (!selectedLayers.length && !importedCollections.length) {
       setExportWarning(
         exportFormat === "csv"
           ? "Turn on at least one visible CSV-supported layer first."
@@ -7569,15 +9047,21 @@ if (pointSets.length) {
 
       const totalFeatures = countRows.reduce(
         (sum, row) => sum + (Number.isFinite(row.count) ? row.count : 0),
-        0
+        importedCollections.reduce((sum, row) => sum + (row.featureCollection?.features?.length || 0), 0)
       );
 
       setExportCountSummary({
         totalFeatures,
-        byLayer: countRows.map((row) => ({
-          layerName: row.layer.name,
-          count: row.count,
-        })),
+        byLayer: [
+          ...countRows.map((row) => ({
+            layerName: row.layer.name,
+            count: row.count,
+          })),
+          ...importedCollections.map((row) => ({
+            layerName: row.layer.name,
+            count: row.featureCollection?.features?.length || 0,
+          })),
+        ],
       });
 
       if (
@@ -7622,6 +9106,7 @@ if (pointSets.length) {
           };
         })
       );
+      collections.push(...importedCollections);
 
       const filename = buildExportFilename(exportFormat, exportProjection);
       const transformContext = await prepareExportTransformContext(collections, exportProjection, exportFormat);
@@ -7662,7 +9147,9 @@ if (pointSets.length) {
       return;
     }
 
-    if (!visibleExportableLayers.length) {
+    const importedCollections = getVisibleImportedExportCollections(exportFormat);
+
+    if (!visibleExportableLayers.length && !importedCollections.length) {
       setExportWarning("Turn on at least one exportable layer first.");
       return;
     }
@@ -7674,9 +9161,12 @@ if (pointSets.length) {
     );
 
     setExportSummary({
-      totalVisibleLayers: visibleExportableLayers.length,
+      totalVisibleLayers: visibleExportableLayers.length + importedCollections.length,
       totalCsvPointLayers: csvPointLayers.length,
-      layerNames: visibleExportableLayers.map((l) => l.name),
+      layerNames: [
+        ...visibleExportableLayers.map((l) => l.name),
+        ...importedCollections.map((row) => row.layer.name),
+      ],
     });
 
     setExportCountSummary(null);
@@ -10384,6 +11874,7 @@ return (
 </button>
 
   <button type="button" data-action="export" title="Export visible layers" onClick={toggleExportPanel}>⬇</button>
+  <button type="button" data-action="import" title="Import DXF or CSV" aria-label="Import DXF or CSV" onClick={openImportPanel}>⬆</button>
 
   {measureMode && (
     <button type="button" title="Finish measurement" onClick={finishMeasure}>✔</button>
@@ -10797,6 +12288,205 @@ return (
                   onClick={handleExportDialogSubmit}
                 >
                   {exportBusy ? "Preparing…" : exportLargeConfirmArmed ? "Export Anyway" : "Export"}
+                </button>
+              </div>
+            </DraggableMapPanel>
+          </div>
+        )}
+
+        {importPanelOpen && (
+          <div
+            className="maps-import-backdrop"
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 82,
+              background: "rgba(0,0,0,0.22)",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "flex-start",
+              padding: isMobile ? "72px 12px 12px" : "88px 16px 16px",
+            }}
+          >
+            <DraggableMapPanel
+              panelId="import-dialog"
+              open={importPanelOpen}
+              containerRef={mapWrapRef}
+              zIndex={mapPanelZ["import-dialog"] || 95}
+              onActivate={bringMapPanelToFront}
+              className="maps-import-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="maps-import-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="maps-import-modal-header maps-draggable-panel-header" data-map-panel-drag-handle="true">
+                <div>
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                    <MapPanelDragGrip label="Drag import dialog" />
+                    <div id="maps-import-title" className="maps-import-modal-title">Import map data</div>
+                  </div>
+                  <div className="maps-import-modal-subtitle">DXF linework or CSV points</div>
+                </div>
+                <button type="button" className="btn-pill" onClick={closeImportPanel} disabled={importBusy}>
+                  Close
+                </button>
+              </div>
+
+              <div className="maps-import-modal-body">
+                <label className="maps-import-field">
+                  <span>File</span>
+                  <input
+                    type="file"
+                    accept=".dxf,.csv,text/csv,application/dxf"
+                    onChange={handleImportFileChange}
+                    disabled={importBusy}
+                  />
+                </label>
+
+                <div className="maps-import-grid">
+                  <label className="maps-import-field">
+                    <span>Dataset name</span>
+                    <input
+                      className="maps-search-input"
+                      value={importDatasetName}
+                      onChange={(event) => setImportDatasetName(event.target.value)}
+                      placeholder="Dataset name"
+                      disabled={importBusy}
+                    />
+                  </label>
+
+                  <label className="maps-import-field">
+                    <span>Detected type</span>
+                    <input
+                      className="maps-search-input"
+                      value={importDetectedType || "—"}
+                      readOnly
+                    />
+                  </label>
+                </div>
+
+                <label className="maps-import-field">
+                  <span>Source projection</span>
+                  <select
+                    className="maps-search-input"
+                    value={importProjection}
+                    onChange={(event) => {
+                      setImportProjection(event.target.value);
+                      setImportPreview(null);
+                    }}
+                    disabled={importBusy}
+                  >
+                    {PROJECTION_GROUPS.map((group) => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.options.map((opt) => (
+                          <option key={opt.code} value={opt.code}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <small>Uploaded coordinates are interpreted as {importProjectionLabel}.</small>
+                </label>
+
+                <div className="maps-import-save-options">
+                  <label>
+                    <input
+                      type="radio"
+                      name="maps-import-save-mode"
+                      value="temporary"
+                      checked={importSaveMode === "temporary"}
+                      onChange={() => setImportSaveMode("temporary")}
+                      disabled={importBusy}
+                    />
+                    Display temporarily
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="maps-import-save-mode"
+                      value="save"
+                      checked={importSaveMode === "save"}
+                      onChange={() => setImportSaveMode("save")}
+                      disabled={importBusy}
+                    />
+                    Save import
+                  </label>
+                </div>
+
+                {importSaveMode === "save" && selectedPortalJob ? (
+                  <label className="maps-import-job-option">
+                    <input
+                      type="checkbox"
+                      checked={!!importAttachToCurrentJob}
+                      onChange={(event) => setImportAttachToCurrentJob(event.target.checked)}
+                      disabled={importBusy}
+                    />
+                    <span>Save to current job: {buildImportJobSummary(selectedPortalJob)}</span>
+                  </label>
+                ) : importSaveMode === "save" ? (
+                  <div className="maps-import-muted">No current job selected. This will save as a general map import.</div>
+                ) : null}
+
+                {importPreview ? (
+                  <div className="maps-import-preview">
+                    <div className="maps-import-preview-title">Preview</div>
+                    <div><b>Name:</b> {importPreview.datasetName}</div>
+                    <div><b>Type:</b> {importPreview.fileType.toUpperCase()}</div>
+                    <div><b>Projection:</b> {importPreview.sourceProjectionLabel}</div>
+                    <div><b>Features:</b> {importPreview.featureCount.toLocaleString()}</div>
+                    <div><b>Vertices:</b> {importPreview.vertexCount.toLocaleString()}</div>
+                    {importPreview.fileType === "csv" ? (
+                      <div>
+                        <b>CSV rows:</b> {importPreview.acceptedCount.toLocaleString()} accepted,{" "}
+                        {importPreview.rejectedCount.toLocaleString()} rejected
+                      </div>
+                    ) : null}
+                    {unsupportedSummaryText(importPreview.unsupportedSummary) ? (
+                      <div><b>Unsupported DXF:</b> {unsupportedSummaryText(importPreview.unsupportedSummary)}</div>
+                    ) : null}
+                    {importPreview.bounds ? (
+                      <div>
+                        <b>Bounds:</b> {importPreview.bounds.south.toFixed(6)}, {importPreview.bounds.west.toFixed(6)} to{" "}
+                        {importPreview.bounds.north.toFixed(6)}, {importPreview.bounds.east.toFixed(6)}
+                      </div>
+                    ) : null}
+                    <div><b>Mode:</b> {importSaveMode === "save" ? "Saved" : "Temporary"}</div>
+                    {importSaveMode === "save" && importAttachToCurrentJob && selectedPortalJob ? (
+                      <div><b>Job:</b> {buildImportJobSummary(selectedPortalJob)}</div>
+                    ) : importSaveMode === "save" ? (
+                      <div><b>Job:</b> General</div>
+                    ) : null}
+                    {(importPreview.warnings || []).map((warning) => (
+                      <div key={warning} className="maps-import-warning">{warning}</div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {importError ? <div className="maps-import-error">{importError}</div> : null}
+                {importStatus ? <div className="maps-import-status">{importStatus}</div> : null}
+              </div>
+
+              <div className="maps-import-modal-actions">
+                <button type="button" className="btn-pill" onClick={closeImportPanel} disabled={importBusy}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn-pill"
+                  onClick={handlePreviewImport}
+                  disabled={importBusy || !importFile || !importDatasetName.trim()}
+                >
+                  {importBusy ? "Working…" : "Preview"}
+                </button>
+                <button
+                  type="button"
+                  className="btn-pill primary"
+                  onClick={handleConfirmImport}
+                  disabled={importBusy || !importFile || !importDatasetName.trim()}
+                >
+                  {importBusy ? "Importing…" : "Import"}
                 </button>
               </div>
             </DraggableMapPanel>
@@ -11447,6 +13137,86 @@ title={
                   </div>
                 ) : null}
 
+                <div className="maps-imported-data-section">
+                  <div className="maps-imported-data-title">Imported Data</div>
+                  {(!visibleImportDatasets || visibleImportDatasets.length === 0) ? (
+                    <div className="maps-imported-empty">No imported datasets.</div>
+                  ) : (
+                    <div className="maps-imported-list">
+                      {(visibleImportDatasets || []).map((dataset) => {
+                        const canManageImport =
+                          !!dataset.temporary ||
+                          !!currentUserIsAdmin ||
+                          (currentUserId && String(dataset.created_by || "") === String(currentUserId));
+                        const type = String(dataset.file_type || "").toUpperCase();
+                        const itemType = dataset.file_type === "csv" ? "points" : "lines";
+                        const time = dataset.temporary ? "" : formatNoteTime(dataset.created_at);
+                        const isJobLinked = !!(dataset.job_id ?? dataset.jobId) || !!dataset.job_number;
+                        const attachedLabel = isJobLinked
+                          ? dataset.job_number
+                            ? `Attached to Job #${dataset.job_number}`
+                            : "Attached to job"
+                          : "General map import";
+                        const creatorLabel = dataset.temporary ? "" : getImportCreatorLabel(dataset);
+                        return (
+                          <div key={dataset.id} className="maps-imported-item">
+                            <label className="maps-imported-main">
+                              <input
+                                type="checkbox"
+                                checked={!!dataset.visible}
+                                onChange={() => toggleImportDatasetVisibility(dataset.id)}
+                              />
+                              <span className="maps-imported-copy">
+                                <span className="maps-imported-name">{dataset.name}</span>
+                                <span className="maps-imported-meta">
+                                  {type} · {dataset.feature_count.toLocaleString()}{" "}
+                                  {itemType}
+                                  {dataset.temporary ? " · Temporary" : ""}
+                                </span>
+                                {time ? (
+                                  <span className="maps-imported-meta" style={{ whiteSpace: "nowrap" }}>
+                                    {time}
+                                  </span>
+                                ) : null}
+                                {!dataset.temporary ? (
+                                  <span className="maps-imported-meta" style={{ opacity: 0.9, fontWeight: 900 }}>
+                                    {attachedLabel}
+                                  </span>
+                                ) : null}
+                                {creatorLabel ? (
+                                  <span className="maps-imported-meta">
+                                    {creatorLabel}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </label>
+                            <div className="maps-imported-actions">
+                              <button type="button" className="btn-pill" onClick={() => zoomToImportDataset(dataset)}>
+                                Zoom
+                              </button>
+                              {canManageImport ? (
+                                <button type="button" className="btn-pill" onClick={() => renameImportDataset(dataset)}>
+                                  Rename
+                                </button>
+                              ) : null}
+                              {!dataset.temporary ? (
+                                <button type="button" className="btn-pill" onClick={() => downloadOriginalImport(dataset)}>
+                                  Download original
+                                </button>
+                              ) : null}
+                              {canManageImport ? (
+                                <button type="button" className="btn-pill" onClick={() => removeImportDataset(dataset)}>
+                                  {dataset.temporary ? "Remove" : "Delete"}
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
                 <div
                   style={{
                     marginTop: 10,
@@ -11470,6 +13240,7 @@ title={
                     .map((n, idx, arr) => {
                       const preview = (n.text || "").split(/\r?\n/)[0].trim() || "—";
                       const time = formatNoteTime(n.created_at);
+                      const creatorLabel = getNoteCreatorLabel(n);
                       const borderBottom =
                         idx < arr.length - 1 ? "1px solid rgba(0,0,0,0.08)" : "none";
 
@@ -11516,8 +13287,8 @@ title={
                                 Attached to Job #{n.job_number}
                               </div>
                             ) : null}
-                            {n.created_by_name ? (
-                              <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2 }}>{n.created_by_name}</div>
+                            {creatorLabel ? (
+                              <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2, overflowWrap: "anywhere" }}>{creatorLabel}</div>
                             ) : null}
                           </button>
 

@@ -197,8 +197,10 @@ const handlePrint = () => {
         job_ref: row.job_ref,
       };
 
-      if (!linksByAssignment[key]) linksByAssignment[key] = [];
-      linksByAssignment[key].push(link);
+      if (row.id != null && row.job_planning_entry_id != null) {
+        if (!linksByAssignment[key]) linksByAssignment[key] = [];
+        linksByAssignment[key].push(link);
+      }
 
       if (!detailsByAssignment[key]) detailsByAssignment[key] = [];
       detailsByAssignment[key].push({

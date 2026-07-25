@@ -5651,6 +5651,248 @@ body,
   background: rgba(255,255,255,0.9);
 }
 
+.maps-import-modal {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 18px;
+  box-shadow: 0 18px 36px rgba(0,0,0,0.22);
+}
+
+.maps-import-modal-header,
+.maps-import-modal-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.maps-import-modal-header {
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+}
+
+.maps-import-modal-actions {
+  border-top: 1px solid rgba(0,0,0,0.08);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.maps-import-modal-title {
+  font-size: 16px;
+  font-weight: 950;
+  color: #111;
+}
+
+.maps-import-modal-subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(0,0,0,0.62);
+}
+
+.maps-import-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.maps-import-grid {
+  display: grid;
+  grid-template-columns: 1fr 150px;
+  gap: 10px;
+}
+
+.maps-import-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 900;
+  color: #111;
+}
+
+.maps-import-field input[type="file"] {
+  max-width: 100%;
+  font-size: 13px;
+}
+
+.maps-import-field small,
+.maps-import-muted {
+  font-size: 11px;
+  font-weight: 750;
+  color: rgba(0,0,0,0.62);
+  line-height: 1.35;
+}
+
+.maps-import-save-options,
+.maps-import-job-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.maps-import-save-options label,
+.maps-import-job-option {
+  min-width: 0;
+}
+
+.maps-import-job-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.maps-import-preview,
+.maps-import-error,
+.maps-import-status {
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.maps-import-preview {
+  display: grid;
+  gap: 4px;
+  background: rgba(25,118,210,0.08);
+  border: 1px solid rgba(25,118,210,0.18);
+}
+
+.maps-import-preview-title {
+  font-weight: 950;
+  color: #111;
+  margin-bottom: 2px;
+}
+
+.maps-import-warning {
+  margin-top: 4px;
+  font-weight: 900;
+  color: #8a5a00;
+}
+
+.maps-import-error {
+  background: rgba(211,47,47,0.10);
+  border: 1px solid rgba(211,47,47,0.18);
+  color: #8a1f1f;
+  font-weight: 900;
+}
+
+.maps-import-status {
+  background: rgba(46,125,50,0.10);
+  border: 1px solid rgba(46,125,50,0.18);
+  color: #1b5e20;
+  font-weight: 900;
+}
+
+.maps-imported-data-section {
+  margin-top: 12px;
+  border: 1px solid rgba(0,0,0,0.10);
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.98);
+}
+
+.maps-imported-data-title {
+  padding: 9px 10px;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  font-size: 13px;
+  font-weight: 950;
+  color: #111;
+  background: rgba(211,47,47,0.06);
+}
+
+.maps-imported-empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: rgba(0,0,0,0.68);
+}
+
+.maps-imported-list {
+  display: grid;
+}
+
+.maps-imported-item {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+}
+
+.maps-imported-item:last-child {
+  border-bottom: none;
+}
+
+.maps-imported-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.maps-imported-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.maps-imported-name {
+  font-size: 13px;
+  font-weight: 950;
+  color: #111;
+  overflow-wrap: anywhere;
+}
+
+.maps-imported-meta {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(0,0,0,0.68);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.maps-imported-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .maps-import-modal {
+    max-height: calc(100vh - 84px);
+    border-radius: 14px;
+  }
+
+  .maps-import-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .maps-import-modal-header,
+  .maps-import-modal-actions,
+  .maps-import-modal-body {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .maps-imported-actions {
+    justify-content: flex-start;
+  }
+}
+
 .layer-subheading {
   font-size: 0.7rem;
   font-weight: 700;
