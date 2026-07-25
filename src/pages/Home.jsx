@@ -17,13 +17,13 @@ function Home() {
         <ul style={{ fontSize: "0.85rem", marginTop: "0.3rem", paddingLeft: "1.1rem" }}>
           <strong>Current Version - v1.4.2</strong>
           <br />
-          v1.4.2 - 25/07/2026 - Import data function added to map pag.
+          v1.4.2 - 25/07/2026 - Import data function added to maps page.
           <br />
           v1.4.1 - 24/07/2026 - Various improvements.
           <br />
           v1.4.0 - 23/07/2026 - Checklists added to jobs - testing phase only.
           <br />
-          v1.3.7 - 17/07/2026 - Merged drainage layers on map page.
+          v1.3.7 - 17/07/2026 - Merged drainage layers on maps page.
           <br />
           v1.3.6 - 16/07/2026 - Additional drainage layers added to maps.
           {/* 
