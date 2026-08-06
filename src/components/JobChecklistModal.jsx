@@ -7,6 +7,9 @@ import {
   hasChecklistActivity,
 } from "../lib/jobChecklists.js";
 
+const CHECKLIST_ITEM_SELECT =
+  "id, job_id, job_category, item_key, item_order, item_text, is_completed, comments, completed_by, completed_at";
+
 function formatDateTimeAU(v) {
   if (!v) return "";
   const d = new Date(v);
@@ -43,6 +46,33 @@ function buildChecklistRowsFromDefinition(category, existingRows = []) {
       completed_by: saved?.completed_by || null,
       completed_at: saved?.completed_at || null,
       completed_by_name: saved?.completed_by_name || "",
+    };
+  });
+}
+
+function mergePersistedChecklistRows(rows, persistedRows = []) {
+  const byKey = new Map((persistedRows || []).map((row) => [row.item_key, row]));
+
+  return rows.map((row) => {
+    const persisted = byKey.get(row.item_key);
+    if (!persisted) {
+      return {
+        ...row,
+        saved_comments: row.comments || "",
+        saved_item_text: row.item_text || row.definition_text,
+        saved_item_order: row.item_order,
+      };
+    }
+
+    return {
+      ...row,
+      ...persisted,
+      saved_comments: persisted.comments || "",
+      saved_item_text: persisted.item_text || "",
+      saved_item_order: persisted.item_order ?? null,
+      completed_by_name: persisted.completed_by ? row.completed_by_name || "Unknown user" : "",
+      subpoints: row.subpoints || [],
+      definition_text: row.definition_text,
     };
   });
 }
@@ -89,7 +119,7 @@ async function loadChecklistRowsForJob(jobId, category) {
 
   const { data, error } = await supabase
     .from("job_checklist_items")
-    .select("id, job_id, job_category, item_key, item_order, item_text, is_completed, comments, completed_by, completed_at")
+    .select(CHECKLIST_ITEM_SELECT)
     .eq("job_id", jobId)
     .eq("job_category", category)
     .order("item_order", { ascending: true });
@@ -356,7 +386,7 @@ function JobChecklistModal({
           );
 
     const { data, error: updateError } = await mutation
-      .select("id, job_id, job_category, item_key, item_order, item_text, is_completed, comments, completed_by, completed_at")
+      .select(CHECKLIST_ITEM_SELECT)
       .single();
 
     if (updateError) throw updateError;
@@ -437,36 +467,34 @@ function JobChecklistModal({
       );
 
       if (jobId && changedRows.length) {
-        const payload = changedRows.map((row) => {
-          const nextRow = {
-            job_id: jobId,
-            job_category: category,
-            item_key: row.item_key,
-            item_order: row.item_order,
-            item_text: row.item_text || row.definition_text,
-            is_completed: row.is_completed,
-            comments: row.comments || "",
-            completed_by: row.is_completed ? row.completed_by || null : null,
-            completed_at: row.is_completed ? row.completed_at : null,
-          };
+        const payload = changedRows.map((row) => ({
+          job_id: jobId,
+          job_category: category,
+          item_key: row.item_key,
+          item_order: row.item_order,
+          item_text: row.item_text || row.definition_text,
+          is_completed: row.is_completed,
+          comments: row.comments || "",
+          completed_by: row.is_completed ? row.completed_by || null : null,
+          completed_at: row.is_completed ? row.completed_at : null,
+        }));
 
-          if (row.id) nextRow.id = row.id;
-          return nextRow;
-        });
-
-        const { error: upsertError } = await supabase
+        const { data, error: upsertError } = await supabase
           .from("job_checklist_items")
-          .upsert(payload, { onConflict: "job_id,job_category,item_key" });
+          .upsert(payload, { onConflict: "job_id,job_category,item_key" })
+          .select(CHECKLIST_ITEM_SELECT);
 
         if (upsertError) throw upsertError;
+        const savedRows = mergePersistedChecklistRows(rows, data || []);
+        setRows(savedRows);
+        setBaselineRows(savedRows);
+        setSuccess("Checklist saved.");
+        onSaved?.({ category, rows: savedRows });
+        if (closeAfterSave) onClose?.();
+        return true;
       }
 
-      const savedRows = rows.map((row) => ({
-        ...row,
-        saved_comments: row.comments || "",
-        saved_item_text: row.item_text || row.definition_text,
-        saved_item_order: row.item_order,
-      }));
+      const savedRows = mergePersistedChecklistRows(rows);
       setRows(savedRows);
       setBaselineRows(savedRows);
       if (!jobId) onDraftChange?.(category, checklistRowsToDraft(category, savedRows, { markSaved: true }));
