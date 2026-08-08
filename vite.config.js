@@ -12,6 +12,10 @@ export default defineConfig(() => {
   return {
     plugins: [react()],
 
+    build: {
+      target: ["safari13", "es2020"],
+    },
+
     resolve: {
       alias: {
         react: path.resolve("./node_modules/react"),

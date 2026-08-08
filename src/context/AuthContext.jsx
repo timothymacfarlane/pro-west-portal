@@ -329,10 +329,14 @@ const value = useMemo(() => {
   const permissionsReady = !user || !!profile;
 
   // ✅ canonical display name for the whole app
+  const cleanDisplayName = (value) => String(value || "").trim();
+  const userMetadata = user?.user_metadata || {};
   const displayName =
-  profile?.display_name ||
-  user?.email ||
-  "";
+    cleanDisplayName(profile?.display_name) ||
+    cleanDisplayName(userMetadata.display_name) ||
+    cleanDisplayName(userMetadata.full_name) ||
+    cleanDisplayName(userMetadata.name) ||
+    cleanDisplayName(user?.email);
 
  return {
   user,

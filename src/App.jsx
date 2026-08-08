@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { Component, useState, useEffect, lazy, Suspense } from "react";
 import { Routes, Route, NavLink, useLocation, useNavigate } from "react-router-dom";
 import "./App.css";
 
@@ -15,7 +15,6 @@ const EquipmentRegister = lazy(() => import("./pages/EquipmentRegister.jsx"));
 const Jobs = lazy(() => import("./pages/Jobs.jsx"));
 const JobPlanning = lazy(() => import("./pages/JobPlanning.jsx"));
 const MyJobs = lazy(() => import("./pages/MyJobs.jsx"));
-const Maps = lazy(() => import("./pages/Maps.jsx"));
 const Profile = lazy(() => import("./pages/Profile.jsx"));
 const Schedule = lazy(() => import("./pages/Schedule.jsx"));
 const ShoppingList = lazy(() => import("./pages/ShoppingList.jsx"));
@@ -29,10 +28,253 @@ const Weather = lazy(() => import("./pages/Weather.jsx"));
 
 const NotificationBell = lazy(() => import("./components/NotificationBell.jsx"));
 
+const MAPS_DEBUG_BUILD_ID = "maps-ipad-compat-2026-08-08";
+
+function sanitizeRouteError(error) {
+  if (!error || typeof error !== "object") {
+    return { name: "Error", message: "The Maps page failed to start." };
+  }
+
+  return {
+    name: typeof error.name === "string" ? error.name : "Error",
+    message:
+      typeof error.message === "string" && error.message
+        ? error.message
+        : "The Maps page failed to start.",
+  };
+}
+
+function setMapsChunkStatus(status, error) {
+  if (typeof window === "undefined") return;
+  const safeError = error ? sanitizeRouteError(error) : null;
+  window.__pwMapsChunkStatus = {
+    status,
+    error: safeError,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function loadMapsRoute() {
+  setMapsChunkStatus("loading");
+  return import("./pages/Maps.jsx")
+    .then((module) => {
+      setMapsChunkStatus("loaded");
+      return module;
+    })
+    .catch((error) => {
+      setMapsChunkStatus("failed", error);
+      throw error;
+    });
+}
+
+const Maps = lazy(loadMapsRoute);
+
 import Home from "./pages/Home.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 
+function isMapsDebugEnabled(search) {
+  try {
+    return new URLSearchParams(search).get("mapsDebug") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function detectSafariDetails(userAgent) {
+  const safariMatch = userAgent.match(/Version\/([\d.]+).*Safari\//);
+  const ipadosMatch = userAgent.match(/OS ([\d_]+) like Mac OS X/);
+  const isIpad =
+    /iPad/.test(userAgent) ||
+    (typeof navigator !== "undefined" &&
+      navigator.platform === "MacIntel" &&
+      navigator.maxTouchPoints > 1);
+
+  return {
+    isIpad,
+    safariVersion: safariMatch ? safariMatch[1] : "not detected",
+    ipadosVersion: ipadosMatch ? ipadosMatch[1].replace(/_/g, ".") : "not detected",
+  };
+}
+
+function readMapsDebugSnapshot() {
+  if (typeof window === "undefined") {
+    return {
+      build: MAPS_DEBUG_BUILD_ID,
+      target: "safari13/es2020",
+      phase: "server-render",
+      userAgent: "unavailable",
+      safari: "not detected",
+      ipados: "not detected",
+      viewport: "unavailable",
+      orientation: "unavailable",
+      visualViewport: "unavailable",
+      mapContainer: "unavailable",
+      mapParent: "unavailable",
+      mapFullscreen: "unavailable",
+      toolsToolbar: "unavailable",
+      shellHamburger: "unavailable",
+      layoutMode: "unavailable",
+      breakpoints: "unavailable",
+      mapStatus: "unavailable",
+      serviceWorker: "unavailable",
+      mapsChunk: "not requested",
+      googleScript: "unavailable",
+      features: "unavailable",
+      error: "none",
+    };
+  }
+
+  const userAgent = navigator.userAgent || "";
+  const safari = detectSafariDetails(userAgent);
+  const mapNode =
+    document.querySelector("[data-map-container]") ||
+    document.querySelector(".maps-map");
+  const mapRect = mapNode ? mapNode.getBoundingClientRect() : null;
+  const mapParentRect = mapNode?.parentElement?.getBoundingClientRect?.() || null;
+  const fullscreenNode = document.querySelector(".maps-fullscreen");
+  const fullscreenRect = fullscreenNode?.getBoundingClientRect?.() || null;
+  const toolsNode = document.querySelector(".maps-floating-tools");
+  const toolsRect = toolsNode?.getBoundingClientRect?.() || null;
+  const hamburgerNode = document.querySelector(".mobile-hamburger");
+  const hamburgerRect = hamburgerNode?.getBoundingClientRect?.() || null;
+  const runtimeStatus = window.__pwMapsRuntimeStatus || null;
+  const chunkStatus = window.__pwMapsChunkStatus || { status: "not requested" };
+  const googleScript = document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]');
+  const googleReady = Boolean(window.google && window.google.maps);
+  const swAvailable = Boolean(navigator.serviceWorker);
+  const swControlled = swAvailable && Boolean(navigator.serviceWorker.controller);
+  const error = chunkStatus.error || null;
+
+  return {
+    build: MAPS_DEBUG_BUILD_ID,
+    target: "safari13/es2020",
+    phase: chunkStatus.status || "not requested",
+    userAgent,
+    safari: safari.safariVersion,
+    ipados: safari.isIpad ? safari.ipadosVersion : "not iPad",
+    viewport: `${window.innerWidth}x${window.innerHeight}`,
+    orientation: window.innerWidth > window.innerHeight ? "landscape" : "portrait",
+    visualViewport: window.visualViewport
+      ? `${Math.round(window.visualViewport.width)}x${Math.round(window.visualViewport.height)}`
+      : "unavailable",
+    mapContainer: mapRect
+      ? `${Math.round(mapRect.width)}x${Math.round(mapRect.height)}`
+      : "not mounted",
+    mapParent: mapParentRect
+      ? `${Math.round(mapParentRect.width)}x${Math.round(mapParentRect.height)}`
+      : "not mounted",
+    mapFullscreen: fullscreenRect
+      ? `${Math.round(fullscreenRect.width)}x${Math.round(fullscreenRect.height)}`
+      : "not mounted",
+    toolsToolbar: toolsRect
+      ? `${Math.round(toolsRect.left)},${Math.round(toolsRect.top)} ${Math.round(toolsRect.width)}x${Math.round(toolsRect.height)}`
+      : "not mounted",
+    shellHamburger: hamburgerRect
+      ? `${Math.round(hamburgerRect.left)},${Math.round(hamburgerRect.top)} ${Math.round(hamburgerRect.width)}x${Math.round(hamburgerRect.height)}`
+      : "not mounted",
+    layoutMode: runtimeStatus?.layoutMode || "not mounted",
+    breakpoints: [
+      `<=768:${window.matchMedia?.("(max-width: 768px)")?.matches ? "yes" : "no"}`,
+      `<=900:${window.matchMedia?.("(max-width: 900px)")?.matches ? "yes" : "no"}`,
+      `touch<=1180:${
+        window.matchMedia?.("(max-width: 1180px) and (pointer: coarse)")?.matches
+          ? "yes"
+          : "no"
+      }`,
+      `coarse:${window.matchMedia?.("(pointer: coarse)")?.matches ? "yes" : "no"}`,
+    ].join(", "),
+    mapStatus: runtimeStatus
+      ? [
+          `containerReady:${runtimeStatus.mapContainerReady ? "yes" : "no"}`,
+          `initialized:${runtimeStatus.mapInitialized ? "yes" : "no"}`,
+          `attached:${runtimeStatus.mapAttached ? "yes" : "no"}`,
+          `lastResize:${runtimeStatus.lastResizeAt || "none"}`,
+        ].join(", ")
+      : "not mounted",
+    serviceWorker: swAvailable
+      ? swControlled
+        ? "controlled"
+        : "available, not controlling"
+      : "unavailable",
+    mapsChunk: chunkStatus.status || "not requested",
+    googleScript: googleReady ? "ready" : googleScript ? "script present" : "not requested",
+    features: [
+      `ResizeObserver:${typeof ResizeObserver !== "undefined" ? "yes" : "no"}`,
+      `visualViewport:${window.visualViewport ? "yes" : "no"}`,
+      `crypto.randomUUID:${
+        typeof crypto !== "undefined" && crypto.randomUUID ? "yes" : "no"
+      }`,
+      `structuredClone:${typeof structuredClone !== "undefined" ? "yes" : "no"}`,
+      `Promise.any:${Promise.any ? "yes" : "no"}`,
+      `100dvh:${
+        window.CSS && CSS.supports && CSS.supports("height", "100dvh") ? "yes" : "no"
+      }`,
+    ].join(", "),
+    error: error ? `${error.name}: ${error.message}` : "none",
+  };
+}
+
+function MapsDebugPanel() {
+  const [snapshot, setSnapshot] = useState(() => readMapsDebugSnapshot());
+
+  useEffect(() => {
+    const refresh = () => setSnapshot(readMapsDebugSnapshot());
+    refresh();
+    const timer = window.setInterval(refresh, 1000);
+    window.addEventListener("resize", refresh);
+    window.addEventListener("orientationchange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("resize", refresh);
+      window.removeEventListener("orientationchange", refresh);
+    };
+  }, []);
+
+  return (
+    <aside className="maps-debug-panel" aria-label="Maps debug">
+      <strong>Maps debug</strong>
+      {Object.entries(snapshot).map(([key, value]) => (
+        <div key={key}>
+          <span>{key}</span>
+          <code>{String(value)}</code>
+        </div>
+      ))}
+    </aside>
+  );
+}
+
+class MapsRouteErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error) {
+    setMapsChunkStatus("failed", error);
+  }
+
+  render() {
+    if (this.state.error) {
+      const safeError = sanitizeRouteError(this.state.error);
+      return (
+        <div className="maps-route-error" role="alert">
+          <h2>Maps could not load</h2>
+          <p>{safeError.message}</p>
+          <button type="button" className="btn-pill primary" onClick={() => window.location.reload()}>
+            Retry
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 import { AppVisibilityProvider } from "./context/AppVisibilityContext.jsx";
 
 function App() {
@@ -45,16 +287,17 @@ function App() {
   // Updated: rely on AuthContext canonical flags rather than "ADMIN" string checks
 const { isAdmin, user, profile, displayName } = useAuth();
 
+const cleanUserLabel = (value) => String(value || "").trim();
 const sidebarUserName =
-  profile?.display_name ||
-  displayName ||
-  profile?.full_name ||
+  cleanUserLabel(profile?.display_name) ||
+  cleanUserLabel(displayName) ||
+  cleanUserLabel(profile?.full_name) ||
   [profile?.first_name, profile?.last_name]
+    .map(cleanUserLabel)
     .filter(Boolean)
     .join(" ")
     .trim() ||
-  user?.email ||
-  "";
+  cleanUserLabel(user?.email);
 
  const isAuthPage = ["/login", "/reset-password"].includes(location.pathname);
  const isMapsPage = location.pathname === "/maps";
@@ -62,6 +305,16 @@ const sidebarUserName =
   const toggleSidebar = () => {
     // Desktop collapse toggle (existing behaviour)
     setSidebarCollapsed((prev) => !prev);
+  };
+
+  const handleSidebarTogglePointerDown = (event) => {
+    event.stopPropagation();
+  };
+
+  const handleSidebarToggleClick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleSidebar();
   };
 
   const toggleMobileSidebar = () => {
@@ -187,7 +440,8 @@ const handleLogout = async () => {
               <button
                 className="sidebar-toggle"
                 type="button"
-                onClick={toggleSidebar}
+                onPointerDown={handleSidebarTogglePointerDown}
+                onClick={handleSidebarToggleClick}
                 aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
                 title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               >
@@ -427,6 +681,7 @@ const handleLogout = async () => {
 
         {/* ---------- MAIN CONTENT ---------- */}
 <main className={`main-content ${isMapsPage ? "main-content-maps" : ""}`}>
+  {isMapsPage && isMapsDebugEnabled(location.search) && <MapsDebugPanel />}
   <Suspense fallback={<div className="page-loading">Loading portal...</div>}>
     <Routes>
       <Route path="/login" element={<Login />} />
@@ -497,7 +752,9 @@ const handleLogout = async () => {
         path="/maps"
         element={
           <ProtectedRoute>
-            <Maps />
+            <MapsRouteErrorBoundary>
+              <Maps />
+            </MapsRouteErrorBoundary>
           </ProtectedRoute>
         }
       />

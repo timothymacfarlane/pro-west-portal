@@ -522,6 +522,22 @@ function buildGolaFallbackSearch(props = {}, name = "") {
 }
 
 const TOP_BAR_HEIGHT = 56;
+const MAPS_TOUCH_TABLET_QUERY = "(max-width: 1180px) and (pointer: coarse)";
+
+function getMapsResponsiveMode() {
+  if (typeof window === "undefined") {
+    return { isMobile: false, mode: "desktop", matchesTouchTablet: false };
+  }
+
+  const width = window.innerWidth || 0;
+  const matchesTouchTablet = Boolean(window.matchMedia?.(MAPS_TOUCH_TABLET_QUERY)?.matches);
+  const isMobile = width <= 900 || matchesTouchTablet;
+  return {
+    isMobile,
+    mode: isMobile ? "touch" : "desktop",
+    matchesTouchTablet,
+  };
+}
 
 // ---- Landgate live ArcGIS endpoints ----
 const LGATE_076_QUERY =
@@ -2158,6 +2174,7 @@ function createDraggableMapPopupOverlay(options = {}) {
       this.pointerState = null;
       this.frame = null;
       this.listenerController = null;
+      this.actionHandler = typeof opts.onAction === "function" ? opts.onAction : null;
       this.pendingDomReady = false;
       this.visible = false;
       this.zIndex = 120;
@@ -2229,6 +2246,8 @@ function createDraggableMapPopupOverlay(options = {}) {
         event.stopPropagation();
         this.close(true);
       });
+
+      this.div.addEventListener("click", this.onActionClick);
 
       this.contentEl = document.createElement("div");
       this.contentEl.className = "map-popup-content";
@@ -2313,6 +2332,10 @@ function createDraggableMapPopupOverlay(options = {}) {
       this.queueDrawAndDomReady();
     }
 
+    setActionHandler(handler) {
+      this.actionHandler = typeof handler === "function" ? handler : null;
+    }
+
     normalizeLatLng(value) {
       if (!value || !googleMaps?.LatLng) return null;
       if (value instanceof googleMaps.LatLng) return value;
@@ -2389,6 +2412,20 @@ function createDraggableMapPopupOverlay(options = {}) {
       this.handle.addEventListener("pointerup", this.onPointerUp, listenerOptions);
       this.handle.addEventListener("pointercancel", this.onPointerUp, listenerOptions);
     }
+
+    onActionClick = (event) => {
+      const actionEl = event.target?.closest?.("[data-pw-popup-action]");
+      if (!actionEl || !this.div?.contains(actionEl)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      this.actionHandler?.({
+        action: actionEl.dataset.pwPopupAction || "",
+        event,
+        target: actionEl,
+        overlay: this,
+      });
+    };
 
     cleanupDrag() {
       if (this.frame) cancelAnimationFrame(this.frame);
@@ -3368,6 +3405,11 @@ function Maps() {
   const [googleMapsReady, setGoogleMapsReady] = useState(
     () => typeof window !== "undefined" && !!window.google?.maps
   );
+  const [mapsLoadError, setMapsLoadError] = useState("");
+  const [mapContainerReady, setMapContainerReady] = useState(false);
+  const [mapInitError, setMapInitError] = useState("");
+  const [mapInitialized, setMapInitialized] = useState(false);
+  const [mapInitRetryKey, setMapInitRetryKey] = useState(0);
 
   const toolsControlDivRef = useRef(null);
   const mapWrapRef = useRef(null);
@@ -3390,23 +3432,36 @@ useEffect(() => {
 
   let cancelled = false;
   let pollId = null;
+  let timeoutId = null;
   const mapsScript = document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]');
 
   const markReady = () => {
     if (!cancelled && window.google?.maps) {
+      setMapsLoadError("");
       setGoogleMapsReady(true);
       if (pollId) window.clearInterval(pollId);
+      if (timeoutId) window.clearTimeout(timeoutId);
     }
   };
 
+  const markFailed = () => {
+    if (!cancelled) setMapsLoadError("Google Maps could not be loaded. Check the connection and try again.");
+  };
+
   mapsScript?.addEventListener("load", markReady);
+  mapsScript?.addEventListener("error", markFailed);
   pollId = window.setInterval(markReady, 250);
+  timeoutId = window.setTimeout(() => {
+    if (!window.google?.maps) markFailed();
+  }, 15000);
   markReady();
 
   return () => {
     cancelled = true;
     mapsScript?.removeEventListener("load", markReady);
+    mapsScript?.removeEventListener("error", markFailed);
     if (pollId) window.clearInterval(pollId);
+    if (timeoutId) window.clearTimeout(timeoutId);
   };
 }, []);
 
@@ -3481,6 +3536,7 @@ const [infoMode, setInfoMode] = useState(false);
   const measureDragKeyRef = useRef(0);
   const lastMeasureSummaryRef = useRef(null);
   const lastMeasureLatLngRef = useRef(null);
+  const completedMeasureSnapshotRef = useRef(null);
   const lastMeasureSavedRef = useRef(false);
   const measureOverlaysByNoteIdRef = useRef(new Map());
   const mainInfoOpenRef = useRef(false);
@@ -3632,7 +3688,7 @@ useEffect(() => {
   // Mobile-only: retractable right panel as a bottom drawer (does not affect desktop)
   const [isMobile, setIsMobile] = useState(() => {
     try {
-      return typeof window !== "undefined" && window.innerWidth <= 900;
+      return getMapsResponsiveMode().isMobile;
     } catch {
       return false;
     }
@@ -3655,15 +3711,18 @@ const bringMapPanelToFront = (panelId) => {
   useEffect(() => {
     const onResize = () => {
       try {
-        const mobile = typeof window !== "undefined" && window.innerWidth <= 900;
-        setIsMobile(mobile);
+        setIsMobile(getMapsResponsiveMode().isMobile);
         // Keep drawer behaviour the same on desktop and mobile.
       } catch {
         // ignore
       }
     };
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+    };
   }, []);
 
   useEffect(() => {
@@ -3674,6 +3733,28 @@ const bringMapPanelToFront = (panelId) => {
       // ignore
     }
   }, [isMobile]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const updateStatus = () => {
+      window.__pwMapsRuntimeStatus = {
+        layoutMode: isMobile ? "touch" : "desktop",
+        isMobile,
+        mapContainerReady,
+        mapInitialized,
+        mapAttached: Boolean(mapRef.current && mapDivRef.current),
+        updatedAt: new Date().toISOString(),
+      };
+    };
+
+    updateStatus();
+    window.addEventListener("resize", updateStatus);
+    window.addEventListener("orientationchange", updateStatus);
+    return () => {
+      window.removeEventListener("resize", updateStatus);
+      window.removeEventListener("orientationchange", updateStatus);
+    };
+  }, [isMobile, mapContainerReady, mapInitialized]);
 
 
   // Jobs search (portal jobs)
@@ -5574,13 +5655,46 @@ const notePayload = {
     setJobNumberActiveIndex(-1);
   }, [jobNumberQuery, jobPicked, jobNumberSuggestions.length]);
 
+  useEffect(() => {
+    const node = mapDivRef.current;
+    if (!node || typeof window === "undefined") return undefined;
+
+    let frame = null;
+    const measure = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        const rect = node.getBoundingClientRect?.();
+        const width = Math.round(rect?.width || node.clientWidth || node.offsetWidth || 0);
+        const height = Math.round(rect?.height || node.clientHeight || node.offsetHeight || 0);
+        const ready = width > 0 && height > 0;
+        setMapContainerReady((prev) => (prev || ready ? true : false));
+      });
+    };
+
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    observer?.observe(node);
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+    window.visualViewport?.addEventListener?.("resize", measure);
+    measure();
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("orientationchange", measure);
+      window.visualViewport?.removeEventListener?.("resize", measure);
+    };
+  }, [mapInitRetryKey]);
+
   // Initialise map once
   useEffect(() => {
-    if (!googleMapsReady || !window.google?.maps || !mapDivRef.current || mapRef.current) return;
+    if (!googleMapsReady || !mapContainerReady || !window.google?.maps || !mapDivRef.current || mapRef.current) return;
+    setMapInitError("");
+    setMapInitialized(false);
 
-  const mobile =
-  typeof window !== "undefined" &&
-  window.innerWidth <= 900;
+  const mobile = getMapsResponsiveMode().isMobile;
 
     const persisted = safeReadState() || {};
     const startCenter =
@@ -5592,7 +5706,9 @@ const notePayload = {
     const startMapType =
       typeof persisted?.mapTypeId === "string" ? persisted.mapTypeId : "hybrid";
 
-   const map = new window.google.maps.Map(mapDivRef.current, {
+   let map;
+   try {
+     map = new window.google.maps.Map(mapDivRef.current, {
   center: startCenter,
   zoom: startZoom,
   mapTypeId: startMapType,
@@ -5605,8 +5721,13 @@ const notePayload = {
   disableDoubleClickZoom: true,
   tilt: 0,
 });
+   } catch (e) {
+     setMapInitError(e?.message || "Google Maps could not be initialized on this device.");
+     return undefined;
+   }
 
     mapRef.current = map;
+    setMapInitialized(true);
     map.setTilt(0);
 
     const tiltListener = map.addListener("tilt_changed", () => {
@@ -5730,8 +5851,9 @@ return () => {
     clearTimeout(idleDebounceRef.current);
     idleDebounceRef.current = null;
   }
+  mapRef.current = null;
 };
-  }, [googleMapsReady]);
+  }, [googleMapsReady, mapContainerReady, mapInitRetryKey]);
   // Pause Google Maps interaction when app is backgrounded (mobile battery saver)
 useEffect(() => {
   const map = mapRef.current;
@@ -5968,9 +6090,7 @@ if (!isWA) {
   };
 
   const getPortalIcon = (color, mobileScale = null) => {
-    const mobile =
-  typeof window !== "undefined" &&
-  window.innerWidth <= 900;
+    const mobile = getMapsResponsiveMode().isMobile;
     const scale = mobileScale ?? (mobile ? 4.2 : 4.8); // small pins
     return {
       path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
@@ -7208,6 +7328,7 @@ const handleMyLocation = () => {
   const clearMeasure = () => {
     clearMeasureListeners();
     measurePathRef.current = [];
+    completedMeasureSnapshotRef.current = null;
 
     if (measureLineRef.current) {
       measureLineRef.current.setMap(null);
@@ -7271,10 +7392,17 @@ const handleMyLocation = () => {
 
   const saveCurrentMeasurementAsNote = async (attachToJob = true) => {
     try {
-      const summary = lastMeasureSummaryRef.current;
-      const pos = lastMeasureLatLngRef.current;
-      if (!summary || !pos) return;
-
+      const snapshot = completedMeasureSnapshotRef.current || {
+        summary: lastMeasureSummaryRef.current,
+        position: lastMeasureLatLngRef.current,
+        path: (measurePathRef.current || []).map((p) => ({ lat: p.lat(), lng: p.lng() })),
+      };
+      const summary = snapshot.summary;
+      const pos = snapshot.position;
+      const measurePath = snapshot.path || [];
+      if (!summary || !pos || measurePath.length < 2) {
+        throw new Error("Measurement details are no longer available.");
+      }
 
       // Ensure we have an auth user id (RLS often requires created_by = auth.uid())
       let authUserId = currentUserId || null;
@@ -7287,7 +7415,7 @@ const handleMyLocation = () => {
         // ignore
       }
 
-      if (lastMeasureSavedRef.current) return;
+      if (lastMeasureSavedRef.current) return true;
       lastMeasureSavedRef.current = true;
 
       const lat = typeof pos.lat === "function" ? pos.lat() : pos.lat;
@@ -7300,7 +7428,7 @@ const handleMyLocation = () => {
         created_by: authUserId,
         created_by_name: authUserName || null,
         measure_mode: summary.mode || null,
-        measure_path: (measurePathRef.current || []).map((p) => ({ lat: p.lat(), lng: p.lng() })),
+        measure_path: measurePath,
       };
 
       const jobIdToAttach = portalSelectedJobIdRef.current;
@@ -7324,7 +7452,7 @@ const handleMyLocation = () => {
       try {
         const map = mapRef.current;
         const summaryMode = summary?.mode;
-        const pathLatLngs = (measurePathRef.current || []).slice();
+        const pathLatLngs = measurePath.map((p) => new window.google.maps.LatLng(p.lat, p.lng));
         if (map && pathLatLngs.length >= 2) {
           // Remove any existing overlay for this note id
           const existing = measureOverlaysByNoteIdRef.current.get(data.id);
@@ -7375,10 +7503,12 @@ const handleMyLocation = () => {
           // ignore
         }
       }, 0);
+      return true;
     } catch (e) {
       console.error("Save measurement note failed:", e);
       lastMeasureSavedRef.current = false;
       alert(`Couldn’t save measurement note: ${e?.message || "unknown error"}`);
+      return false;
     }
   };
 
@@ -7487,6 +7617,11 @@ const handleMyLocation = () => {
     // Save position: midpoint (distance: halfway along line; area: bounds center)
     const savePos = getMeasureSaveLatLng(path, lastMeasureSummaryRef.current?.mode || "area");
     if (savePos) lastMeasureLatLngRef.current = savePos;
+    completedMeasureSnapshotRef.current = {
+      summary: lastMeasureSummaryRef.current,
+      position: savePos || last,
+      path: path.map((p) => ({ lat: p.lat(), lng: p.lng() })),
+    };
 
     clearMeasureListeners();
     setHasMeasure(true);
@@ -7508,21 +7643,19 @@ const handleMyLocation = () => {
         ? "Tap ✖ Clear to remove"
         : "Use ✖ Clear to remove (or start a new measure)";
 
-      const btnId = `save-measure-note-${Date.now()}`;
-
       measureFinalIWRef.current.setContent(
         `<div data-pw-drag-handle="1" style="font-weight:900; font-size:13px;">
           ${htmlLabel}<br/>
           ${
             selectedPortalJobNumberRef.current
               ? `<label style="display:flex; gap:8px; align-items:center; margin-top:8px; font-weight:900; color:#111;">
-                   <input id="save-measure-attach-job" type="checkbox" checked />
+                   <input data-pw-measure-attach-job="1" type="checkbox" checked />
                    Attach to Job #${selectedPortalJobNumberRef.current || "—"}
                  </label>`
-              : `<input id="save-measure-attach-job" type="checkbox" style="display:none" />`
+              : `<input data-pw-measure-attach-job="1" type="checkbox" style="display:none" />`
           }
           <div style="display:flex; gap:8px; margin-top:8px;">
-            <button id="${btnId}"
+            <button type="button" data-pw-popup-action="save-measure-note"
               style="flex:1; padding:7px 8px; border-radius:10px; border:2px solid #111; background:#111; color:#fff; font-weight:900; cursor:pointer; font-size:12px;">
               Save as note
             </button>
@@ -7531,30 +7664,37 @@ const handleMyLocation = () => {
         </div>`
       );
 
-      window.google.maps.event.addListenerOnce(measureFinalIWRef.current, "domready", () => {
-        setTimeout(() => makeLatestInfoWindowDraggable({ dragKey: `measure:${measureDragKeyRef.current}` }), 0);
-        const btn = document.getElementById(btnId);
-        if (!btn) return;
+      measureFinalIWRef.current.setActionHandler(async ({ action, target }) => {
+        if (action !== "save-measure-note") return;
+        if (target.dataset.pwMeasureSaveState === "saving" || target.dataset.pwMeasureSaveState === "saved") return;
 
-        btn.onclick = async () => {
-          const attachEl = document.getElementById("save-measure-attach-job");
-          const attachToJob = attachEl ? !!attachEl.checked : false;
-          try {
-            btn.disabled = true;
-            btn.textContent = "Saving…";
-          } catch {
-            // ignore
+        const contentEl = measureFinalIWRef.current?.contentEl || document;
+        const attachEl = contentEl.querySelector("[data-pw-measure-attach-job=\"1\"]");
+        const attachToJob = attachEl ? !!attachEl.checked : false;
+        try {
+          target.dataset.pwMeasureSaveState = "saving";
+          target.disabled = true;
+          target.textContent = "Saving…";
+        } catch {
+          // ignore
+        }
+
+        const saved = await saveCurrentMeasurementAsNote(attachToJob);
+
+        try {
+          if (saved) {
+            target.dataset.pwMeasureSaveState = "saved";
+            target.textContent = "Saved ✓";
+          } else {
+            target.dataset.pwMeasureSaveState = "";
+            target.disabled = false;
+            target.textContent = "Save as note";
           }
-
-          await saveCurrentMeasurementAsNote(attachToJob);
-
-          try {
-            btn.textContent = "Saved ✓";
-          } catch {
-            // ignore
-          }
-        };
+        } catch {
+          // ignore
+        }
       });
+      measureFinalIWRef.current.setDragOptions({ dragKey: `measure:${measureDragKeyRef.current}` });
     } catch {
       // ignore
     }
@@ -10757,8 +10897,7 @@ const staleTimer = setInterval(() => {
 
           const labelCfg = layer.data?.labels;
           if (!labelCfg) continue;
-          const isMobileDevice =
-            typeof window !== "undefined" && window.innerWidth <= 900;
+          const isMobileDevice = getMapsResponsiveMode().isMobile;
           const labelMinZoom =
             isMobileDevice && Number.isFinite(labelCfg.mobileMinZoom)
               ? labelCfg.mobileMinZoom
@@ -10978,7 +11117,7 @@ useEffect(() => {
     const labelCfg = layer.data?.lineLabels;
     if (!labelCfg) return [];
 
-    const isMobileDevice = typeof window !== "undefined" && window.innerWidth <= 900;
+    const isMobileDevice = getMapsResponsiveMode().isMobile;
     const maxLabels =
       isMobileDevice && Number.isFinite(labelCfg.mobileMaxLabels)
         ? labelCfg.mobileMaxLabels
@@ -11767,13 +11906,33 @@ useEffect(() => {
   if (!node) return;
 
   let frame = null;
+  let retryTimer = null;
   const resizeMap = () => {
     if (frame) cancelAnimationFrame(frame);
     frame = requestAnimationFrame(() => {
+      frame = null;
       const map = mapRef.current;
       if (!map || !window.google?.maps) return;
+      const rect = node.getBoundingClientRect?.();
+      const width = Math.round(rect?.width || node.clientWidth || node.offsetWidth || 0);
+      const height = Math.round(rect?.height || node.clientHeight || node.offsetHeight || 0);
+      if (width <= 0 || height <= 0) {
+        if (!retryTimer) retryTimer = window.setTimeout(() => {
+          retryTimer = null;
+          resizeMap();
+        }, 80);
+        return;
+      }
+      const center = map.getCenter?.();
       window.google.maps.event.trigger(map, "resize");
+      if (center) map.setCenter(center);
       viewRef.current = { bounds: map.getBounds(), zoom: map.getZoom() };
+      if (typeof window !== "undefined") {
+        window.__pwMapsRuntimeStatus = {
+          ...(window.__pwMapsRuntimeStatus || {}),
+          lastResizeAt: new Date().toISOString(),
+        };
+      }
       setViewTick((t) => t + 1);
     });
   };
@@ -11783,14 +11942,33 @@ useEffect(() => {
 
   observer?.observe(node);
   window.addEventListener("resize", resizeMap);
+  window.addEventListener("orientationchange", resizeMap);
+  window.visualViewport?.addEventListener?.("resize", resizeMap);
   resizeMap();
 
   return () => {
     if (frame) cancelAnimationFrame(frame);
+    if (retryTimer) window.clearTimeout(retryTimer);
     observer?.disconnect();
     window.removeEventListener("resize", resizeMap);
+    window.removeEventListener("orientationchange", resizeMap);
+    window.visualViewport?.removeEventListener?.("resize", resizeMap);
   };
 }, []);
+
+const mapsStartupError = mapsLoadError || mapInitError;
+const retryMapsStartup = () => {
+  setMapsLoadError("");
+  setMapInitError("");
+  setMapInitialized(false);
+  setMapContainerReady(false);
+  if (window.google?.maps) {
+    setGoogleMapsReady(true);
+    setMapInitRetryKey((value) => value + 1);
+  } else {
+    window.location.reload();
+  }
+};
 
 return (
     <div className="maps-fullscreen">
@@ -11824,7 +12002,27 @@ return (
 
 <div ref={mapDivRef} className="maps-map" />
 
-<div ref={toolsControlDivRef} className="maps-floating-tools">
+{(mapsStartupError || !mapInitialized) && (
+  <div className="maps-startup-panel" role={mapsStartupError ? "alert" : "status"}>
+    <div className="maps-startup-title">{mapsStartupError ? "Maps could not start" : "Preparing map..."}</div>
+    <div className="maps-startup-message">
+      {mapsStartupError || "Waiting for the map container and Google Maps to finish loading."}
+    </div>
+    {mapsStartupError && (
+      <button type="button" className="btn-pill primary" onClick={retryMapsStartup}>
+        Retry
+      </button>
+    )}
+  </div>
+)}
+
+<div
+  ref={toolsControlDivRef}
+  className="maps-floating-tools"
+  onPointerDown={(event) => event.stopPropagation()}
+  onWheel={(event) => event.stopPropagation()}
+  onTouchMove={(event) => event.stopPropagation()}
+>
  <button type="button" data-action="distance" title="Measure distance" onClick={startDistanceMeasure}>📏</button>
 <button type="button" data-action="area" title="Measure area" onClick={startAreaMeasure}>📐</button>
 <button type="button" data-action="location" title="My location" onClick={handleMyLocation}>📍</button>
