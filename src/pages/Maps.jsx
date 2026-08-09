@@ -3508,6 +3508,7 @@ const contourIdentifySeqRef = useRef(0);
   const portalJobsByIdRef = useRef(new Map());
   const portalPointsByIdRef = useRef(new Map());
   const portalVisibleIdsRef = useRef(new Set());
+  const portalJobsInitialFetchDoneRef = useRef(false);
 
   // Notes markers + info windows
   const noteMarkersByIdRef = useRef(new Map());
@@ -6074,10 +6075,11 @@ if (!isWA) {
   };
 
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapInitialized || !mapRef.current || portalJobsInitialFetchDoneRef.current) return;
+    portalJobsInitialFetchDoneRef.current = true;
     fetchPortalJobs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mapInitialized]);
 
   const ensurePortalClusterer = () => {
     const map = mapRef.current;
