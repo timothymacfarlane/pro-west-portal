@@ -5702,7 +5702,7 @@ body,
 @media (max-width: 900px) {
   .maps-floating-tools {
     top: auto;
-    bottom: calc(140px + env(safe-area-inset-bottom));
+    bottom: calc(12px + env(safe-area-inset-bottom));
     left: 6px;
 
     flex-direction: column;
@@ -5728,7 +5728,7 @@ body,
 @media (max-width: 1180px) and (pointer: coarse) {
   .maps-floating-tools {
     top: auto;
-    bottom: calc(140px + env(safe-area-inset-bottom));
+    bottom: calc(12px + env(safe-area-inset-bottom));
     left: 6px;
     flex-direction: column;
     gap: 2px;
@@ -5938,27 +5938,7 @@ body,
     right: auto !important;
     bottom: calc(12px + env(safe-area-inset-bottom)) !important;
     left: calc(6px + env(safe-area-inset-left)) !important;
-    max-height: calc(100dvh - 88px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-    overflow-y: auto;
-    overflow-x: hidden;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-y;
-    flex-direction: column !important;
-    gap: 3px;
-    padding: 3px;
     border-width: 1px;
-  }
-
-  .maps-floating-tools button {
-    flex: 0 0 auto;
-    width: 28px;
-    height: 28px;
-    min-height: 28px;
-    font-size: 13px;
-    border-width: 1px;
-    border-radius: 7px;
-    line-height: 1;
   }
 }
 
@@ -5977,26 +5957,6 @@ body,
     z-index: 2;
   }
 
-  .maps-floating-tools {
-    position: fixed !important;
-    top: auto !important;
-    right: auto !important;
-    bottom: calc(12px + env(safe-area-inset-bottom)) !important;
-    left: calc(6px + env(safe-area-inset-left)) !important;
-    max-height: calc(100svh - 96px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
-    max-height: calc(100dvh - 96px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
-    overflow-y: auto !important;
-    overflow-x: hidden !important;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-y;
-    flex-direction: column !important;
-    gap: 3px !important;
-    padding: 3px !important;
-    border-width: 1px !important;
-    z-index: 90 !important;
-  }
-
   .maps-floating-tools button {
     flex: 0 0 auto;
     width: 40px !important;
@@ -6008,6 +5968,82 @@ body,
     border-radius: 8px !important;
     line-height: 1 !important;
     touch-action: manipulation;
+  }
+}
+
+/* Keep the custom Maps toolbar inside the visible map viewport on touch devices. */
+@media (max-width: 1180px) and (pointer: coarse) {
+  .maps-floating-tools {
+    --maps-tools-size: 32px;
+    --maps-tools-gap: 3px;
+    --maps-tools-pad: 3px;
+    --maps-tools-columns: 1;
+    position: fixed !important;
+    box-sizing: border-box !important;
+    display: grid !important;
+    grid-template-columns: repeat(var(--maps-tools-columns), var(--maps-tools-size));
+    grid-auto-rows: var(--maps-tools-size);
+    grid-auto-flow: row;
+    align-content: end;
+    gap: var(--maps-tools-gap) !important;
+    padding: var(--maps-tools-pad) !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+    left: calc(6px + env(safe-area-inset-left)) !important;
+    max-height: calc(100svh - 76px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    max-height: calc(100dvh - 76px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    max-width: calc(100vw - 12px - env(safe-area-inset-left) - env(safe-area-inset-right)) !important;
+    overflow: hidden !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: manipulation;
+    z-index: 90 !important;
+  }
+
+  .maps-floating-tools button {
+    width: var(--maps-tools-size) !important;
+    height: var(--maps-tools-size) !important;
+    min-height: var(--maps-tools-size) !important;
+    padding: 0 !important;
+    font-size: 14px !important;
+    border-width: 1px !important;
+    border-radius: 7px !important;
+    line-height: 1 !important;
+    touch-action: manipulation;
+  }
+}
+
+@media (max-width: 699px) and (pointer: coarse) {
+  .maps-floating-tools {
+    --maps-tools-columns: 1;
+  }
+}
+
+@media (max-width: 699px) and (pointer: coarse) and (max-height: 430px) {
+  .maps-floating-tools {
+    --maps-tools-columns: 2;
+  }
+}
+
+@media (min-width: 700px) and (max-width: 1180px) and (pointer: coarse) {
+  .maps-floating-tools {
+    --maps-tools-size: 40px;
+    --maps-tools-columns: 1;
+  }
+}
+
+@media (min-width: 700px) and (max-width: 1180px) and (pointer: coarse) and (max-height: 510px) {
+  .maps-floating-tools {
+    --maps-tools-columns: 2;
+  }
+}
+
+@media (max-width: 1180px) and (pointer: coarse) and (max-height: 360px) {
+  .maps-floating-tools {
+    --maps-tools-columns: 3;
+    overflow-y: auto !important;
+    touch-action: pan-y;
   }
 }
 
