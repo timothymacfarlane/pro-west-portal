@@ -3141,8 +3141,28 @@ textarea {
   }
 }
 /* ==========================================================
-   HOME – MOBILE POLISH
+   HOME – INVITATION & MOBILE POLISH
    ========================================================== */
+.home-party-reminder {
+  max-width: 560px;
+  margin: 0 auto 0.85rem;
+  text-align: center;
+}
+
+.home-party-invite {
+  display: block;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.home-party-invite img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
 @media (max-width: 768px) {
   .home-actions {
     display: flex;

@@ -1,4 +1,5 @@
 import PageLayout from "../components/PageLayout.jsx";
+import partyInvite from "../assets/pro-west-end-of-year-party-2026.png";
 
 function Home() {
   return (
@@ -7,6 +8,27 @@ function Home() {
       title="Home"
       subtitle="Welcome to Pro West Portal"
     >
+      <div className="card" data-home-card>
+        <p className="card-title home-party-reminder">
+          Reminder: The Pro West end of year Christmas party is this Friday, 6th November.
+        </p>
+        <a
+          className="home-party-invite"
+          href={partyInvite}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open invitation full size"
+        >
+          <img
+            src={partyInvite}
+            width="1024"
+            height="1536"
+            decoding="async"
+            alt="Pro West End of Year Party invitation. Friday 6 November 2026, 5:30–9:30 pm at The Breakwater, Hillarys. Food and drinks provided, partners welcome. RSVP with dietary requirements to admin@prowestsurveying.com.au."
+          />
+        </a>
+      </div>
+
 <div className="card" data-home-card>
         <h3 className="card-title">Portal Updates</h3>
         <p style={{ fontSize: "0.85rem", color: "#555", marginTop: "0.35rem" }}>
