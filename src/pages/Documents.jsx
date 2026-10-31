@@ -11,6 +11,7 @@ const CATEGORIES = [
   "Checklists",
   "Administration",
   "Miscellaneous",
+  "Toolbox",
 ];
 
 function normalizeSpace(s) {
