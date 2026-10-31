@@ -3140,6 +3140,26 @@ textarea {
     font-size: 0.75rem;
   }
 }
+
+/* Keep Jobs search results at their natural height inside the scrollable list. */
+.jobs-search-suggestions > .contacts-suggestion {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  padding-block: 0.7rem;
+}
+
+.jobs-search-suggestions .contacts-suggestion-header {
+  align-items: flex-start;
+}
+
+.jobs-search-suggestions .contacts-avatar {
+  flex-shrink: 0;
+}
+
+.jobs-search-suggestion-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 /* ==========================================================
    HOME – INVITATION & MOBILE POLISH
    ========================================================== */

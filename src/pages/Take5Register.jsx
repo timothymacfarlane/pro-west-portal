@@ -18,6 +18,8 @@ function addressSummaryFromRow(r) {
   return cleanDisplayAddress(a) || "—";
 }
 
+const PAGE_SIZE = 25;
+
 function Take5Register() {
   const location = useLocation();
   const { user } = useAuth();
@@ -26,18 +28,24 @@ const [staff, setStaff] = useState([]);
 const [myDisplayName, setMyDisplayName] = useState("");
 const [surveyorMode, setSurveyorMode] = useState("__my__"); // __my__ | __all__ | name
   const [rows, setRows] = useState([]);
-  const [pdfMap, setPdfMap] = useState({}); // { [rowId]: signedUrl }
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
   const [error, setError] = useState("");
+  const [pdfError, setPdfError] = useState("");
+  const [openingPdfId, setOpeningPdfId] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
 
   // ✅ Job filter with autosuggest (same approach as Jobs.jsx / Take5.jsx)
  const [jobFilter, setJobFilter] = useState("");
+const [searchJobFilter, setSearchJobFilter] = useState("");
 const [selectedJob, setSelectedJob] = useState(null);
 const [jobFilterSuggestions, setJobFilterSuggestions] = useState([]);
 const [jobFilterLoading, setJobFilterLoading] = useState(false);
 const [dateFilter, setDateFilter] = useState("");
 const debounceJobFilterRef = useRef(null);
+const requestIdRef = useRef(0);
 
 useEffect(() => {
   const frame = requestAnimationFrame(() => {
@@ -136,22 +144,37 @@ const surveyorDropdownOptions = useMemo(() => {
     return () => debounceJobFilterRef.current && clearTimeout(debounceJobFilterRef.current);
   }, [jobFilter, runJobFilterSuggest]);
 
-  const fetchData = useCallback(async () => {
-      setLoading(true);
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchJobFilter(jobFilter.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [jobFilter]);
+
+  const fetchData = useCallback(async (from = 0) => {
+      const loadMore = from > 0;
+      const requestId = ++requestIdRef.current;
+      if (loadMore) setLoadingMore(true);
+      else {
+        setLoading(true);
+        setLoadingMore(false);
+        setRows([]);
+        setHasMore(false);
+        setTotalCount(0);
+      }
       setError("");
-      setPdfMap({});
+      setPdfError("");
 
       try {
         let query = supabase
           .from("take5_submissions")
           .select(
-            "id, job_number, employee_name, take5_number, created_at, pdf_path, form_data"
+            "id, job_number, employee_name, take5_number, created_at, pdf_path, form_data",
+            { count: "exact" }
           )
-          .order("created_at", { ascending: false });
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false });
 
-        if (jobFilter.trim()) {
-          // keep your existing flexible filter behaviour
-          query = query.ilike("job_number", `%${jobFilter.trim()}%`);
+        if (searchJobFilter) {
+          query = query.ilike("job_number", `%${searchJobFilter}%`);
         }
 
         if (dateFilter) {
@@ -167,52 +190,60 @@ const surveyorDropdownOptions = useMemo(() => {
 if (selectedSurveyor !== "__all__") {
   if (!selectedSurveyor) {
     setRows([]);
-    setPdfMap({});
-    setLoading(false);
+    setHasMore(false);
+    setTotalCount(0);
     return;
   }
 
   query = query.eq("employee_name", selectedSurveyor);
 }
 
-        const { data, error: qError } = await query;
+        const { data, count, error: qError } = await query.range(from, from + PAGE_SIZE);
         if (qError) throw qError;
+        if (requestId !== requestIdRef.current) return;
 
         const fetched = data || [];
-        setRows(fetched);
-
-        // Build signed URLs for private bucket
-        const map = {};
-        await Promise.all(
-          fetched.map(async (row) => {
-            if (!row.pdf_path) return;
-            try {
-              const { data: signed, error: sErr } = await supabase.storage
-                .from("take5-pdfs")
-                .createSignedUrl(row.pdf_path, 60 * 60); // 1 hour
-
-              if (!sErr && signed?.signedUrl) {
-                map[row.id] = signed.signedUrl;
-              }
-            } catch (e) {
-              // swallow per-row errors so list still loads
-              console.warn("Signed URL error for row", row.id, e);
-            }
-          })
-        );
-
-        setPdfMap(map);
+        setRows((current) => loadMore ? [...current, ...fetched.slice(0, PAGE_SIZE)] : fetched.slice(0, PAGE_SIZE));
+        setHasMore(fetched.length > PAGE_SIZE);
+        setTotalCount(count ?? 0);
       } catch (err) {
+        if (requestId !== requestIdRef.current) return;
         console.error(err);
         setError("Failed to load Take 5 submissions.");
       } finally {
-        setLoading(false);
+        if (requestId === requestIdRef.current) {
+          if (loadMore) setLoadingMore(false);
+          else setLoading(false);
+        }
       }
-    }, [jobFilter, selectedSurveyor, dateFilter]);
+    }, [searchJobFilter, selectedSurveyor, dateFilter]);
 
   useEffect(() => {
-    fetchData();
+    fetchData(0);
   }, [fetchData, refreshKey]);
+
+  const openPdf = async (row) => {
+    if (!row.pdf_path || openingPdfId) return;
+    setOpeningPdfId(row.id);
+    setPdfError("");
+    const pdfTab = window.open("about:blank", "_blank");
+    if (pdfTab) pdfTab.opener = null;
+    try {
+      const { data, error: signedError } = await supabase.storage
+        .from("take5-pdfs")
+        .createSignedUrl(row.pdf_path, 60 * 60);
+      if (signedError) throw signedError;
+      if (!data?.signedUrl) throw new Error("No signed PDF URL returned.");
+      if (pdfTab) pdfTab.location.replace(data.signedUrl);
+      else window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      pdfTab?.close();
+      console.warn("Take 5 Register PDF open failed:", err);
+      setPdfError("The PDF could not be opened. Please try again.");
+    } finally {
+      setOpeningPdfId("");
+    }
+  };
 
   const handleRefresh = useCallback(() => {
     if (debounceJobFilterRef.current) {
@@ -221,6 +252,7 @@ if (selectedSurveyor !== "__all__") {
     }
 
     setJobFilter("");
+    setSearchJobFilter("");
     setSelectedJob(null);
     setJobFilterSuggestions([]);
     setJobFilterLoading(false);
@@ -464,7 +496,7 @@ className="maps-search-input"
 <div className="card-row" style={{ marginTop: "0.6rem" }}>
   <span className="card-row-label">Showing</span>
   <span className="card-row-value">
-    <b>{rows.length}</b> Take 5{rows.length === 1 ? "" : "s"}
+    <b>{rows.length}</b> of <b>{totalCount}</b> Take 5{totalCount === 1 ? "" : "s"}
     {selectedSurveyor !== "__all__" && selectedSurveyor ? ` for ${selectedSurveyor}` : ""}
     {jobFilter.trim() ? ` • Job #${jobFilter.trim()}` : ""}
     {dateFilter ? ` • ${new Date(`${dateFilter}T00:00:00`).toLocaleDateString("en-AU")}` : ""}
@@ -498,13 +530,19 @@ className="maps-search-input"
           </div>
         )}
 
+        {pdfError && (
+          <div role="alert" style={{ marginTop: "0.4rem", fontSize: "0.85rem", color: "#b71c1c" }}>
+            {pdfError}
+          </div>
+        )}
+
         {!loading && !error && rows.length === 0 && (
           <div style={{ marginTop: "0.4rem", fontSize: "0.85rem" }}>
             No submissions found.
           </div>
         )}
 
-        {!loading && !error && rows.length > 0 && (
+        {!loading && rows.length > 0 && (
           <div
             style={{
               marginTop: "0.8rem",
@@ -582,8 +620,6 @@ className="maps-search-input"
                       })
                     : "-";
 
-                  const signedUrl = pdfMap[row.id];
-
                   return (
                     <tr key={row.id}>
                       <td
@@ -626,21 +662,16 @@ className="maps-search-input"
                           padding: "0.35rem",
                         }}
                       >
-                        {signedUrl ? (
-                          <a
-                            href={signedUrl}
-                            target="_blank"
-                            rel="noreferrer"
+                        {row.pdf_path ? (
+                          <button
+                            type="button"
                             className="btn-pill"
-                            style={{
-                              textDecoration: "none",
-                              fontSize: "0.75rem",
-                            }}
+                            style={{ fontSize: "0.75rem" }}
+                            onClick={() => openPdf(row)}
+                            disabled={Boolean(openingPdfId)}
                           >
-                            View PDF
-                          </a>
-                        ) : row.pdf_path ? (
-                          <span style={{ color: "#999" }}>Generating…</span>
+                            {openingPdfId === row.id ? "Opening..." : "View PDF"}
+                          </button>
                         ) : (
                           <span style={{ color: "#999" }}>No PDF</span>
                         )}
@@ -650,6 +681,18 @@ className="maps-search-input"
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        {!loading && hasMore && (
+          <div style={{ marginTop: "0.8rem", textAlign: "center" }}>
+            <button
+              type="button"
+              className="btn-pill"
+              onClick={() => fetchData(rows.length)}
+              disabled={loadingMore}
+            >
+              {loadingMore ? "Loading..." : "Load more"}
+            </button>
           </div>
         )}
       </div>

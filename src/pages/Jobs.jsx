@@ -3998,7 +3998,7 @@ useEffect(() => {
 
 {Array.isArray(jobNoSuggestions) && jobNoSuggestions.length > 0 && (
   <div
-    className="contacts-suggestions"
+    className="contacts-suggestions jobs-search-suggestions"
     style={{
       marginTop: "0.4rem",
       maxHeight: "200px",
@@ -4023,7 +4023,7 @@ useEffect(() => {
       >
         <div className="contacts-suggestion-header">
           <div className="contacts-avatar">{getJobBadge(j.job_number)}</div>
-  <div>
+  <div className="jobs-search-suggestion-text">
   <div className="contacts-suggestion-name">
     {`Job #${j.job_number}`}
     {j.job_type_legacy ? ` · ${j.job_type_legacy}` : ""}
@@ -4137,7 +4137,7 @@ if (hasList && globalActiveIdx >= 0) {
 
 {Array.isArray(globalSuggestions) && globalSuggestions.length > 0 && (
   <div
-    className="contacts-suggestions"
+    className="contacts-suggestions jobs-search-suggestions"
     style={{
       marginTop: "0.4rem",
       maxHeight: "200px",
@@ -4165,7 +4165,7 @@ onClick={() => {
       >
         <div className="contacts-suggestion-header">
           <div className="contacts-avatar">{getJobBadge(j.job_number)}</div>
-<div>
+<div className="jobs-search-suggestion-text">
   <div className="contacts-suggestion-name">
     {`Job #${j.job_number}`}
     {j.job_type_legacy ? ` · ${j.job_type_legacy}` : ""}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
 import { isContactsVisibleProfile } from "../lib/profileVisibility.js";
+import { useAuth } from "../context/AuthContext.jsx";
 
 function getInitials(name) {
   if (!name) return "?";
@@ -50,6 +51,7 @@ function emptyClientForm() {
 }
 
 function Contacts() {
+  const { isAdmin } = useAuth();
   const [contacts, setContacts] = useState([]);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(null);
@@ -60,52 +62,12 @@ function Contacts() {
   const [showStaff, setShowStaff] = useState(true);
   const [showClients, setShowClients] = useState(false);
 
-  // Role / permissions
-  const [userRole, setUserRole] = useState("basic");
-  const isAdmin = userRole === "admin";
-
   // Admin client CRUD UI
   const [clientFormOpen, setClientFormOpen] = useState(false);
   const [clientFormMode, setClientFormMode] = useState("add"); // add | edit
   const [clientForm, setClientForm] = useState(emptyClientForm());
   const [savingClient, setSavingClient] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
-
-  // Fetch current user role from profiles
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadRole = async () => {
-      try {
-        const { data: authData, error: authErr } = await supabase.auth.getUser();
-        if (authErr) throw authErr;
-
-        const user = authData?.user;
-        if (!user) {
-          if (!cancelled) setUserRole("basic");
-          return;
-        }
-
-        const { data: profile, error: profErr } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .single();
-
-        if (profErr) throw profErr;
-
-        if (!cancelled) setUserRole(profile?.role || "basic");
-      } catch (e) {
-        console.error("Error loading user role:", e);
-        if (!cancelled) setUserRole("basic");
-      }
-    };
-
-    loadRole();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
 useEffect(() => {
   if (!showClients) return;

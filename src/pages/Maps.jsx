@@ -16,6 +16,7 @@ import {
 } from "../lib/projections.js";
 import { supabase } from "../lib/supabaseClient.js";
 import { useAppVisibilityContext } from "../context/AppVisibilityContext.jsx";
+import { useAuth } from "../context/AuthContext.jsx";
 import { cleanDisplayAddress } from "../lib/displayFormatters.js";
 import { getJobAddressWarning } from "../lib/jobAddress.js";
 
@@ -3370,6 +3371,7 @@ function getFeatureLabelText(props = {}, layer) {
 }
 
 function Maps() {
+  const { user, displayName, isAdmin } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const mapDivRef = useRef(null);
@@ -3608,9 +3610,9 @@ useEffect(() => {
     noteAddModeRef.current = noteAddMode;
   }, [noteAddMode]);
 
-  const [currentUserName, setCurrentUserName] = useState("");
-  const [currentUserId, setCurrentUserId] = useState("");
-  const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState(false);
+  const currentUserName = displayName || user?.id || "";
+  const currentUserId = user?.id || "";
+  const currentUserIsAdmin = isAdmin;
   const [showAllNotes, setShowAllNotes] = useState(() => {
     const s = safeReadState() || {};
     if (s.notesVisibility && typeof s.notesVisibility.showAllNotes === "boolean") {
@@ -3619,62 +3621,6 @@ useEffect(() => {
     return typeof s.showAllNotes === "boolean" ? s.showAllNotes : false;
   });
 
-  // Resolve "who am I?" once (for note attribution)
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const { data } = await supabase.auth.getUser();
-        const user = data?.user;
-        if (!alive || !user) return;
-
-        // Try pull a friendly name from profiles (falls back to email/id)
-        let name = "";
-        try {
-          const { data: prof } = await supabase
-            .from("profiles")
-            .select("display_name, full_name, first_name, last_name, email")
-            .eq("id", user.id)
-            .limit(1)
-            .single();
-          name =
-            prof?.display_name ||
-            prof?.full_name ||
-            [prof?.first_name, prof?.last_name].filter(Boolean).join(" ") ||
-            prof?.email ||
-            "";
-        } catch {
-          // ignore (profiles might not exist / RLS might block)
-        }
-
-        if (!name) name = user.email || user.id;
-
-        // Store auth user id
-        if (alive) setCurrentUserId(user.id);
-
-        // Determine admin role (best-effort; UI only — RLS still enforces)
-        try {
-          const { data: roleRow } = await supabase
-            .from("profiles")
-            .select("role")
-            .eq("id", user.id)
-            .limit(1)
-            .single();
-          if (alive) setCurrentUserIsAdmin(String(roleRow?.role || "").toLowerCase() === "admin");
-        } catch {
-          // ignore
-        }
-
-        if (alive) setCurrentUserName(name);
-      } catch {
-        // ignore
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
-  }, []);
   /* ================================
      ✅ Core UI state (restored)
      ================================ */
@@ -4350,7 +4296,7 @@ ${safeBy ? `<div style="margin-top:4px; font-size:11px; color:#444; font-weight:
     } catch {}
 
     try {
-      // Always read auth user (fixes notes created before currentUserId loaded)
+      // Verify the auth user before attributing a note edit.
       let authUserId = currentUserId || null;
       let authUserName = currentUserName || null;
 
@@ -4584,7 +4530,7 @@ const notePayload = {
   lng,
   // IMPORTANT: make ownership deterministic for RLS
   created_by: authUserId,
-  // keep the friendly name you already fetch, but fall back to email
+  // Use the display name from AuthContext, with the auth email as a fallback.
   created_by_name: currentUserName || authUserEmail || null,
 };
 

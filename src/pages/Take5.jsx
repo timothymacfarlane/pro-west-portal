@@ -316,6 +316,8 @@ function Take5() {
   const [submitSuccess, setSubmitSuccess] = useState("");
   const [incompleteWarning, setIncompleteWarning] = useState("");
   const [pdfUrl, setPdfUrl] = useState("");
+  const [pendingSubmission, setPendingSubmission] = useState(null);
+  const submittingRef = useRef(false);
 
   const isSubmitted = !!submitSuccess;
 
@@ -455,6 +457,37 @@ const [jhaImagePreview, setJhaImagePreview] = useState("");
   const uid = user?.id || "anon";
   return `pw_take5_draft:${uid}`;
 }, [user?.id]);
+  const pendingKey = useMemo(
+    () => `pw_take5_pending:${user?.id || "anon"}`,
+    [user?.id]
+  );
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(pendingKey) || "null");
+      setPendingSubmission(saved?.id && saved?.jobNumber ? saved : null);
+    } catch {
+      setPendingSubmission(null);
+    }
+  }, [pendingKey]);
+
+  const rememberPendingSubmission = (submission) => {
+    setPendingSubmission(submission);
+    try {
+      localStorage.setItem(pendingKey, JSON.stringify(submission));
+    } catch {
+      // In-memory retry still works when browser storage is unavailable.
+    }
+  };
+
+  const clearPendingSubmission = () => {
+    setPendingSubmission(null);
+    try {
+      localStorage.removeItem(pendingKey);
+    } catch {
+      // ignore
+    }
+  };
 
   // Restore draft (when key changes)
   useEffect(() => {
@@ -1084,6 +1117,12 @@ const compressImageToDataUrl = useCallback((file, maxWidth = 1600, quality = 0.7
 }, []);
 
   const resetForm = useCallback(() => {
+    if (submittingRef.current) return;
+    if (pendingSubmission?.id) {
+      setStep(totalSteps);
+      setSubmitError("This Take 5 is already being submitted. Retry its PDF before starting another Take 5.");
+      return;
+    }
     setStep(1);
     setJobNumber("");
     setJobNoQuery("");
@@ -1160,7 +1199,7 @@ setJhaImagePreview("");
 
 
 
-  }, [draftKey, getLoggedInEmployeeName]);
+  }, [draftKey, getLoggedInEmployeeName, pendingSubmission]);
 
   const canContinueFromStep = useCallback(
     (currentStep) => {
@@ -1669,59 +1708,87 @@ y += declarationText.length * 4.8 + 2;
 
   const handleSubmit = async (forceSubmit = false) => {
   const shouldForceSubmit = forceSubmit === true;
+  if (submittingRef.current || isSubmitted) return;
 
-  if (!canContinueFromStep(5)) {
+  if (pendingSubmission?.id && jobNumber !== pendingSubmission.jobNumber) {
+    setSubmitError(`This Take 5 is already saved for job #${pendingSubmission.jobNumber}. Restore that job number to retry its PDF.`);
+    return;
+  }
+
+  if (!pendingSubmission?.pdfPath && !canContinueFromStep(5)) {
     setIncompleteWarning("All fields must be completed");
     return;
   }
 
-  if (!shouldForceSubmit && hasRedSelectionsOnStep(5)) {
+  if (!pendingSubmission?.id && !shouldForceSubmit && hasRedSelectionsOnStep(5)) {
     setShowRedWarning(true);
     return;
   }
 
+  submittingRef.current = true;
   setIsSubmitting(true);
   setSubmitError("");
   setSubmitSuccess("");
   setIncompleteWarning("");
   setPdfUrl("");
+  let savedSubmissionId = "";
 
   try {
-    const { count, error: countError } = await supabase
-      .from("take5_submissions")
-      .select("id", { count: "exact", head: true })
-      .eq("job_number", jobNumber);
+    const attempt = pendingSubmission || {
+      id: crypto.randomUUID(),
+      jobNumber,
+      pdfPath: "",
+    };
+    if (!pendingSubmission) rememberPendingSubmission(attempt);
 
-    if (countError) throw countError;
-    const take5Number = (count || 0) + 1;
+    const { data: inserted, error: insertError } = await supabase.rpc(
+      "create_take5_submission",
+      {
+        p_submission_id: attempt.id,
+        p_job_number: attempt.jobNumber,
+        p_employee_name: employeeName,
+        p_form_data: buildFormData(null),
+      }
+    ).single();
 
-    const formData = buildFormData(take5Number);
-
-const compressedSwmsImage =
-  swms === "Yes" && swmsImageFile
-    ? await compressImageToDataUrl(swmsImageFile)
-    : "";
-
-const compressedJhaImage =
-  jha === "Yes" && jhaImageFile
-    ? await compressImageToDataUrl(jhaImageFile)
-    : "";
-
-const { data: inserted, error: insertError } = await supabase
-      .from("take5_submissions")
-      .insert({
-        job_number: jobNumber,
-        employee_name: employeeName,
-        take5_number: take5Number,
-        form_data: formData,
-      })
-      .select()
-      .single();
-
-    if (insertError) throw insertError;
+    if (insertError) {
+      if (insertError.code === "PGRST202") clearPendingSubmission();
+      throw insertError;
+    }
+    if (!inserted?.id || !Number.isInteger(inserted.take5_number)) {
+      throw new Error("The saved Take 5 number could not be confirmed.");
+    }
     const take5Id = inserted.id;
+    const take5Number = inserted.take5_number;
+    savedSubmissionId = take5Id;
+    let formData = inserted.form_data;
+    let path = inserted.pdf_path || attempt.pdfPath || "";
+    rememberPendingSubmission({ ...attempt, take5Number, pdfPath: path });
 
-    const pdfDoc = await generatePdf(formData);
+    if (!path && pendingSubmission?.id) {
+      formData = buildFormData(take5Number);
+      const { data: updated, error: updateError } = await supabase
+        .from("take5_submissions")
+        .update({ employee_name: employeeName, form_data: formData })
+        .eq("id", take5Id)
+        .select("id")
+        .single();
+      if (updateError || updated?.id !== take5Id) {
+        throw updateError || new Error("The saved Take 5 could not be updated for retry.");
+      }
+    }
+
+    if (!path) {
+      const compressedSwmsImage =
+        swms === "Yes" && swmsImageFile
+          ? await compressImageToDataUrl(swmsImageFile)
+          : "";
+      const compressedJhaImage =
+        jha === "Yes" && jhaImageFile
+          ? await compressImageToDataUrl(jhaImageFile)
+          : "";
+
+      const pdfDoc = await generatePdf(formData);
 
 const appendImagePage = (title, docNumber, imageDataUrl) => {
   if (!imageDataUrl) return;
@@ -1775,21 +1842,38 @@ appendImagePage("JHA Attachment", jhaDocNumber, compressedJhaImage);
       pdfBlob = new Blob([ab], { type: "application/pdf" });
     }
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const path = `${jobNumber}/take5/${take5Number}_${take5Id}_${timestamp}.pdf`;
+    if (!pdfBlob || pdfBlob.size <= 0) {
+      throw new Error("Generated Take 5 PDF was empty.");
+    }
+    path = `${attempt.jobNumber}/take5/${take5Number}_${take5Id}.pdf`;
 
     const { error: uploadError } = await supabase.storage
       .from("take5-pdfs")
-      .upload(path, pdfBlob, { contentType: "application/pdf" });
+      .upload(path, pdfBlob, { contentType: "application/pdf", upsert: false });
 
-    if (uploadError) throw uploadError;
+    if (uploadError) {
+      if (String(uploadError.statusCode) !== "409") throw uploadError;
+      // An earlier upload may have succeeded even though its response was lost.
+      const { data: existing, error: existingError } = await supabase.storage
+        .from("take5-pdfs")
+        .createSignedUrl(path, 60);
+      if (existingError || !existing?.signedUrl) throw uploadError;
+      formData = inserted.form_data;
+    }
+    rememberPendingSubmission({ ...attempt, take5Number, pdfPath: path });
+    }
 
-    const { error: updateError } = await supabase
-      .from("take5_submissions")
-      .update({ pdf_path: path })
-      .eq("id", take5Id);
-
-    if (updateError) throw updateError;
+    if (!inserted.pdf_path) {
+      const { data: finalRow, error: updateError } = await supabase
+        .from("take5_submissions")
+        .update({ pdf_path: path, form_data: formData })
+        .eq("id", take5Id)
+        .select("id, pdf_path")
+        .single();
+      if (updateError || finalRow?.id !== take5Id || finalRow?.pdf_path !== path) {
+        throw updateError || new Error("The Take 5 PDF path could not be confirmed on the submission.");
+      }
+    }
 
     const { data: signed, error: signedErr } = await supabase.storage
       .from("take5-pdfs")
@@ -1801,6 +1885,7 @@ appendImagePage("JHA Attachment", jhaDocNumber, compressedJhaImage);
 
     setSubmitSuccess("Take 5 submitted and PDF saved successfully.");
     setStep(totalSteps);
+    clearPendingSubmission();
 
     try {
       localStorage.removeItem(draftKey);
@@ -1809,8 +1894,15 @@ appendImagePage("JHA Attachment", jhaDocNumber, compressedJhaImage);
     }
   } catch (err) {
     console.error(err);
-    setSubmitError("There was a problem submitting the Take 5. Please try again.");
+    setSubmitError(
+      err?.code === "PGRST202"
+        ? "Take 5 submissions need the database update before this version of the portal can save them. Please contact an administrator."
+        : savedSubmissionId
+        ? "The Take 5 was saved, but its PDF could not be attached. Submit again to retry the same record and number."
+        : "The Take 5 could not be confirmed. Submit again to retry the same submission ID."
+    );
   } finally {
+    submittingRef.current = false;
     setIsSubmitting(false);
   }
 };
@@ -3104,7 +3196,7 @@ const footerBarStyle = {
       title="Take 5"
       subtitle={`Step ${step} of ${totalSteps}`}
       actions={
-        <button className="btn-pill" type="button" onClick={resetForm}>
+        <button className="btn-pill" type="button" onClick={resetForm} disabled={isSubmitting || !!pendingSubmission}>
           Start Over
         </button>
       }
@@ -3117,6 +3209,7 @@ const footerBarStyle = {
       <AnimatePresence mode="wait">
   <motion.div
     key={step}
+    inert={Boolean(pendingSubmission?.pdfPath)}
     initial={{ opacity: 0, y: 14 }}
     animate={{ opacity: 1, y: 0 }}
     exit={{ opacity: 0, y: -14 }}
@@ -3139,6 +3232,13 @@ const footerBarStyle = {
           }}
         >
           ⚠️ {incompleteWarning}
+        </div>
+      )}
+
+      {pendingSubmission && !isSubmitting && !submitSuccess && (
+        <div role="status" style={{ marginTop: "0.7rem", fontSize: "0.85rem", color: "#8a4b00" }}>
+          Job #{pendingSubmission.jobNumber} has an unfinished Take 5 submission. Retry the PDF before starting another one.
+          {!pendingSubmission.pdfPath && " If this page was reloaded, reselect any SWMS or JHA image attachments."}
         </div>
       )}
 
@@ -3188,7 +3288,7 @@ const footerBarStyle = {
               cursor: canContinueFromStep(totalSteps) && !submitSuccess ? "pointer" : "not-allowed",
             }}
           >
-            {isSubmitting ? "Submitting..." : submitSuccess ? "Submitted" : "Submit Take 5"}
+            {isSubmitting ? "Submitting..." : submitSuccess ? "Submitted" : pendingSubmission ? "Retry Take 5 PDF" : "Submit Take 5"}
           </button>
         )}
       </div>

@@ -7,6 +7,7 @@ const TABLES = [
   "timesheet_entries",
   "schedule_assignments",
   "job_planning_entries",
+  "schedule_job_ref_links",
   "job_planning_unscheduled",
   "profiles",
   "documents",
@@ -181,10 +182,16 @@ async function pruneOldBackups(supabaseAdmin: any) {
   );
 
   for (const folder of foldersToDelete) {
-    const paths = TABLES.flatMap((table) => [
-      `${folder}/${table}.csv`,
-      `${folder}/${table}.json`,
-    ]);
+    const { data: files, error: listError } = await supabaseAdmin.storage
+      .from(BUCKET)
+      .list(folder, { limit: 1000 });
+
+    if (listError) {
+      throw new Error(`Failed listing backup folder ${folder}: ${listError.message}`);
+    }
+
+    const paths = (files ?? []).map((file: { name: string }) => `${folder}/${file.name}`);
+    if (paths.length === 0) continue;
 
     console.log(`Pruning old backup folder: ${folder}`);
 

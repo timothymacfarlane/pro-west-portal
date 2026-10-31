@@ -14,3 +14,8 @@ entrypoint = "./functions/daily-table-backup/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/send-vehicle-prestart-manager-alert/index.ts"
+
+[functions.send-shopping-list-alert]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-shopping-list-alert/index.ts"

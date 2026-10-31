@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabaseClient";
@@ -9,6 +9,7 @@ const ALL_VEHICLES = "__all__";
 const MY_VEHICLE = "__my__";
 const PDF_BUCKET = "vehicle-prestart-pdfs";
 const PDF_SIGNED_URL_SECONDS = 60 * 60;
+const PAGE_SIZE = 25;
 
 function profileName(profile) {
   return (profile?.display_name || "").trim() || (profile?.email || "").trim() || "Unnamed";
@@ -20,12 +21,6 @@ function vehicleLabel(vehicle) {
   const makeModel = [vehicle.make, vehicle.model].filter(Boolean).join(" ").trim() || "-";
   const year = vehicle.year == null || vehicle.year === "" ? "-" : String(vehicle.year);
   return `${registration} — ${makeModel} — ${year}`;
-}
-
-function perthDateString(value) {
-  return value
-    ? new Date(value).toLocaleDateString("en-CA", { timeZone: "Australia/Perth" })
-    : "";
 }
 
 function formatDateTime(value) {
@@ -135,13 +130,16 @@ function VehiclePrestartRegister() {
   const [vehicleMode, setVehicleMode] = useState(MY_VEHICLE);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
   const [filtersLoading, setFiltersLoading] = useState(true);
   const [error, setError] = useState("");
   const [pdfError, setPdfError] = useState("");
   const [dateFilter, setDateFilter] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
-  const [pdfMap, setPdfMap] = useState({});
   const [openingPdfId, setOpeningPdfId] = useState("");
+  const requestIdRef = useRef(0);
 
   const myProfileId = profile?.id || user?.id || "";
 
@@ -165,7 +163,6 @@ function VehiclePrestartRegister() {
   }, [myProfileId, vehicleMode, vehicles]);
 
   const selectedVehicleId = selectedVehicle?.id || "";
-  const selectedVehicleRegistration = (selectedVehicle?.registration || "").trim();
 
   const loadFilters = useCallback(async () => {
     if (!user) return;
@@ -235,99 +232,76 @@ function VehiclePrestartRegister() {
     loadFilters();
   }, [loadFilters, refreshKey]);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (from = 0) => {
+    const loadMore = from > 0;
+    const requestId = ++requestIdRef.current;
+    if (loadMore) setLoadingMore(true);
+    else {
+      setLoading(true);
+      setLoadingMore(false);
+      setRows([]);
+      setHasMore(false);
+      setTotalCount(0);
+    }
     setError("");
     setPdfError("");
-    setPdfMap({});
 
     try {
+      if (selectedSurveyor !== ALL_SURVEYORS && !selectedSurveyor) {
+        setRows([]);
+        setHasMore(false);
+        setTotalCount(0);
+        return;
+      }
+
       let query = supabase
         .from("vehicle_prestart_submissions")
         .select(
-          "id, vehicle_label, vehicle_equipment_id, employee_name, employee_profile_id, odometer, created_at, form_data, pdf_path, employee_signed_off, employee_signed_off_at, signed_off_employee_name, submitted_status, submitted_at, notify_manager, manager_alert_status, manager_alert_sent_at, manager_alert_error"
+          "id, vehicle_label, vehicle_equipment_id, employee_name, employee_profile_id, odometer, created_at, form_data, pdf_path, employee_signed_off, employee_signed_off_at, signed_off_employee_name, submitted_status, submitted_at, notify_manager, manager_alert_status, manager_alert_sent_at, manager_alert_error",
+          { count: "exact" }
         )
-        .order("created_at", { ascending: false });
-
-      const { data, error: qError } = await query;
-      if (qError) throw qError;
-
-      let fetched = data || [];
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false });
 
       if (selectedSurveyor !== ALL_SURVEYORS) {
-        if (!selectedSurveyor) {
-          setRows([]);
-          setLoading(false);
-          return;
-        }
-
         const staffMatch = staff.find((person) => person.name === selectedSurveyor);
-        fetched = fetched.filter((row) => {
-          const rowProfileId = row.employee_profile_id || row.form_data?.employeeId || "";
-          if (staffMatch?.id && rowProfileId && rowProfileId === staffMatch.id) return true;
-          return String(row.employee_name || row.form_data?.employeeName || "") === selectedSurveyor;
-        });
+        query = staffMatch?.id
+          ? query.eq("employee_profile_id", staffMatch.id)
+          : query.eq("employee_name", selectedSurveyor);
       }
 
       if (dateFilter) {
-        fetched = fetched.filter((row) => {
-          const submittedAt = row.submitted_at || row.form_data?.submittedAt || row.created_at;
-          return perthDateString(submittedAt) === dateFilter;
-        });
+        const start = new Date(`${dateFilter}T00:00:00+08:00`);
+        const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+        query = query.gte("submitted_at", start.toISOString()).lt("submitted_at", end.toISOString());
       }
 
       if (selectedVehicleId) {
-        const registration = selectedVehicleRegistration.toLowerCase();
-        fetched = fetched.filter((row) => {
-          const rowEquipmentId = row.vehicle_equipment_id || row.form_data?.vehicleEquipmentId || "";
-          if (rowEquipmentId && rowEquipmentId === selectedVehicleId) return true;
-
-          const rowLabel = String(row.vehicle_label || row.form_data?.vehicle || "").toLowerCase();
-          return registration && rowLabel.includes(registration);
-        });
+        query = query.eq("vehicle_equipment_id", selectedVehicleId);
       }
 
-      setRows(fetched);
+      const { data, count, error: qError } = await query.range(from, from + PAGE_SIZE);
+      if (qError) throw qError;
+      if (requestId !== requestIdRef.current) return;
 
-      const map = {};
-      await Promise.all(
-        fetched.map(async (row) => {
-          const ref = pdfReference(row);
-          if (!ref) return;
-
-          if (isUrl(ref)) {
-            map[row.id] = ref;
-            return;
-          }
-
-          try {
-            const { data: signed, error: signedError } = await supabase.storage
-              .from(PDF_BUCKET)
-              .createSignedUrl(ref, PDF_SIGNED_URL_SECONDS);
-
-            if (signedError) throw signedError;
-            if (signed?.signedUrl) map[row.id] = signed.signedUrl;
-          } catch (signedErr) {
-            console.warn("Vehicle Prestart Register signed URL error", {
-              rowId: row.id,
-              pdfPath: ref,
-              error: signedErr,
-            });
-          }
-        })
-      );
-
-      setPdfMap(map);
+      const fetched = data || [];
+      setRows((current) => loadMore ? [...current, ...fetched.slice(0, PAGE_SIZE)] : fetched.slice(0, PAGE_SIZE));
+      setHasMore(fetched.length > PAGE_SIZE);
+      setTotalCount(count ?? 0);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       console.error("Vehicle Prestart Register load failed:", err);
       setError("Failed to load Vehicle Pre Start submissions.");
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        if (loadMore) setLoadingMore(false);
+        else setLoading(false);
+      }
     }
-  }, [dateFilter, selectedSurveyor, selectedVehicleId, selectedVehicleRegistration, staff]);
+  }, [dateFilter, selectedSurveyor, selectedVehicleId, staff]);
 
   useEffect(() => {
-    fetchData();
+    fetchData(0);
   }, [fetchData, refreshKey]);
 
   const handleRefresh = useCallback(() => {
@@ -335,7 +309,6 @@ function VehiclePrestartRegister() {
     setSurveyorMode(MY_SURVEYOR);
     setVehicleMode(MY_VEHICLE);
     setPdfError("");
-    setPdfMap({});
     setRefreshKey((key) => key + 1);
   }, []);
 
@@ -366,6 +339,7 @@ function VehiclePrestartRegister() {
 
     setOpeningPdfId(row.id);
     setPdfError("");
+    let pdfTab = null;
 
     try {
       console.info("Vehicle Pre Start PDF open requested", { rowId: row.id, pdfPath: ref });
@@ -375,12 +349,8 @@ function VehiclePrestartRegister() {
         return;
       }
 
-      const cached = pdfMap[row.id];
-      if (cached) {
-        window.open(cached, "_blank", "noopener,noreferrer");
-        return;
-      }
-
+      pdfTab = window.open("about:blank", "_blank");
+      if (pdfTab) pdfTab.opener = null;
       const { data, error: signedError } = await supabase.storage
         .from(PDF_BUCKET)
         .createSignedUrl(ref, PDF_SIGNED_URL_SECONDS);
@@ -388,10 +358,11 @@ function VehiclePrestartRegister() {
       if (signedError) throw signedError;
       if (!data?.signedUrl) throw new Error("No signed PDF URL returned.");
 
-      setPdfMap((prev) => ({ ...prev, [row.id]: data.signedUrl }));
       console.info("Vehicle Pre Start signed PDF URL created", { rowId: row.id });
-      window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+      if (pdfTab) pdfTab.location.replace(data.signedUrl);
+      else window.open(data.signedUrl, "_blank", "noopener,noreferrer");
     } catch (err) {
+      pdfTab?.close();
       console.error("Vehicle Prestart PDF open failed:", { rowId: row.id, pdfPath: ref, error: err });
       setPdfError("The PDF could not be opened. The attachment may be missing or unavailable.");
     } finally {
@@ -400,15 +371,14 @@ function VehiclePrestartRegister() {
   };
 
   const showingLabel = useMemo(() => {
-    const count = rows.length;
-    const parts = [`${count} Vehicle Pre Start${count === 1 ? "" : "s"}`];
+    const parts = [`Vehicle Pre Start${totalCount === 1 ? "" : "s"}`];
 
     if (selectedSurveyor !== ALL_SURVEYORS && selectedSurveyor) parts.push(`for ${selectedSurveyor}`);
     if (selectedVehicle) parts.push(`Vehicle ${selectedVehicle.registration || "-"}`);
     if (dateFilter) parts.push(new Date(`${dateFilter}T00:00:00+08:00`).toLocaleDateString("en-AU", { timeZone: "Australia/Perth" }));
 
     return parts.join(" • ");
-  }, [dateFilter, rows.length, selectedSurveyor, selectedVehicle]);
+  }, [dateFilter, selectedSurveyor, selectedVehicle, totalCount]);
 
   return (
     <PageLayout
@@ -505,7 +475,7 @@ function VehiclePrestartRegister() {
         <div className="card-row" style={{ marginTop: "0.6rem" }}>
           <span className="card-row-label">Showing</span>
           <span className="card-row-value">
-            <b>{rows.length}</b> {showingLabel.replace(/^\d+ /, "")}
+            <b>{rows.length}</b> of <b>{totalCount}</b> {showingLabel}
           </span>
         </div>
       </div>
@@ -540,7 +510,7 @@ function VehiclePrestartRegister() {
           </div>
         )}
 
-        {!loading && !error && rows.length > 0 && (
+        {!loading && rows.length > 0 && (
           <div
             style={{
               marginTop: "0.8rem",
@@ -579,7 +549,6 @@ function VehiclePrestartRegister() {
                   const status = row.submitted_status || row.form_data?.submittedStatus || "submitted";
                   const alert = managerAlertInfo(row);
                   const ref = pdfReference(row);
-                  const pdfUrl = pdfMap[row.id];
                   const opening = openingPdfId === row.id;
 
                   return (
@@ -651,7 +620,7 @@ function VehiclePrestartRegister() {
                             onClick={() => openPdf(row)}
                             disabled={opening}
                           >
-                            {opening ? "Opening..." : pdfUrl || isUrl(ref) ? "View PDF" : "Preparing..."}
+                            {opening ? "Opening..." : "View PDF"}
                           </button>
                         ) : (
                           <span style={{ color: "#999" }}>No PDF</span>
@@ -662,6 +631,18 @@ function VehiclePrestartRegister() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        {!loading && hasMore && (
+          <div style={{ marginTop: "0.8rem", textAlign: "center" }}>
+            <button
+              type="button"
+              className="btn-pill"
+              onClick={() => fetchData(rows.length)}
+              disabled={loadingMore}
+            >
+              {loadingMore ? "Loading..." : "Load more"}
+            </button>
           </div>
         )}
       </div>

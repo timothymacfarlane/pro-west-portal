@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PageLayout from "../components/PageLayout.jsx";
 import { supabase } from "../lib/supabaseClient";
+import { useAuth } from "../context/AuthContext.jsx";
 
 const CATEGORIES = [
   "Safety",
@@ -146,31 +147,9 @@ function useDebounced(value, delayMs = 250) {
   return debounced;
 }
 
-async function getUserRole() {
-  try {
-    const { data: authData, error: authErr } = await supabase.auth.getUser();
-    if (authErr) throw authErr;
-    const user = authData?.user;
-    if (!user) return { role: "basic", userId: null };
-
-    const { data: profile, error: profErr } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-    if (profErr) throw profErr;
-
-    return { role: profile?.role || "basic", userId: user.id };
-  } catch (e) {
-    console.error("Error loading user role:", e);
-    return { role: "basic", userId: null };
-  }
-}
-
 function Documents() {
-  const [userRole, setUserRole] = useState("basic");
-  const isAdmin = userRole === "admin";
-  const [userId, setUserId] = useState(null);
+  const { user, isAdmin } = useAuth();
+  const userId = user?.id || null;
 
   const [query, setQuery] = useState("");
 const [showSuggestions, setShowSuggestions] = useState(false);
@@ -243,21 +222,6 @@ const debouncedQuery = useDebounced(query, 250);
 
     media.addListener(syncSmallScreen);
     return () => media.removeListener(syncSmallScreen);
-  }, []);
-
-  // Load role
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { role, userId } = await getUserRole();
-      if (!cancelled) {
-        setUserRole(role);
-        setUserId(userId);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
 useEffect(() => {

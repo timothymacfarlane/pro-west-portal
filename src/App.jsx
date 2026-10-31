@@ -2,7 +2,7 @@ import { Component, useState, useEffect, lazy, Suspense } from "react";
 import { Routes, Route, NavLink, useLocation, useNavigate } from "react-router-dom";
 import "./App.css";
 
-import prowestLogo from "./assets/prowest-logo.png";
+import prowestLogo from "./assets/prowest-logo-header.png";
 import { supabase } from "./lib/supabaseClient.js";
 
 const Login = lazy(() => import("./pages/Login.jsx"));
