@@ -105,7 +105,7 @@ function useIsMobile(breakpointPx = 520) {
   return isMobile;
 }
 function Timesheets() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, displayName } = useAuth();
   const isMobile = useIsMobile(520);
   const todayIso = localIsoDate(new Date());
 
@@ -802,7 +802,7 @@ markCurrentFieldsSaved();
             <div className="card-row">
               <span className="card-row-label">Employee</span>
               <span className="card-row-value">
-                {user?.user_metadata?.full_name || user?.email || "Unknown user"}
+                {displayName || "Unknown user"}
               </span>
             </div>
           )}
