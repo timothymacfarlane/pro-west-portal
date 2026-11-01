@@ -7089,6 +7089,48 @@ body,
   grid-column: 1 / -1;
 }
 
+.jobs-filters-full .jobs-date-range {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.jobs-filters-full .jobs-date-field {
+  display: grid;
+  flex: 0 1 180px;
+  min-width: 0;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.jobs-filters-full .jobs-date-field input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  color: inherit;
+}
+
+.jobs-filters-full .jobs-date-field input[aria-invalid="true"] {
+  border-color: var(--pw-primary, #d32f2f);
+}
+
+.jobs-filters-full .jobs-date-clear {
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--pw-primary, #d32f2f);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.jobs-filters-full .jobs-date-error {
+  color: var(--pw-primary, #d32f2f);
+  font-size: 12px;
+}
+
 @media (max-width: 860px) {
   .jobs-search-row {
     grid-template-columns: 1fr;
@@ -7110,6 +7152,10 @@ body,
 
   .jobs-filters-label {
     font-size: 9px;
+  }
+
+  .jobs-filters-full .jobs-date-field {
+    flex: 1 1 140px;
   }
 
   .jobs-filter-pills {

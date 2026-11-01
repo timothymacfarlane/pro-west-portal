@@ -3127,6 +3127,9 @@ function Jobs() {
   const [totalJobs, setTotalJobs] = useState(0);
   const [jobCategoryFilter, setJobCategoryFilter] = useState([]);
   const [statusFilter, setStatusFilter] = useState([]);
+  const [jobDateFrom, setJobDateFrom] = useState("");
+  const [jobDateTo, setJobDateTo] = useState("");
+  const invalidJobDateRange = Boolean(jobDateFrom && jobDateTo && jobDateFrom > jobDateTo);
 
     // -----------------------------
   // Job register table (paged)
@@ -3299,8 +3302,14 @@ async function fetchJobByNumber(jobNumber) {
   if (jobErr) throw jobErr;
   return jobData || null;
 }
-  async function fetchJobsPage({ page, sortBy, ascending, jobNo, globalQ, jobCategory, status }) {
+  async function fetchJobsPage({ page, sortBy, ascending, jobNo, globalQ, jobCategory, status, dateFrom, dateTo }) {
     setListError("");
+
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      setListRows([]);
+      setFilteredCount(0);
+      return;
+    }
 
     const from = page * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
@@ -3358,6 +3367,9 @@ if (jobCategoryValues.length > 0) {
 if (statusValues.length > 0) {
   q = q.in("status", statusValues);
 }
+
+if (dateFrom) q = q.gte("job_date_legacy", dateFrom);
+if (dateTo) q = q.lte("job_date_legacy", dateTo);
 
     if (globalTrim.length >= 3) {
       const isNumeric = /^\d+$/.test(globalTrim);
@@ -3418,6 +3430,8 @@ q = q.range(from, to);
   globalQ: globalQuery,
   jobCategory: jobCategoryFilter,
   status: statusFilter,
+  dateFrom: jobDateFrom,
+  dateTo: jobDateTo,
 });
     } catch (e) {
       setListError(e?.message || "Failed to refresh job register.");
@@ -3736,6 +3750,8 @@ if (!isAppVisible) return;
   globalQ: globalQuery,
   jobCategory: jobCategoryFilter,
   status: statusFilter,
+  dateFrom: jobDateFrom,
+  dateTo: jobDateTo,
 });
       } catch (e) {
         setListError(e?.message || "Failed to load job register page.");
@@ -3748,11 +3764,11 @@ if (!isAppVisible) return;
 
     return () => listDebounceRef.current && clearTimeout(listDebounceRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
- }, [pageIndex, sortKey, sortAsc, jobNoQuery, globalQuery, jobCategoryFilter, statusFilter, isAppVisible]);
+ }, [pageIndex, sortKey, sortAsc, jobNoQuery, globalQuery, jobCategoryFilter, statusFilter, jobDateFrom, jobDateTo, isAppVisible]);
 useEffect(() => {
   setPageIndex(0);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [jobNoQuery, globalQuery, jobCategoryFilter, statusFilter, sortKey, sortAsc]);
+}, [jobNoQuery, globalQuery, jobCategoryFilter, statusFilter, jobDateFrom, jobDateTo, sortKey, sortAsc]);
 
   // ✅ Deep-link support: /jobs?job=12345 (+ optional from=maps&edit=1)
   useEffect(() => {
@@ -3927,6 +3943,8 @@ useEffect(() => {
       setGlobalQuery("");
       setJobCategoryFilter([]);
       setStatusFilter([]);
+      setJobDateFrom("");
+      setJobDateTo("");
       setJobNoSuggestions([]);
       setGlobalSuggestions([]);
       try {
@@ -4269,6 +4287,50 @@ onClick={() => {
                   ))}
                 </div>
               </div>
+              <div className="jobs-filters-group">
+                <div className="jobs-filters-label">Job date range</div>
+                <div className="jobs-date-range">
+                  <label className="jobs-date-field">
+                    <span>From</span>
+                    <input
+                      className="maps-search-input"
+                      type="date"
+                      value={jobDateFrom}
+                      onChange={(e) => setJobDateFrom(e.target.value)}
+                      aria-invalid={invalidJobDateRange}
+                      aria-describedby={invalidJobDateRange ? "jobs-date-range-error" : undefined}
+                    />
+                  </label>
+                  <label className="jobs-date-field">
+                    <span>To</span>
+                    <input
+                      className="maps-search-input"
+                      type="date"
+                      value={jobDateTo}
+                      onChange={(e) => setJobDateTo(e.target.value)}
+                      aria-invalid={invalidJobDateRange}
+                      aria-describedby={invalidJobDateRange ? "jobs-date-range-error" : undefined}
+                    />
+                  </label>
+                  {(jobDateFrom || jobDateTo) && (
+                    <button
+                      type="button"
+                      className="jobs-date-clear"
+                      onClick={() => {
+                        setJobDateFrom("");
+                        setJobDateTo("");
+                      }}
+                    >
+                      Clear dates
+                    </button>
+                  )}
+                </div>
+                {invalidJobDateRange && (
+                  <div className="jobs-date-error" id="jobs-date-range-error" role="alert">
+                    The start date must be on or before the end date.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -4279,7 +4341,7 @@ onClick={() => {
           <div>
             <h3 className="card-title" style={{ marginBottom: 6 }}>Job register</h3>
             <div style={{ fontSize: 12, opacity: 0.75 }}>
-              Showing page {pageIndex + 1} · {filteredCount ? `${filteredCount.toLocaleString()} matches` : "—"}
+              Showing page {pageIndex + 1} · {filteredCount.toLocaleString()} matches
               {listLoading ? " · loading…" : ""}
             </div>
           </div>
