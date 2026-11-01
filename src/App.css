@@ -7104,6 +7104,17 @@ body,
   font-size: 11px;
 }
 
+.jobs-filters-full .jobs-date-input-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.jobs-filters-full .jobs-date-display,
+.jobs-filters-full .jobs-date-icon {
+  display: none;
+}
+
 .jobs-filters-full .jobs-date-field input {
   box-sizing: border-box;
   width: 100%;
@@ -7155,7 +7166,47 @@ body,
   }
 
   .jobs-filters-full .jobs-date-field {
-    flex: 1 1 140px;
+    flex: 0 1 150px;
+    max-width: calc(50% - 4px);
+  }
+
+  .jobs-filters-full .jobs-date-field input {
+    height: 34px;
+    padding-right: 30px;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .jobs-filters-full .jobs-date-field input::-webkit-calendar-picker-indicator {
+    opacity: 0;
+  }
+
+  .jobs-filters-full .jobs-date-display,
+  .jobs-filters-full .jobs-date-icon {
+    position: absolute;
+    display: block;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .jobs-filters-full .jobs-date-display {
+    left: 9px;
+    color: #24354b;
+    font-size: 14px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .jobs-filters-full .jobs-date-display.is-placeholder {
+    color: #687581;
+  }
+
+  .jobs-filters-full .jobs-date-icon {
+    right: 9px;
+    width: 15px;
+    height: 15px;
+    color: #24354b;
   }
 
   .jobs-filter-pills {

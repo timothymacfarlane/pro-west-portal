@@ -155,6 +155,11 @@ function formatDateAU(v) {
   if (Number.isNaN(d.getTime())) return String(v);
   return d.toLocaleDateString("en-AU");
 }
+function formatDateInputAU(v) {
+  if (!v) return "dd/mm/yyyy";
+  const [year, month, day] = v.split("-");
+  return `${day}/${month}/${year}`;
+}
 function stripAustralia(addr) {
   return (addr || "").toString().replace(/,?\s*Australia\s*$/i, "").trim();
 }
@@ -4292,25 +4297,43 @@ onClick={() => {
                 <div className="jobs-date-range">
                   <label className="jobs-date-field">
                     <span>From</span>
-                    <input
-                      className="maps-search-input"
-                      type="date"
-                      value={jobDateFrom}
-                      onChange={(e) => setJobDateFrom(e.target.value)}
-                      aria-invalid={invalidJobDateRange}
-                      aria-describedby={invalidJobDateRange ? "jobs-date-range-error" : undefined}
-                    />
+                    <span className="jobs-date-input-wrap">
+                      <input
+                        className="maps-search-input"
+                        type="date"
+                        value={jobDateFrom}
+                        onChange={(e) => setJobDateFrom(e.target.value)}
+                        aria-invalid={invalidJobDateRange}
+                        aria-describedby={invalidJobDateRange ? "jobs-date-range-error" : undefined}
+                      />
+                      <span className={`jobs-date-display ${jobDateFrom ? "" : "is-placeholder"}`} aria-hidden="true">
+                        {formatDateInputAU(jobDateFrom)}
+                      </span>
+                      <svg className="jobs-date-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <rect x="3" y="5" width="18" height="16" rx="2" />
+                        <path d="M7 3v4M17 3v4M3 10h18" />
+                      </svg>
+                    </span>
                   </label>
                   <label className="jobs-date-field">
                     <span>To</span>
-                    <input
-                      className="maps-search-input"
-                      type="date"
-                      value={jobDateTo}
-                      onChange={(e) => setJobDateTo(e.target.value)}
-                      aria-invalid={invalidJobDateRange}
-                      aria-describedby={invalidJobDateRange ? "jobs-date-range-error" : undefined}
-                    />
+                    <span className="jobs-date-input-wrap">
+                      <input
+                        className="maps-search-input"
+                        type="date"
+                        value={jobDateTo}
+                        onChange={(e) => setJobDateTo(e.target.value)}
+                        aria-invalid={invalidJobDateRange}
+                        aria-describedby={invalidJobDateRange ? "jobs-date-range-error" : undefined}
+                      />
+                      <span className={`jobs-date-display ${jobDateTo ? "" : "is-placeholder"}`} aria-hidden="true">
+                        {formatDateInputAU(jobDateTo)}
+                      </span>
+                      <svg className="jobs-date-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <rect x="3" y="5" width="18" height="16" rx="2" />
+                        <path d="M7 3v4M17 3v4M3 10h18" />
+                      </svg>
+                    </span>
                   </label>
                   {(jobDateFrom || jobDateTo) && (
                     <button
