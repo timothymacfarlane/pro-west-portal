@@ -7165,9 +7165,20 @@ body,
     font-size: 9px;
   }
 
+  .jobs-filters-full .jobs-date-range {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
   .jobs-filters-full .jobs-date-field {
-    flex: 0 1 150px;
-    max-width: calc(50% - 4px);
+    width: 100%;
+    max-width: none;
+  }
+
+  .jobs-filters-full .jobs-date-clear {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 
   .jobs-filters-full .jobs-date-field input {
