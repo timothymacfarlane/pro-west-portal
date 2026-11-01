@@ -135,6 +135,8 @@ function ReassignModal({ open, job, staffOptions, onClose, onConfirm, busy }) {
   if (!open) return null;
 
   const staff = (staffOptions || []).map((s) => s.name).filter(Boolean);
+  const currentAssignee = (job?.assigned_to || "").trim();
+  const unavailableAssignee = currentAssignee && !staff.includes(currentAssignee);
 
   return (
     <div
@@ -189,6 +191,11 @@ function ReassignModal({ open, job, staffOptions, onClose, onConfirm, busy }) {
             disabled={busy}
           >
             <option value="">Unassigned</option>
+            {unavailableAssignee && (
+              <option value={currentAssignee} disabled>
+                {currentAssignee} (current assignee — unavailable)
+              </option>
+            )}
             {staff.map((name) => (
               <option key={name} value={name}>
                 {name}
@@ -262,6 +269,10 @@ function MyJobs() {
   }, [assigneeMode, myDisplayName]);
 
   const staffOptions = useMemo(() => staff || [], [staff]);
+  const reassignStaffOptions = useMemo(
+    () => staffOptions.filter((person) => person.canAssign),
+    [staffOptions]
+  );
 
   const assigneeDropdownOptions = useMemo(() => {
     const list = (staffOptions || []).map((p) => p.name).filter(Boolean);
@@ -358,7 +369,7 @@ function MyJobs() {
       try {
         const { data, error } = await supabase
           .from("profiles")
-          .select("id, display_name, email, is_active")
+          .select("id, display_name, email, is_active, show_in_contacts")
           .eq("is_active", true)
           .order("display_name", { ascending: true });
 
@@ -367,6 +378,7 @@ function MyJobs() {
         const list = (data || []).map((p) => ({
           id: p.id,
           name: (p.display_name || p.email || "Unnamed").trim(),
+          canAssign: !!p.show_in_contacts && !!(p.display_name || "").trim(),
         }));
 
         setStaff(list);
@@ -602,23 +614,24 @@ function MyJobs() {
 
   async function doReassign(nextAssignee) {
     if (!reassignJob?.id) return;
-    setReassignBusy(true);
-
     const newName = (nextAssignee || "").trim() || null;
+    if (newName && !reassignStaffOptions.some((person) => person.name === newName)) {
+      showToast("Choose a current employee who is visible in Contacts.", "err");
+      return;
+    }
+    setReassignBusy(true);
 
     try {
       // Preferred: RPC (lets you keep strict RLS & only allow reassignment)
       // If you haven't created it yet, we'll fallback to direct update.
-      let rpcWorked = false;
-
       const { error: rpcErr } = await supabase.rpc("reassign_job", {
         p_job_id: reassignJob.id,
         p_new_assigned_to: newName,
       });
 
-      if (!rpcErr) rpcWorked = true;
+      if (rpcErr && rpcErr.code !== "PGRST202") throw rpcErr;
 
-      if (!rpcWorked) {
+      if (rpcErr) {
         // fallback: direct update (requires UPDATE policy allowing non-admins)
         const { error: upErr } = await supabase
           .from("jobs")
@@ -1029,7 +1042,7 @@ function MyJobs() {
       <ReassignModal
         open={reassignOpen}
         job={reassignJob}
-        staffOptions={staffOptions}
+        staffOptions={reassignStaffOptions}
         onClose={() => !reassignBusy && setReassignOpen(false)}
         onConfirm={doReassign}
         busy={reassignBusy}

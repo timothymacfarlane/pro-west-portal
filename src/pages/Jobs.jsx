@@ -528,6 +528,7 @@ function ClientFormModal({ open, mode = "add", initialClient = null, onClose, on
 function JobModal({ open, mode, isAdmin, onClose, onSaved, initial, staffOptions }) {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
   const navigate = useNavigate();
+  const { profile, displayName } = useAuth();
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1720,9 +1721,9 @@ async function notifyJobAssignment({ jobId, jobNumber, prevAssigned, nextAssigne
     return;
   }
 
-  // Who did it (optional, nice for message)
-  const { data: authData } = await supabase.auth.getUser();
-  const actor = authData?.user?.email || "Someone";
+  const actor = [profile?.display_name, displayName]
+    .map((name) => (name || "").trim())
+    .find((name) => name && !name.includes("@")) || "a colleague";
 
   const type = "job_reassigned";
   const title = isReassign ? "Job reassigned to you" : "New job assigned to you";
@@ -1745,6 +1746,14 @@ async function notifyJobAssignment({ jobId, jobNumber, prevAssigned, nextAssigne
 
   async function handleSave(opts = {}) {
     if (!canEdit) return;
+
+    const chosenAssignee = (assignedTo || "").trim();
+    const existingAssignee = (initial?.assigned_to || "").trim();
+    if (chosenAssignee && chosenAssignee !== existingAssignee &&
+        !(staffOptions || []).some((person) => person.display_name === chosenAssignee)) {
+      setError("Choose a current employee who is visible in Contacts.");
+      return;
+    }
 
     const closeAfter = opts.closeAfter !== false;
     const returnSaved = !!opts.returnSaved;
@@ -1902,6 +1911,9 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
     id: s.id,
     display_name: s.display_name,
   }));
+  const existingAssignee = (initial?.assigned_to || "").trim();
+  const unavailableAssignee = existingAssignee &&
+    !staffDisplay.some((person) => person.display_name === existingAssignee);
 
   return (
   <div
@@ -2321,6 +2333,11 @@ onFocus={() => {
       disabled={!canEdit}
     >
       <option value="">Unassigned</option>
+      {unavailableAssignee && (
+        <option value={existingAssignee} disabled>
+          {existingAssignee} (current assignee — unavailable)
+        </option>
+      )}
       {staffDisplay.map((s) => (
         <option key={s.id} value={s.display_name}>
           {s.display_name}
@@ -3168,13 +3185,15 @@ const topScrollInnerRef = useRef(null);
       const { data, error } = await supabase
         .from("profiles")
         .select("id, display_name")
+        .eq("is_active", true)
+        .eq("show_in_contacts", true)
         .order("display_name", { ascending: true })
         .limit(5000);
       if (error) throw error;
       setStaffOptions(
         (data || [])
           .filter((p) => (p.display_name || "").trim())
-          .map((p) => ({ id: p.id, display_name: p.display_name }))
+          .map((p) => ({ id: p.id, display_name: p.display_name.trim() }))
       );
     } catch {
       setStaffOptions([]);

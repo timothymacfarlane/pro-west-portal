@@ -2837,6 +2837,41 @@ textarea {
   line-height: 1;
 }
 
+.notification-live-alert {
+  position: fixed;
+  right: calc(12px + env(safe-area-inset-right));
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 1200;
+  width: min(360px, calc(100vw - 24px - env(safe-area-inset-right)));
+  max-height: 30dvh;
+  overflow-y: auto;
+  box-sizing: border-box;
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-left: 4px solid var(--pw-primary);
+  border-radius: 12px;
+  background: #1e1e24;
+  color: #fff;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.notification-live-alert strong {
+  font-size: 0.9rem;
+}
+
+.notification-live-alert span {
+  font-size: 0.8rem;
+}
+
+.notification-live-alert small {
+  color: #ffb7b7;
+  font-size: 0.75rem;
+}
+
 .notification-dropdown {
   position: absolute;
   right: 0;
