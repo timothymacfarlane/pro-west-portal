@@ -7167,13 +7167,22 @@ body,
 
   .jobs-filters-full .jobs-date-range {
     display: grid;
+    width: 272px;
+    max-width: 100%;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
   }
 
   .jobs-filters-full .jobs-date-field {
     width: 100%;
-    max-width: none;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .jobs-filters-full,
+  .jobs-filters-full .jobs-filters-row,
+  .jobs-filters-full .jobs-filters-group {
+    min-width: 0;
   }
 
   .jobs-filters-full .jobs-date-clear {
