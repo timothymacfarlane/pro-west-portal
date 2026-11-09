@@ -1,5 +1,5 @@
 import PageLayout from "../components/PageLayout.jsx";
-import partyInvite from "../assets/pro-west-end-of-year-party-2026.png";
+// import partyInvite from "../assets/pro-west-end-of-year-party-2026.png";
 
 function Home() {
   return (
@@ -8,6 +8,7 @@ function Home() {
       title="Home"
       subtitle="Welcome to Pro West Portal"
     >
+      {/* Past event: retain the invitation here if it is needed for reference later.
       <div className="card" data-home-card>
         <p className="card-title home-party-reminder">
           Reminder: The Pro West end of year Christmas party is this Friday, 6th November.
@@ -28,6 +29,7 @@ function Home() {
           />
         </a>
       </div>
+      */}
 
 <div className="card" data-home-card>
         <h3 className="card-title">Portal Updates</h3>
