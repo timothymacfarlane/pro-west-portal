@@ -39,7 +39,9 @@ function Home() {
           To access Pro West Portal: <strong>https://pro-west-portal.netlify.app/</strong>
         </p>
         <ul style={{ fontSize: "0.85rem", marginTop: "0.3rem", paddingLeft: "1.1rem" }}>
-          <strong>Current Version - v1.4.5</strong>
+          <strong>Current Version - v1.4.6</strong>
+          <br />
+          v1.4.6 - 10/11/2026 - Addition of open Job Folder Button.
           <br />
           v1.4.5 - 01/11/2026 - Minor improvements.
           <br />
@@ -48,9 +50,9 @@ function Home() {
           v1.4.3 - 06/08/2026 - Checklist improvements.
           <br />
           v1.4.2 - 25/07/2026 - Import data function added to maps page.
+          {/*
           <br />
           v1.4.1 - 24/07/2026 - Various improvements.
-          {/*
           <br />
           v1.4.0 - 23/07/2026 - Checklists added to jobs - testing phase only. 
           <br />

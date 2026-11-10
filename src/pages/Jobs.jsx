@@ -991,6 +991,16 @@ function pickLocalAuthority(la) {
   return `/maps?${params.toString()}`;
 }, [initial]);
 
+  const jobFolderNumber = String(initial?.job_number ?? "");
+  const jobFolderHref =
+    mode !== "new" &&
+    /^[1-9]\d{0,9}$/.test(jobFolderNumber) &&
+    Number(jobFolderNumber) <= 2147483647 &&
+    typeof navigator !== "undefined" &&
+    /Windows/i.test(navigator.userAgent)
+      ? `prowest-job://open/${jobFolderNumber}`
+      : "";
+
   // Prevent background scroll when the modal is open (better UX on phones)
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -2039,6 +2049,7 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
     alignItems: "center",
   }}
 >
+          <div className="jobmodal-header-title-group">
           <div>
           <h3 className="card-title" style={{ marginBottom: 4 }}>
   {mode === "new" ? "New Job" : mode === "view" ? "Job Details" : "Edit Job"}
@@ -2049,6 +2060,13 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
     : `Job #${initial?.job_number ?? "—"}${mode === "view" ? " (read-only)" : ""}`}
 </p>
 
+          </div>
+
+          {jobFolderHref && (
+            <a className="btn-pill jobmodal-header-folder-action" href={jobFolderHref}>
+              Open Job Folder
+            </a>
+          )}
           </div>
 
           <div
@@ -2643,6 +2661,21 @@ onChange={(e) => {
   min-width: 0;
 }
 
+.jobmodal-header-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.jobmodal-header-folder-action {
+  min-height: 36px;
+  justify-content: center;
+  text-decoration: none;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
 .jobmodal-header-actions > button,
 .jobmodal-client-actions > button,
 .jobmodal-footer-actions > button {
@@ -2770,6 +2803,11 @@ onChange={(e) => {
   max-width: 100%;
   justify-content: center;
   box-sizing: border-box;
+}
+
+.jobmodal-header-title-group {
+  width: 100%;
+  justify-content: space-between;
 }
 
 .jobmodal-header-actions .checklist-button-wrap {
