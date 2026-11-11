@@ -537,8 +537,11 @@ function JobModal({ open, mode, isAdmin, onClose, onSaved, initial, staffOptions
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [folderOpening, setFolderOpening] = useState(false);
+  const [folderError, setFolderError] = useState("");
   const [mobileHeaderOffset, setMobileHeaderOffset] = useState(0);
   const modalCardRef = useRef(null);
+  const folderRequestRef = useRef(null);
   const MAX_STICKER_NOTES = 143;
   const STICKER_CHARS_PER_LINE = 35;
   const STICKER_MAX_LINES = 4;
@@ -616,6 +619,8 @@ function ChecklistProgressBadge({ progress }) {
 
   // ✅ Re-sync modal fields whenever the selected job changes (fixes blank fields on open)
 useEffect(() => {
+  folderRequestRef.current?.abort();
+  folderRequestRef.current = null;
   // ✅ when closing, wipe the client search UI so it doesn't persist
   if (!open) {
     setClientSearch("");
@@ -719,6 +724,8 @@ setNotes(i.notes ?? "");
 
 
   setError("");
+  setFolderError("");
+  setFolderOpening(false);
 }, [open, mode, initial?.id]);
 
 useEffect(() => {
@@ -992,6 +999,20 @@ function pickLocalAuthority(la) {
 }, [initial]);
 
   const jobFolderNumber = String(initial?.job_number ?? "");
+  const validFolderNumber =
+    mode !== "new" &&
+    /^[1-9]\d{0,9}$/.test(jobFolderNumber) &&
+    Number(jobFolderNumber) <= 2147483647;
+  const isWindowsDevice =
+    typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+  let mobileGatewayOrigin = "";
+  try {
+    const gateway = new URL(import.meta.env.VITE_JOB_FILES_GATEWAY_URL || "");
+    if (gateway.protocol === "https:") mobileGatewayOrigin = gateway.origin;
+  } catch {
+    // The mobile action remains hidden until the private gateway is configured.
+  }
+  const showMobileFolder = validFolderNumber && !isWindowsDevice && !!mobileGatewayOrigin;
   const jobFolderHref =
     mode !== "new" &&
     /^[1-9]\d{0,9}$/.test(jobFolderNumber) &&
@@ -1000,6 +1021,52 @@ function pickLocalAuthority(la) {
     /Windows/i.test(navigator.userAgent)
       ? `prowest-job://open/${jobFolderNumber}`
       : "";
+
+  async function openMobileJobFolder() {
+    if (folderOpening || !showMobileFolder) return;
+    setFolderError("");
+    setFolderOpening(true);
+    const controller = new AbortController();
+    folderRequestRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 12000);
+    try {
+      const { data, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !data?.session?.access_token) {
+        throw new Error("Sign in to the portal and try again.");
+      }
+      const response = await fetch(mobileGatewayOrigin + "/api/launch", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + data.session.access_token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ jobNumber: jobFolderNumber }),
+        signal: controller.signal,
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || "The job folder could not be opened.");
+      }
+      const launchUrl = new URL(result.url);
+      if (launchUrl.origin !== mobileGatewayOrigin ||
+          !/^\/launch\/[a-f0-9]{64}$/.test(launchUrl.pathname)) {
+        throw new Error("The job folder link is invalid. Try again.");
+      }
+      setFolderOpening(false);
+      window.location.assign(launchUrl.href);
+    } catch (openError) {
+      if (folderRequestRef.current !== controller) return;
+      setFolderError(openError?.name === "AbortError"
+        ? "The job folder took too long to respond. Check the company network and try again."
+        : openError?.message === "Failed to fetch" || openError instanceof TypeError
+          ? "Job files are unavailable. Connect to the company network and try again."
+          : openError?.message || "The job folder could not be opened.");
+      setFolderOpening(false);
+    } finally {
+      if (folderRequestRef.current === controller) folderRequestRef.current = null;
+      window.clearTimeout(timeout);
+    }
+  }
 
   // Prevent background scroll when the modal is open (better UX on phones)
   useEffect(() => {
@@ -2067,6 +2134,16 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
               Open Job Folder
             </a>
           )}
+          {showMobileFolder && (
+            <button
+              className="btn-pill jobmodal-header-folder-action"
+              type="button"
+              onClick={openMobileJobFolder}
+              disabled={folderOpening}
+            >
+              {folderOpening ? "Opening…" : "Open Job Folder"}
+            </button>
+          )}
           </div>
 
           <div
@@ -2111,6 +2188,10 @@ return returnSaved ? (refreshed || { ...initial, ...payload }) : undefined;
   </button>
 </div>
         </div>
+
+        {folderError && (
+          <p className="jobmodal-folder-error" role="alert">{folderError}</p>
+        )}
 
         {error && (
           <div
@@ -2674,6 +2755,12 @@ onChange={(e) => {
   text-decoration: none;
   white-space: nowrap;
   flex: 0 0 auto;
+}
+
+.jobmodal-folder-error {
+  margin: 10px 0 0;
+  color: var(--pw-primary-dark, #b71c1c);
+  font-size: 0.88rem;
 }
 
 .jobmodal-header-actions > button,
